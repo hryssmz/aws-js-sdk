@@ -4,6 +4,27 @@
  */
 
 export default {
+  collectCoverageFrom: [
+    "src/iam/legacy.ts",
+    "src/iam/wrapper.ts",
+    "src/s3/legacy.ts",
+    "src/s3/wrapper.ts",
+    "src/sts/legacy.ts",
+    "src/sts/wrapper.ts",
+  ],
+  testMatch: [
+    "<rootDir>/src/iam/__tests__/legacy.spec.ts",
+    "<rootDir>/src/iam/__tests__/wrapper.spec.ts",
+    "<rootDir>/src/iam/__tests__/scenarios/createRoUserRwUser.spec.ts",
+    "<rootDir>/src/iam/__tests__/scenarios/createUserAssumeRole.spec.ts",
+    "<rootDir>/src/iam/__tests__/scenarios/manageAccessKeys.spec.ts",
+    "<rootDir>/src/iam/__tests__/scenarios/rollbackPolicy.spec.ts",
+    "<rootDir>/src/s3/__tests__/legacy.spec.ts",
+    "<rootDir>/src/s3/__tests__/wrapper.spec.ts",
+    "<rootDir>/src/sts/__tests__/legacy.spec.ts",
+    "<rootDir>/src/sts/__tests__/wrapper.spec.ts",
+  ],
+
   // All imported modules in your tests should be mocked automatically
   // automock: false,
 
@@ -21,16 +42,6 @@ export default {
 
   // An array of glob patterns indicating a set of files for which coverage information should be collected
   // collectCoverageFrom: undefined,
-  collectCoverageFrom: [
-    "src/iam/actions/group.ts",
-    "src/iam/actions/policy.ts",
-    "src/iam/actions/role.ts",
-    "src/iam/actions/rolePolicy.ts",
-    "src/iam/actions/user.ts",
-    "src/iam/scenarios/createUserAssumeRole.ts",
-    "src/s3/actions/bucket.ts",
-    "src/sts/actions/index.ts",
-  ],
 
   // The directory where Jest should output its coverage files
   coverageDirectory: "coverage",
@@ -168,17 +179,6 @@ export default {
   //   "**/__tests__/**/*.[jt]s?(x)",
   //   "**/?(*.)+(spec|test).[tj]s?(x)"
   // ],
-  testMatch: [
-    "<rootDir>/src/iam/actions/__tests__/group.spec.ts",
-    "<rootDir>/src/iam/actions/__tests__/policy.spec.ts",
-    "<rootDir>/src/iam/actions/__tests__/role.spec.ts",
-    "<rootDir>/src/iam/actions/__tests__/rolePolicy.spec.ts",
-    "<rootDir>/src/iam/actions/__tests__/user.spec.ts",
-    "<rootDir>/src/iam/actions/__tests__/userPolicy.spec.ts",
-    "<rootDir>/src/iam/scenarios/__tests__/createUserAssumeRole.spec.ts",
-    "<rootDir>/src/s3/actions/__tests__/bucket.spec.ts",
-    "<rootDir>/src/sts/actions/__tests__/index.spec.ts",
-  ],
 
   // An array of regexp pattern strings that are matched against all test paths, matched tests are skipped
   // testPathIgnorePatterns: [

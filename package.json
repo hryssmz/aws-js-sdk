@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "nodemon src/index.ts",
     "lint": "tsc --noEmit -p tsconfig.json && eslint --max-warnings=0 .",
+    "start": "ts-node src/index.ts",
     "test": "jest -i -o --coverage=false",
     "testAll": "jest -i"
   },
