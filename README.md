@@ -108,6 +108,25 @@ npm install -D babel-jest @babel/core @babel/preset-env @babel/preset-typescript
 
 ```bash
 npm install @aws-sdk/client-iam
+npm install @aws-sdk/client-lambda
 npm install @aws-sdk/client-s3
 npm install @aws-sdk/client-sts
+npm install @aws-sdk/s3-request-presigner
+```
+
+#### 1.3.2. Axios
+
+---
+
+```bash
+npm install axios
+```
+
+#### 1.3.3. archiver
+
+---
+
+```bash
+npm install archiver
+npm install -D @types/archiver
 ```

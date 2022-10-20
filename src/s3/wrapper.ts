@@ -1,6 +1,6 @@
-// s3/actions/wrapper.ts
+// s3/wrapper.ts
 import {
-  S3Client,
+  CopyObjectCommand,
   CreateBucketCommand,
   DeleteBucketCommand,
   DeleteObjectCommand,
@@ -9,10 +9,12 @@ import {
   ListBucketsCommand,
   ListObjectsCommand,
   PutObjectCommand,
+  S3Client,
 } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { defaultClientConfig, isLocal } from "../utils";
 import {
-  S3ClientConfig,
+  CopyObjectCommandInput,
   CreateBucketCommandInput,
   DeleteBucketCommandInput,
   DeleteObjectCommandInput,
@@ -21,7 +23,9 @@ import {
   ListBucketsCommandInput,
   ListObjectsCommandInput,
   PutObjectCommandInput,
+  S3ClientConfig,
 } from "@aws-sdk/client-s3";
+import type { RequestPresigningArguments } from "@aws-sdk/types";
 
 export const defaultS3ClientConfig = {
   ...defaultClientConfig,
@@ -34,6 +38,12 @@ export class S3Wrapper {
 
   constructor(config?: S3ClientConfig) {
     this.client = new S3Client({ ...defaultS3ClientConfig, ...config });
+  }
+
+  async copyObject(params: CopyObjectCommandInput) {
+    const command = new CopyObjectCommand(params);
+    const result = await this.client.send(command);
+    return result;
   }
 
   async createBucket(params: CreateBucketCommandInput) {
@@ -66,6 +76,15 @@ export class S3Wrapper {
     return result;
   }
 
+  async getObjectUrl(
+    params: GetObjectCommandInput,
+    options?: RequestPresigningArguments
+  ) {
+    const command = new GetObjectCommand(params);
+    const signedUrl = await getSignedUrl(this.client, command, options);
+    return signedUrl;
+  }
+
   async listBuckets(params: ListBucketsCommandInput) {
     const command = new ListBucketsCommand(params);
     const result = await this.client.send(command);
@@ -82,5 +101,41 @@ export class S3Wrapper {
     const command = new PutObjectCommand(params);
     const result = await this.client.send(command);
     return result;
+  }
+
+  async putObjectUrl(
+    params: PutObjectCommandInput,
+    options?: RequestPresigningArguments
+  ) {
+    const command = new PutObjectCommand(params);
+    const signedUrl = await getSignedUrl(this.client, command, options);
+    return signedUrl;
+  }
+
+  async deleteAllObjects(Bucket?: string) {
+    const { Contents } = await this.listObjects({ Bucket });
+    if (Contents === undefined) {
+      return;
+    }
+    const result = await this.deleteObjects({
+      Bucket,
+      Delete: { Objects: Contents.map(({ Key }) => ({ Key })) },
+    });
+    return result;
+  }
+
+  async deleteBucketsByPrefix(prefix: string) {
+    const { Buckets } = await this.listBuckets({});
+    const promises =
+      Buckets?.filter(({ Name }) => Name?.startsWith(prefix)).map(
+        async ({ Name }) => {
+          await this.deleteAllObjects(Name);
+          const result = await this.deleteBucket({ Bucket: Name });
+          return result;
+        }
+        /* c8 ignore next */
+      ) ?? [];
+    const results = await Promise.all(promises);
+    return results;
   }
 }

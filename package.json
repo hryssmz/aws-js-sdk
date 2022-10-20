@@ -4,24 +4,34 @@
   "description": "## 1. Setup",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon src/index.ts",
     "lint": "tsc --noEmit -p tsconfig.json && eslint --max-warnings=0 .",
     "start": "ts-node src/index.ts",
     "test": "jest -i -o --coverage=false",
-    "testAll": "jest -i"
+    "testAll": "jest -i",
+    "config-function": "ts-node src/scripts/configFunction.ts",
+    "create-function": "ts-node src/scripts/createFunction.ts",
+    "delete-function": "ts-node src/scripts/deleteFunction.ts",
+    "delete-user": "ts-node src/scripts/deleteUser.ts",
+    "invoke-function": "ts-node src/scripts/invokeFunction.ts",
+    "update-function": "ts-node src/scripts/updateFunction.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@aws-sdk/client-iam": "^3.188.0",
+    "@aws-sdk/client-lambda": "^3.190.0",
     "@aws-sdk/client-s3": "^3.188.0",
-    "@aws-sdk/client-sts": "^3.188.0"
+    "@aws-sdk/client-sts": "^3.188.0",
+    "@aws-sdk/s3-request-presigner": "^3.188.0",
+    "archiver": "^5.3.1",
+    "axios": "^1.1.3"
   },
   "devDependencies": {
     "@babel/core": "^7.19.3",
     "@babel/preset-env": "^7.19.4",
     "@babel/preset-typescript": "^7.18.6",
+    "@types/archiver": "^5.3.1",
     "@types/jest": "^29.1.2",
     "@types/node": "^18.8.4",
     "@typescript-eslint/eslint-plugin": "^5.40.0",

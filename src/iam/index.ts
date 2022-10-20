@@ -1,3 +1,3 @@
-// iam/actions/index.ts
+// iam/index.ts
 export * from "./legacy";
 export * from "./wrapper";

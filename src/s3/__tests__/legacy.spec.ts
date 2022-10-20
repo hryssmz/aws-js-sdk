@@ -1,51 +1,65 @@
-// iam/actions/__tests__/legacy.spec.ts
+// iam/__tests__/legacy.spec.ts
+import url from "node:url";
+import axios from "axios";
 import {
+  copyObject,
   createBucket,
+  deleteAllObjects,
   deleteBucket,
+  deleteBucketsByPrefix,
   deleteObject,
   deleteObjects,
   getObject,
+  getObjectUrl,
   listBuckets,
   listObjects,
   putObject,
+  putObjectUrl,
 } from "../legacy";
 import { bucket, objectKey, objectBody } from "./dummy";
-import { deleteAllObjects, deleteDummyBuckets } from "./utils";
+import { isLocal } from "./utils";
 
 describe("Bucket APIs", () => {
   beforeEach(async () => {
-    await deleteDummyBuckets();
+    await deleteBucketsByPrefix(bucket);
   });
 
   afterAll(async () => {
-    await deleteDummyBuckets();
+    await deleteBucketsByPrefix(bucket);
   });
 
+  const getNumberOfBuckets = async () => {
+    const { Buckets } = await listBuckets({});
+    return Buckets?.length ?? 0;
+  };
+
   test("Create, list, and delete bucket", async () => {
-    const listDummyBuckets = async () => {
-      const { Buckets: buckets } = await listBuckets({});
-      const dummyBuckets = buckets?.filter(bucket =>
-        bucket.Name?.startsWith("dummy")
-      );
-      return dummyBuckets;
-    };
+    const numberOfBuckets = await getNumberOfBuckets();
+    const { Location } = await createBucket({ Bucket: bucket });
 
-    expect(await listDummyBuckets()).toHaveLength(0);
-
-    const { Location: location } = await createBucket({ Bucket: bucket });
-
-    expect(await listDummyBuckets()).toHaveLength(1);
-    expect(location).toStrictEqual(expect.stringContaining(bucket));
+    expect(await getNumberOfBuckets()).toBe(numberOfBuckets + 1);
+    expect(Location).toStrictEqual(expect.stringContaining(bucket));
 
     await deleteBucket({ Bucket: bucket });
 
-    expect(await listDummyBuckets()).toHaveLength(0);
+    expect(await getNumberOfBuckets()).toBe(numberOfBuckets);
+  });
+
+  test("deleteBucketsByPrefix() helper", async () => {
+    const numberOfBuckets = await getNumberOfBuckets();
+    await createBucket({ Bucket: bucket });
+
+    expect(await getNumberOfBuckets()).toBe(numberOfBuckets + 1);
+
+    await deleteBucketsByPrefix(bucket);
+
+    expect(await getNumberOfBuckets()).toBe(numberOfBuckets);
   });
 });
 
 describe("Object APIs", () => {
   beforeAll(async () => {
-    await deleteDummyBuckets();
+    await deleteBucketsByPrefix(bucket);
     await createBucket({ Bucket: bucket });
   });
 
@@ -54,20 +68,20 @@ describe("Object APIs", () => {
   });
 
   afterAll(async () => {
-    await deleteDummyBuckets();
+    await deleteBucketsByPrefix(bucket);
   });
 
-  test("Upload, get, list and delete object", async () => {
-    const listCurrentObjects = async () => {
-      const { Contents: objects } = await listObjects({ Bucket: bucket });
-      return objects;
-    };
+  const getNumberOfObjects = async (Bucket?: string) => {
+    const { Contents } = await listObjects({ Bucket });
+    return Contents?.length ?? 0;
+  };
 
-    expect(await listCurrentObjects()).toBeUndefined();
+  test("Upload, get, list and delete object", async () => {
+    expect(await getNumberOfObjects(bucket)).toBe(0);
 
     await putObject({ Bucket: bucket, Key: objectKey, Body: objectBody });
 
-    expect(await listCurrentObjects()).toHaveLength(1);
+    expect(await getNumberOfObjects(bucket)).toBe(1);
 
     const body = await getObject({ Bucket: bucket, Key: objectKey }).then(
       ({ Body }) => Body?.transformToString()
@@ -77,17 +91,10 @@ describe("Object APIs", () => {
 
     await deleteObject({ Bucket: bucket, Key: objectKey });
 
-    expect(await listCurrentObjects()).toBeUndefined();
+    expect(await getNumberOfObjects(bucket)).toBe(0);
   });
 
   test("Delete all objects", async () => {
-    const listCurrentObjects = async () => {
-      const { Contents: objects } = await listObjects({ Bucket: bucket });
-      return objects;
-    };
-
-    expect(await listCurrentObjects()).toBeUndefined();
-
     await putObject({
       Bucket: bucket,
       Key: `01-${objectKey}`,
@@ -98,15 +105,100 @@ describe("Object APIs", () => {
       Key: `02-${objectKey}`,
       Body: objectBody,
     });
-    const objects = await listCurrentObjects();
 
-    expect(objects).toHaveLength(2);
+    expect(await getNumberOfObjects(bucket)).toBe(2);
 
+    const { Contents } = await listObjects({ Bucket: bucket });
     await deleteObjects({
       Bucket: bucket,
-      Delete: { Objects: objects?.map(object => ({ Key: object.Key })) },
+      Delete: { Objects: Contents?.map(({ Key }) => ({ Key })) },
     });
 
-    expect(await listCurrentObjects()).toBeUndefined();
+    expect(await getNumberOfObjects(bucket)).toBe(0);
+  });
+
+  test("Copy object", async () => {
+    await putObject({ Bucket: bucket, Key: objectKey, Body: objectBody });
+
+    expect(await getNumberOfObjects(bucket)).toBe(1);
+
+    const targetKey = `subdir/${objectKey}`;
+    await copyObject({
+      Bucket: bucket,
+      CopySource: `/${bucket}/${objectKey}`,
+      Key: targetKey,
+    });
+
+    expect(await getNumberOfObjects(bucket)).toBe(2);
+
+    const body = await getObject({ Bucket: bucket, Key: targetKey }).then(
+      ({ Body }) => Body?.transformToString()
+    );
+
+    expect(body).toBe(objectBody);
+  });
+
+  test("deleteAllObjects() helper", async () => {
+    await putObject({ Bucket: bucket, Key: objectKey, Body: objectBody });
+
+    expect(await getNumberOfObjects(bucket)).toBe(1);
+
+    await deleteAllObjects(bucket);
+
+    expect(await getNumberOfObjects(bucket)).toBe(0);
+  });
+});
+
+describe("Signed URLs", () => {
+  beforeAll(async () => {
+    await deleteBucketsByPrefix(bucket);
+    await createBucket({ Bucket: bucket });
+  });
+
+  beforeEach(async () => {
+    await deleteAllObjects(bucket);
+  });
+
+  afterAll(async () => {
+    await deleteBucketsByPrefix(bucket);
+  });
+
+  test("Put object via signed URL", async () => {
+    const signedUrl = await putObjectUrl({
+      Bucket: bucket,
+      Key: objectKey,
+      Body: objectBody,
+    });
+    const { pathname, query } = url.parse(signedUrl, true);
+
+    expect(pathname?.endsWith(`/${objectKey}`)).toBe(true);
+    expect(query["x-id"]).toBe("PutObject");
+
+    if (isLocal) {
+      // LocalStack will crash for some reasons.
+      return;
+    }
+    const res = await axios(signedUrl, { method: "put", data: objectBody });
+
+    expect(res.status).toBe(200);
+
+    const body = await getObject({ Bucket: bucket, Key: objectKey }).then(
+      ({ Body }) => Body?.transformToString()
+    );
+
+    expect(body).toBe(objectBody);
+  });
+
+  test("Get object via signed URL", async () => {
+    await putObject({ Bucket: bucket, Key: objectKey, Body: objectBody });
+    const signedUrl = await getObjectUrl({ Bucket: bucket, Key: objectKey });
+    const { pathname, query } = url.parse(signedUrl, true);
+
+    expect(pathname?.endsWith(`/${objectKey}`)).toBe(true);
+    expect(query["x-id"]).toBe("GetObject");
+
+    const { data } = await axios(signedUrl);
+
+    expect(data).toBe(objectBody);
   });
 });

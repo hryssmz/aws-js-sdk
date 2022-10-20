@@ -1,64 +1,56 @@
-// sts/actions/__tests__/legacy.spec.ts
-import { stsClient, assumeRole } from "../legacy";
-import { path, policyName, roleName, roleSessionName, userName } from "./dummy";
-import {
-  deletePoliciesByPath,
-  deleteRolesByPath,
-  deleteUsersByPath,
-  isLocal,
-  sleep,
-} from "./utils";
+// sts/__tests__/legacy.spec.ts
+import { assumeRole, createSTSClient } from "../legacy";
+import { policyName, roleName, roleSessionName, userName } from "./dummy";
+import { isLocal, sleep } from "./utils";
 import {
   attachUserPolicy,
   createAccessKey,
   createPolicy,
   createRole,
   createUser,
+  deletePoliciesByPrefix,
+  deleteRolesByPrefix,
+  deleteUsersByPrefix,
 } from "../../iam";
 
 jest.setTimeout((isLocal ? 5 : 60) * 1000);
 
-const sleepSec = isLocal ? 0 : 10;
-
 beforeEach(async () => {
-  await deleteUsersByPath(path);
-  await deletePoliciesByPath(path);
-  await deleteRolesByPath(path);
+  await deleteUsersByPrefix(userName);
+  await deleteRolesByPrefix(roleName);
+  await deletePoliciesByPrefix(policyName);
 });
 
 afterAll(async () => {
-  await deleteUsersByPath(path);
-  await deletePoliciesByPath(path);
-  await deleteRolesByPath(path);
+  await deleteUsersByPrefix(userName);
+  await deleteRolesByPrefix(roleName);
+  await deletePoliciesByPrefix(policyName);
 });
 
 test("User has permissions to assume a role", async () => {
   // Create a new user.
-  const { User: user } = await createUser({ UserName: userName, Path: path });
+  const { User } = await createUser({ UserName: userName });
 
   // Create access keys for the new user.
-  const { AccessKey: accessKey } = await createAccessKey({
-    UserName: userName,
-  });
+  const { AccessKey } = await createAccessKey({ UserName: userName });
 
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  const accessKeyId = accessKey!.AccessKeyId!;
+  const accessKeyId = AccessKey!.AccessKeyId!;
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  const secretAccessKey = accessKey!.SecretAccessKey!;
+  const secretAccessKey = AccessKey!.SecretAccessKey!;
 
   // Need to wait until the user and the access key are active.
-  await sleep(sleepSec);
+  await sleep(isLocal ? 0 : 10);
 
   // Create a role with a trust policy that lets the user assume the role.
-  const { Role: role } = await createRole({
+  const { Role } = await createRole({
     RoleName: roleName,
-    Path: path,
     AssumeRolePolicyDocument: JSON.stringify({
       Version: "2012-10-17",
       Statement: [
         {
           Effect: "Allow",
-          Principal: { AWS: user?.Arn },
+          Principal: { AWS: User?.Arn },
           Action: "sts:AssumeRole",
         },
       ],
@@ -66,39 +58,34 @@ test("User has permissions to assume a role", async () => {
   });
 
   // Create a policy that enables the user to assume the role.
-  const { Policy: policy } = await createPolicy({
+  const { Policy } = await createPolicy({
     PolicyName: policyName,
-    Path: path,
     PolicyDocument: JSON.stringify({
       Version: "2012-10-17",
       Statement: [
-        {
-          Effect: "Allow",
-          Action: "sts:AssumeRole",
-          Resource: role?.Arn,
-        },
+        { Effect: "Allow", Action: "sts:AssumeRole", Resource: Role?.Arn },
       ],
     }),
   });
 
   // Attach the policy to the user.
-  await attachUserPolicy({ PolicyArn: policy?.Arn, UserName: userName });
+  await attachUserPolicy({ PolicyArn: Policy?.Arn, UserName: userName });
 
   // Need to wait until the policy has been attached to the user.
-  await sleep(sleepSec * 1.5);
+  await sleep(isLocal ? 0 : 15);
 
-  const userStsClient = stsClient({
+  const userStsClient = createSTSClient({
     credentials: { accessKeyId, secretAccessKey },
   });
-  const { Credentials: credentials } = await assumeRole(
-    { RoleArn: role?.Arn, RoleSessionName: roleSessionName },
+  const { Credentials } = await assumeRole(
+    { RoleArn: Role?.Arn, RoleSessionName: roleSessionName },
     userStsClient
   );
   const {
     AccessKeyId: newAccessKeyId,
     SecretAccessKey: newSecretAccessKey,
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  } = credentials!;
+  } = Credentials!;
 
   expect(newAccessKeyId).toHaveLength(20);
   expect(newSecretAccessKey).toHaveLength(40);

@@ -1,16 +1,14 @@
-// iam/actions/__tests__/dummy.ts
+// iam/__tests__/dummy.ts
 export {
-  assumeRolePolicyJson,
   bucket,
-  identityBasedPolicyJson,
-  path,
   groupName,
+  managedPolicyJson,
   objectBody,
   objectKey,
   policyArn,
   policyName,
   roleName,
-  rolePolicyName,
+  roleSessionName,
+  trustPolicyJson,
   userName,
-  userPolicyName,
 } from "../../utils/dummy";

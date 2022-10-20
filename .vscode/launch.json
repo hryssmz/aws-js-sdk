@@ -9,9 +9,9 @@
       "type": "node"
     },
     {
-      "name": "npm run dev",
+      "name": "npm start",
       "request": "launch",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": ["start"],
       "runtimeExecutable": "npm",
       "skipFiles": ["<node_internals>/**"],
       "type": "node"

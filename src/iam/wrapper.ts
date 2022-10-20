@@ -1,6 +1,5 @@
-// iam/actions/wrapper.ts
+// iam/wrapper.ts
 import {
-  IAMClient,
   AttachRolePolicyCommand,
   AttachUserPolicyCommand,
   CreateAccessKeyCommand,
@@ -31,6 +30,7 @@ import {
   GetPolicyVersionCommand,
   GetRoleCommand,
   GetUserCommand,
+  IAMClient,
   ListAccessKeysCommand,
   ListAccountAliasesCommand,
   ListAttachedRolePoliciesCommand,
@@ -50,7 +50,6 @@ import {
 } from "@aws-sdk/client-iam";
 import { defaultClientConfig } from "../utils";
 import type {
-  IAMClientConfig,
   AttachRolePolicyCommandInput,
   AttachUserPolicyCommandInput,
   CreateAccessKeyCommandInput,
@@ -81,6 +80,7 @@ import type {
   GetPolicyVersionCommandInput,
   GetRoleCommandInput,
   GetUserCommandInput,
+  IAMClientConfig,
   ListAccessKeysCommandInput,
   ListAccountAliasesCommandInput,
   ListAttachedRolePoliciesCommandInput,
@@ -134,13 +134,13 @@ export class IAMWrapper {
     return result;
   }
 
-  async createGroup(params: CreateGroupCommandInput & { Path: string }) {
+  async createGroup(params: CreateGroupCommandInput) {
     const command = new CreateGroupCommand(params);
     const result = await this.client.send(command);
     return result;
   }
 
-  async createPolicy(params: CreatePolicyCommandInput & { Path: string }) {
+  async createPolicy(params: CreatePolicyCommandInput) {
     const command = new CreatePolicyCommand(params);
     const result = await this.client.send(command);
     return result;
@@ -152,13 +152,13 @@ export class IAMWrapper {
     return result;
   }
 
-  async createRole(params: CreateRoleCommandInput & { Path: string }) {
+  async createRole(params: CreateRoleCommandInput) {
     const command = new CreateRoleCommand(params);
     const result = await this.client.send(command);
     return result;
   }
 
-  async createUser(params: CreateUserCommandInput & { Path: string }) {
+  async createUser(params: CreateUserCommandInput) {
     const command = new CreateUserCommand(params);
     const result = await this.client.send(command);
     return result;
@@ -386,5 +386,148 @@ export class IAMWrapper {
     const command = new UpdateUserCommand(params);
     const result = await this.client.send(command);
     return result;
+  }
+
+  async deleteAllPolicyVersions(PolicyArn?: string) {
+    const { Versions } = await this.listPolicyVersions({ PolicyArn });
+    const promises =
+      Versions?.filter(({ IsDefaultVersion }) => !IsDefaultVersion).map(
+        async ({ VersionId }) => {
+          const result = await this.deletePolicyVersion({
+            PolicyArn,
+            VersionId,
+          });
+          return result;
+        }
+        /* c8 ignore next */
+      ) ?? [];
+    const results = await Promise.all(promises);
+    return results;
+  }
+
+  async deleteAllRolePolicies(RoleName?: string) {
+    const { PolicyNames } = await this.listRolePolicies({ RoleName });
+    const promises =
+      PolicyNames?.map(async PolicyName => {
+        const result = await this.deleteRolePolicy({ PolicyName, RoleName });
+        return result;
+        /* c8 ignore next */
+      }) ?? [];
+    const results = await Promise.all(promises);
+    return results;
+  }
+
+  async deleteAllUserAccessKeys(UserName?: string) {
+    const { AccessKeyMetadata } = await this.listAccessKeys({ UserName });
+    const promises =
+      AccessKeyMetadata?.map(async ({ AccessKeyId }) => {
+        const result = await this.deleteAccessKey({ UserName, AccessKeyId });
+        return result;
+        /* c8 ignore next */
+      }) ?? [];
+    const results = await Promise.all(promises);
+    return results;
+  }
+
+  async deleteAllUserPolicies(UserName?: string) {
+    const { PolicyNames } = await this.listUserPolicies({ UserName });
+    const promises =
+      PolicyNames?.map(async PolicyName => {
+        const result = await this.deleteUserPolicy({ UserName, PolicyName });
+        return result;
+        /* c8 ignore next */
+      }) ?? [];
+    const results = await Promise.all(promises);
+    return results;
+  }
+
+  async deleteGroupsByPrefix(prefix: string) {
+    const { Groups } = await this.listGroups({});
+    const promises =
+      Groups?.filter(({ GroupName }) => GroupName?.startsWith(prefix)).map(
+        async ({ GroupName }) => {
+          const result = await this.deleteGroup({ GroupName });
+          return result;
+        }
+        /* c8 ignore next */
+      ) ?? [];
+    const results = await Promise.all(promises);
+    return results;
+  }
+
+  async deletePoliciesByPrefix(prefix: string) {
+    const { Policies } = await this.listPolicies({ Scope: "Local" });
+    const promises =
+      Policies?.filter(({ PolicyName }) => PolicyName?.startsWith(prefix)).map(
+        async ({ Arn }) => {
+          await this.deleteAllPolicyVersions(Arn);
+          const result = await this.deletePolicy({ PolicyArn: Arn });
+          return result;
+        }
+        /* c8 ignore next */
+      ) ?? [];
+    const results = await Promise.all(promises);
+    return results;
+  }
+
+  async deleteRolesByPrefix(prefix: string) {
+    const { Roles } = await this.listRoles({});
+    const promises =
+      Roles?.filter(({ RoleName }) => RoleName?.startsWith(prefix)).map(
+        async ({ RoleName }) => {
+          await this.detachAllRolePolicies(RoleName);
+          await this.deleteAllRolePolicies(RoleName);
+          const result = await this.deleteRole({ RoleName });
+          return result;
+        }
+        /* c8 ignore next */
+      ) ?? [];
+    const results = await Promise.all(promises);
+    return results;
+  }
+
+  async deleteUsersByPrefix(prefix: string) {
+    const { Users } = await this.listUsers({});
+    const promises =
+      Users?.filter(({ UserName }) => UserName?.startsWith(prefix)).map(
+        async ({ UserName }) => {
+          await this.detachAllUserPolicies(UserName);
+          await this.deleteAllUserPolicies(UserName);
+          await this.deleteAllUserAccessKeys(UserName);
+          const result = await this.deleteUser({ UserName });
+          return result;
+        }
+        /* c8 ignore next */
+      ) ?? [];
+    const results = await Promise.all(promises);
+    return results;
+  }
+
+  async detachAllRolePolicies(RoleName?: string) {
+    const { AttachedPolicies } = await this.listAttachedRolePolicies({
+      RoleName,
+    });
+    const promises =
+      AttachedPolicies?.map(async ({ PolicyArn }) => {
+        const result = await this.detachRolePolicy({ RoleName, PolicyArn });
+        return result;
+        /* c8 ignore next */
+      }) ?? [];
+    const results = await Promise.all(promises);
+    return results;
+  }
+
+  async detachAllUserPolicies(UserName?: string) {
+    const { AttachedPolicies } = await this.listAttachedUserPolicies({
+      UserName,
+    });
+    const promises =
+      AttachedPolicies?.map(async ({ PolicyArn }) => {
+        const result = await this.detachUserPolicy({ UserName, PolicyArn });
+        return result;
+        /* c8 ignore next */
+      }) ?? [];
+    const results = await Promise.all(promises);
+    return results;
   }
 }

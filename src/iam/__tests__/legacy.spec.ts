@@ -1,4 +1,4 @@
-// iam/actions/__tests__/legacy.spec.ts
+// iam/__tests__/legacy.spec.ts
 import {
   attachRolePolicy,
   attachUserPolicy,
@@ -11,13 +11,23 @@ import {
   createUser,
   deleteAccessKey,
   deleteAccountAlias,
+  deleteAllPolicyVersions,
+  deleteAllRolePolicies,
+  deleteAllUserAccessKeys,
+  deleteAllUserPolicies,
   deleteGroup,
+  deleteGroupsByPrefix,
+  deletePoliciesByPrefix,
   deletePolicy,
   deletePolicyVersion,
   deleteRole,
   deleteRolePolicy,
+  deleteRolesByPrefix,
   deleteUser,
   deleteUserPolicy,
+  deleteUsersByPrefix,
+  detachAllRolePolicies,
+  detachAllUserPolicies,
   detachRolePolicy,
   detachUserPolicy,
   generateCredentialReport,
@@ -47,53 +57,38 @@ import {
   updateAccessKey,
   updateUser,
 } from "../legacy";
+import { accountAlias, isLocal } from "./utils";
 import {
-  accountAlias,
-  deleteAllUserAccessKeys,
-  deleteGroupsByPath,
-  deletePoliciesByPath,
-  deleteRolesByPath,
-  deleteUsersByPath,
-  isLocal,
-} from "./utils";
-import {
-  assumeRolePolicyJson,
   groupName,
-  identityBasedPolicyJson,
-  path,
+  managedPolicyJson,
   policyArn,
   policyName,
   roleName,
-  rolePolicyName,
+  trustPolicyJson,
   userName,
-  userPolicyName,
 } from "./dummy";
 
 jest.setTimeout((isLocal ? 5 : 30) * 1000);
 
 describe("Group APIs", () => {
   beforeEach(async () => {
-    await deleteGroupsByPath(path);
+    await deleteGroupsByPrefix(groupName);
   });
 
   afterAll(async () => {
-    await deleteGroupsByPath(path);
+    await deleteGroupsByPrefix(groupName);
   });
 
+  const getNumberOfGroups = async () => {
+    const { Groups } = await listGroups({});
+    return Groups?.length ?? 0;
+  };
+
   test("Create, get, list, and delete group", async () => {
-    const listCurrentGroups = async () => {
-      const { Groups: groups } = await listGroups({ PathPrefix: path });
-      return groups;
-    };
+    const numberOfGroups = await getNumberOfGroups();
+    const { Group: group1 } = await createGroup({ GroupName: groupName });
 
-    expect(await listCurrentGroups()).toHaveLength(0);
-
-    const { Group: group1 } = await createGroup({
-      GroupName: groupName,
-      Path: path,
-    });
-
-    expect(await listCurrentGroups()).toHaveLength(1);
+    expect(await getNumberOfGroups()).toBe(numberOfGroups + 1);
     expect(group1?.GroupName).toBe(groupName);
 
     const { Group: group2 } = await getGroup({ GroupName: groupName });
@@ -102,152 +97,189 @@ describe("Group APIs", () => {
 
     await deleteGroup({ GroupName: groupName });
 
-    expect(await listCurrentGroups()).toHaveLength(0);
+    expect(await getNumberOfGroups()).toBe(numberOfGroups);
+  });
+
+  test("deleteGroupsByPrefix() helper", async () => {
+    const numberOfGroups = await getNumberOfGroups();
+    await createGroup({ GroupName: groupName });
+
+    expect(await getNumberOfGroups()).toBe(numberOfGroups + 1);
+
+    await deleteGroupsByPrefix(groupName);
+
+    expect(await getNumberOfGroups()).toBe(numberOfGroups);
   });
 });
 
 describe("Policy APIs", () => {
   beforeEach(async () => {
-    await deletePoliciesByPath(path);
+    await deletePoliciesByPrefix(policyName);
   });
 
   afterAll(async () => {
-    await deletePoliciesByPath(path);
+    await deletePoliciesByPrefix(policyName);
   });
 
+  const getNumberOfPolicies = async () => {
+    const { Policies } = await listPolicies({ Scope: "Local" });
+    return Policies?.length ?? 0;
+  };
+
   test("Create, get, list, and delete policy", async () => {
-    const listCurrentPolicies = async () => {
-      const { Policies: policies } = await listPolicies({ PathPrefix: path });
-      return policies;
-    };
-
-    expect(await listCurrentPolicies()).toHaveLength(0);
-
+    const numberOfPolicies = await getNumberOfPolicies();
     const { Policy: policy1 } = await createPolicy({
       PolicyName: policyName,
-      PolicyDocument: JSON.stringify(identityBasedPolicyJson),
-      Path: path,
+      PolicyDocument: JSON.stringify(managedPolicyJson),
     });
 
-    expect(await listCurrentPolicies()).toHaveLength(1);
+    expect(await getNumberOfPolicies()).toBe(numberOfPolicies + 1);
     expect(policy1?.PolicyName).toBe(policyName);
 
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    const { Policy: policy2 } = await getPolicy({ PolicyArn: policy1!.Arn });
+    const { Policy: policy2 } = await getPolicy({
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      PolicyArn: policy1!.Arn,
+    });
 
     expect(policy2?.PolicyId).toBe(policy1?.PolicyId);
 
     await deletePolicy({ PolicyArn: policy1?.Arn });
 
-    expect(await listCurrentPolicies()).toHaveLength(0);
+    expect(await getNumberOfPolicies()).toBe(numberOfPolicies);
+  });
+
+  test("deletePoliciesByPrefix() helper", async () => {
+    const numberOfPolicies = await getNumberOfPolicies();
+    await createPolicy({
+      PolicyName: policyName,
+      PolicyDocument: JSON.stringify(managedPolicyJson),
+    });
+
+    expect(await getNumberOfPolicies()).toBe(numberOfPolicies + 1);
+
+    await deletePoliciesByPrefix(policyName);
+
+    expect(await getNumberOfPolicies()).toBe(numberOfPolicies);
   });
 });
 
 describe("Policy version APIs", () => {
-  const identityBasedPolicyV2Json = {
-    ...identityBasedPolicyJson,
+  const managedPolicy2Json = {
+    ...managedPolicyJson,
     Statement: [
       {
-        ...identityBasedPolicyJson.Statement[0],
+        ...managedPolicyJson.Statement[0],
         Action: ["s3:GetObject", "s3:PutObject"],
       },
     ],
   };
 
   beforeEach(async () => {
-    await deletePoliciesByPath(path);
+    await deletePoliciesByPrefix(policyName);
   });
 
   afterAll(async () => {
-    await deletePoliciesByPath(path);
+    await deletePoliciesByPrefix(policyName);
   });
 
-  test("Create, get, list, and delete policy version", async () => {
-    const { Policy: policy } = await createPolicy({
-      PolicyName: policyName,
-      Path: path,
-      PolicyDocument: JSON.stringify(identityBasedPolicyJson),
-    });
-    const listCurrentPolicyVersions = async () => {
-      const { Versions: versions } = await listPolicyVersions({
-        PolicyArn: policy?.Arn,
-      });
-      return versions;
-    };
+  const getNumberOfPolicyVersions = async (PolicyArn?: string) => {
+    const { Versions } = await listPolicyVersions({ PolicyArn });
+    return Versions?.length ?? 0;
+  };
 
-    expect(await listCurrentPolicyVersions()).toHaveLength(1);
+  test("Create, get, list, and delete policy version", async () => {
+    const { Policy } = await createPolicy({
+      PolicyName: policyName,
+      PolicyDocument: JSON.stringify(managedPolicyJson),
+    });
+
+    expect(await getNumberOfPolicyVersions(Policy?.Arn)).toBe(1);
 
     const { PolicyVersion: version1 } = await createPolicyVersion({
-      PolicyArn: policy?.Arn,
-      PolicyDocument: JSON.stringify(identityBasedPolicyV2Json),
+      PolicyArn: Policy?.Arn,
+      PolicyDocument: JSON.stringify(managedPolicy2Json),
     });
 
-    expect(await listCurrentPolicyVersions()).toHaveLength(2);
+    expect(await getNumberOfPolicyVersions(Policy?.Arn)).toBe(2);
 
     const { PolicyVersion: version2 } = await getPolicyVersion({
-      PolicyArn: policy?.Arn,
+      PolicyArn: Policy?.Arn,
       VersionId: version1?.VersionId,
     });
 
     expect(
       JSON.parse(decodeURIComponent(version2?.Document ?? ""))
-    ).toStrictEqual(identityBasedPolicyV2Json);
+    ).toStrictEqual(managedPolicy2Json);
 
     await deletePolicyVersion({
-      PolicyArn: policy?.Arn,
+      PolicyArn: Policy?.Arn,
       VersionId: version2?.VersionId,
     });
 
-    expect(await listCurrentPolicyVersions()).toHaveLength(1);
+    expect(await getNumberOfPolicyVersions(Policy?.Arn)).toBe(1);
   });
 
   test("Set policy default version", async () => {
-    const { Policy: policy } = await createPolicy({
+    const { Policy } = await createPolicy({
       PolicyName: policyName,
-      Path: path,
-      PolicyDocument: JSON.stringify(identityBasedPolicyJson),
+      PolicyDocument: JSON.stringify(managedPolicyJson),
     });
     const { PolicyVersion: version1 } = await createPolicyVersion({
-      PolicyArn: policy?.Arn,
-      PolicyDocument: JSON.stringify(identityBasedPolicyV2Json),
+      PolicyArn: Policy?.Arn,
+      PolicyDocument: JSON.stringify(managedPolicy2Json),
     });
     await setDefaultPolicyVersion({
-      PolicyArn: policy?.Arn,
+      PolicyArn: Policy?.Arn,
       VersionId: version1?.VersionId,
     });
     const { PolicyVersion: version2 } = await getPolicyVersion({
-      PolicyArn: policy?.Arn,
+      PolicyArn: Policy?.Arn,
       VersionId: version1?.VersionId,
     });
 
     expect(version2?.IsDefaultVersion).toBe(true);
   });
+
+  test("deleteAllPolicyVersions() helper", async () => {
+    const { Policy } = await createPolicy({
+      PolicyName: policyName,
+      PolicyDocument: JSON.stringify(managedPolicyJson),
+    });
+    await createPolicyVersion({
+      PolicyArn: Policy?.Arn,
+      PolicyDocument: JSON.stringify(managedPolicy2Json),
+    });
+
+    expect(await getNumberOfPolicyVersions(Policy?.Arn)).toBe(2);
+
+    await deleteAllPolicyVersions(Policy?.Arn);
+
+    expect(await getNumberOfPolicyVersions(Policy?.Arn)).toBe(1);
+  });
 });
 
 describe("Role APIs", () => {
   beforeEach(async () => {
-    await deleteRolesByPath(path);
+    await deleteRolesByPrefix(roleName);
   });
 
   afterAll(async () => {
-    await deleteRolesByPath(path);
+    await deleteRolesByPrefix(roleName);
   });
 
+  const getNumberOfRoles = async () => {
+    const { Roles } = await listRoles({});
+    return Roles?.length ?? 0;
+  };
+
   test("Create, get, list, and delete role", async () => {
-    const listCurrentRoles = async () => {
-      const { Roles: roles } = await listRoles({ PathPrefix: path });
-      return roles;
-    };
-
-    expect(await listCurrentRoles()).toHaveLength(0);
-
+    const numberOfRoles = await getNumberOfRoles();
     const { Role: role1 } = await createRole({
       RoleName: roleName,
-      AssumeRolePolicyDocument: JSON.stringify(assumeRolePolicyJson),
-      Path: path,
+      AssumeRolePolicyDocument: JSON.stringify(trustPolicyJson),
     });
 
-    expect(await listCurrentRoles()).toHaveLength(1);
+    expect(await getNumberOfRoles()).toBe(numberOfRoles + 1);
     expect(role1?.RoleName).toBe(roleName);
 
     const { Role: role2 } = await getRole({ RoleName: roleName });
@@ -256,93 +288,143 @@ describe("Role APIs", () => {
 
     await deleteRole({ RoleName: roleName });
 
-    expect(await listCurrentRoles()).toHaveLength(0);
+    expect(await getNumberOfRoles()).toBe(numberOfRoles);
+  });
+
+  test("deleteRolesByPrefix() helper", async () => {
+    const numberOfRoles = await getNumberOfRoles();
+    await createRole({
+      RoleName: roleName,
+      AssumeRolePolicyDocument: JSON.stringify(trustPolicyJson),
+    });
+
+    expect(await getNumberOfRoles()).toBe(numberOfRoles + 1);
+
+    await deleteRolesByPrefix(roleName);
+
+    expect(await getNumberOfRoles()).toBe(numberOfRoles);
   });
 });
 
 describe("Role policy APIs", () => {
   beforeAll(async () => {
-    await deleteRolesByPath(path);
+    await deleteRolesByPrefix(roleName);
     await createRole({
       RoleName: roleName,
-      AssumeRolePolicyDocument: JSON.stringify(assumeRolePolicyJson),
-      Path: path,
+      AssumeRolePolicyDocument: JSON.stringify(trustPolicyJson),
     });
+  });
+
+  beforeEach(async () => {
+    await detachAllRolePolicies(roleName);
   });
 
   afterAll(async () => {
-    await deleteRolesByPath(path);
+    await deleteRolesByPrefix(roleName);
   });
 
-  test("Attach, list, and detach policy to role", async () => {
-    const listCurrentAttachedRolePolicies = async () => {
-      const { AttachedPolicies: policies } = await listAttachedRolePolicies({
-        RoleName: roleName,
-      });
-      return policies;
-    };
+  const getNumberOfAttachedRolePolicies = async (RoleName?: string) => {
+    const { AttachedPolicies } = await listAttachedRolePolicies({
+      RoleName,
+    });
+    return AttachedPolicies?.length ?? 0;
+  };
 
-    expect(await listCurrentAttachedRolePolicies()).toHaveLength(0);
+  test("Attach, list, and detach policy to role", async () => {
+    expect(await getNumberOfAttachedRolePolicies(roleName)).toBe(0);
 
     await attachRolePolicy({ RoleName: roleName, PolicyArn: policyArn });
 
-    expect(await listCurrentAttachedRolePolicies()).toHaveLength(1);
+    expect(await getNumberOfAttachedRolePolicies(roleName)).toBe(1);
 
     await detachRolePolicy({ RoleName: roleName, PolicyArn: policyArn });
 
-    expect(await listCurrentAttachedRolePolicies()).toHaveLength(0);
+    expect(await getNumberOfAttachedRolePolicies(roleName)).toBe(0);
   });
 
-  test("Create, list, and delete inline role policy", async () => {
-    const listCurrentRolePolicies = async () => {
-      const { PolicyNames: policyNames } = await listRolePolicies({
-        RoleName: roleName,
-      });
-      return policyNames;
-    };
+  test("detachAllRolePolicies() helper", async () => {
+    await attachRolePolicy({ RoleName: roleName, PolicyArn: policyArn });
 
-    expect(await listCurrentRolePolicies()).toHaveLength(0);
+    expect(await getNumberOfAttachedRolePolicies(roleName)).toBe(1);
+
+    await detachAllRolePolicies(roleName);
+
+    expect(await getNumberOfAttachedRolePolicies(roleName)).toBe(0);
+  });
+});
+
+describe("Role inline policy APIs", () => {
+  beforeAll(async () => {
+    await deleteRolesByPrefix(roleName);
+    await createRole({
+      RoleName: roleName,
+      AssumeRolePolicyDocument: JSON.stringify(trustPolicyJson),
+    });
+  });
+
+  beforeEach(async () => {
+    await deleteAllRolePolicies(roleName);
+  });
+
+  afterAll(async () => {
+    await deleteRolesByPrefix(roleName);
+  });
+
+  const getNumberOfRolePolicies = async (RoleName?: string) => {
+    const { PolicyNames } = await listRolePolicies({ RoleName });
+    return PolicyNames?.length ?? 0;
+  };
+
+  test("Create, list, and delete inline role policy", async () => {
+    expect(await getNumberOfRolePolicies(roleName)).toBe(0);
 
     await putRolePolicy({
       RoleName: roleName,
-      PolicyDocument: JSON.stringify(identityBasedPolicyJson),
-      PolicyName: rolePolicyName,
+      PolicyDocument: JSON.stringify(managedPolicyJson),
+      PolicyName: policyName,
     });
 
-    expect(await listCurrentRolePolicies()).toHaveLength(1);
+    expect(await getNumberOfRolePolicies(roleName)).toBe(1);
 
-    await deleteRolePolicy({
+    await deleteRolePolicy({ RoleName: roleName, PolicyName: policyName });
+
+    expect(await getNumberOfRolePolicies(roleName)).toBe(0);
+  });
+
+  test("deleteAllRolePolicies() helper", async () => {
+    await putRolePolicy({
       RoleName: roleName,
-      PolicyName: rolePolicyName,
+      PolicyDocument: JSON.stringify(managedPolicyJson),
+      PolicyName: policyName,
     });
 
-    expect(await listCurrentRolePolicies()).toHaveLength(0);
+    expect(await getNumberOfRolePolicies(roleName)).toBe(1);
+
+    await deleteAllRolePolicies(roleName);
+
+    expect(await getNumberOfRolePolicies(roleName)).toBe(0);
   });
 });
 
 describe("User APIs", () => {
   beforeEach(async () => {
-    await deleteUsersByPath(path);
+    await deleteUsersByPrefix(userName);
   });
 
   afterAll(async () => {
-    await deleteUsersByPath(path);
+    await deleteUsersByPrefix(userName);
   });
 
+  const getNumberOfUsers = async () => {
+    const { Users } = await listUsers({});
+    return Users?.length ?? 0;
+  };
+
   test("Create, get, list, and delete user", async () => {
-    const listCurrentUsers = async () => {
-      const { Users: users } = await listUsers({ PathPrefix: path });
-      return users;
-    };
+    const numberOfUsers = await getNumberOfUsers();
+    const { User: user1 } = await createUser({ UserName: userName });
 
-    expect(await listCurrentUsers()).toHaveLength(0);
-
-    const { User: user1 } = await createUser({
-      UserName: userName,
-      Path: path,
-    });
-
-    expect(await listCurrentUsers()).toHaveLength(1);
+    expect(await getNumberOfUsers()).toBe(numberOfUsers + 1);
     expect(user1?.UserName).toBe(userName);
 
     const { User: user2 } = await getUser({ UserName: userName });
@@ -351,12 +433,12 @@ describe("User APIs", () => {
 
     await deleteUser({ UserName: userName });
 
-    expect(await listCurrentUsers()).toHaveLength(0);
+    expect(await getNumberOfUsers()).toBe(numberOfUsers);
   });
 
   test("Update user", async () => {
     const oldUserName = "john_doe";
-    await createUser({ UserName: oldUserName, Path: path });
+    await createUser({ UserName: oldUserName });
     const { User: user1 } = await getUser({ UserName: oldUserName });
 
     expect(user1?.UserName).toBe(oldUserName);
@@ -367,12 +449,23 @@ describe("User APIs", () => {
     expect(user2?.UserName).toBe(userName);
     expect(user2?.UserId).toBe(user1?.UserId);
   });
+
+  test("deleteUsersByPrefix() helper", async () => {
+    const numberOfUsers = await getNumberOfUsers();
+    await createUser({ UserName: userName });
+
+    expect(await getNumberOfUsers()).toBe(numberOfUsers + 1);
+
+    await deleteUsersByPrefix(userName);
+
+    expect(await getNumberOfUsers()).toBe(numberOfUsers);
+  });
 });
 
 describe("Access keys APIs", () => {
   beforeAll(async () => {
-    await deleteUsersByPath(path);
-    await createUser({ UserName: userName, Path: path });
+    await deleteUsersByPrefix(userName);
+    await createUser({ UserName: userName });
   });
 
   beforeEach(async () => {
@@ -380,122 +473,168 @@ describe("Access keys APIs", () => {
   });
 
   afterAll(async () => {
-    await deleteUsersByPath(path);
+    await deleteUsersByPrefix(userName);
   });
 
-  test("Create, list, and delete access key", async () => {
-    const listCurrentAccessKeys = async () => {
-      const { AccessKeyMetadata: accessKeys } = await listAccessKeys({
-        UserName: userName,
-      });
-      return accessKeys;
-    };
+  const getNumberOfAccessKeys = async (UserName?: string) => {
+    const { AccessKeyMetadata } = await listAccessKeys({ UserName });
+    return AccessKeyMetadata?.length ?? 0;
+  };
 
-    expect(await listCurrentAccessKeys()).toHaveLength(0);
+  test("Create, list, and delete access key", async () => {
+    expect(await getNumberOfAccessKeys(userName)).toBe(0);
 
     await createAccessKey({ UserName: userName });
-    const accessKeys = await listCurrentAccessKeys();
 
-    expect(accessKeys).toHaveLength(1);
+    expect(await getNumberOfAccessKeys(userName)).toBe(1);
 
+    const { AccessKeyMetadata } = await listAccessKeys({ UserName: userName });
     await deleteAccessKey({
       UserName: userName,
-      AccessKeyId: accessKeys?.[0].AccessKeyId,
+      AccessKeyId: AccessKeyMetadata?.[0].AccessKeyId,
     });
 
-    expect(await listCurrentAccessKeys()).toHaveLength(0);
+    expect(await getNumberOfAccessKeys(userName)).toBe(0);
   });
 
   test("Get access key last used info", async () => {
-    const { AccessKey: accessKey } = await createAccessKey({
-      UserName: userName,
-    });
-    const { AccessKeyLastUsed: lastUsed } = await getAccessKeyLastUsed({
-      AccessKeyId: accessKey?.AccessKeyId,
+    const { AccessKey } = await createAccessKey({ UserName: userName });
+    const { AccessKeyLastUsed } = await getAccessKeyLastUsed({
+      AccessKeyId: AccessKey?.AccessKeyId,
     });
 
-    expect(lastUsed?.LastUsedDate).toBeUndefined();
-    expect(lastUsed?.Region).toBe("N/A");
-    expect(lastUsed?.ServiceName).toBe("N/A");
+    expect(AccessKeyLastUsed?.LastUsedDate).toBeUndefined();
+    expect(AccessKeyLastUsed?.Region).toBe("N/A");
+    expect(AccessKeyLastUsed?.ServiceName).toBe("N/A");
   });
 
   test("Deactivate access key", async () => {
     const getFirstAccessKeyStatus = async () => {
-      const { AccessKeyMetadata: accessKeys } = await listAccessKeys({
+      const { AccessKeyMetadata } = await listAccessKeys({
         UserName: userName,
       });
-      const status = accessKeys?.[0].Status;
+      const status = AccessKeyMetadata?.[0].Status;
       return status;
     };
-    const { AccessKey: accessKey } = await createAccessKey({
-      UserName: userName,
-    });
+    const { AccessKey } = await createAccessKey({ UserName: userName });
 
     expect(await getFirstAccessKeyStatus()).toBe("Active");
 
     await updateAccessKey({
-      AccessKeyId: accessKey?.AccessKeyId,
+      AccessKeyId: AccessKey?.AccessKeyId,
       UserName: userName,
       Status: "Inactive",
     });
 
     expect(await getFirstAccessKeyStatus()).toBe("Inactive");
   });
+
+  test("deleteAllUserAccessKeys() helper", async () => {
+    await createAccessKey({ UserName: userName });
+
+    expect(await getNumberOfAccessKeys(userName)).toBe(1);
+
+    await deleteAllUserAccessKeys(userName);
+
+    expect(await getNumberOfAccessKeys(userName)).toBe(0);
+  });
 });
 
 describe("User policy APIs", () => {
   beforeAll(async () => {
-    await deleteUsersByPath(path);
-    await createUser({ UserName: userName, Path: path });
+    await deleteUsersByPrefix(userName);
+    await createUser({ UserName: userName });
+  });
+
+  beforeEach(async () => {
+    await detachAllUserPolicies(userName);
+    await deletePoliciesByPrefix(policyName);
   });
 
   afterAll(async () => {
-    await deleteUsersByPath(path);
+    await deleteUsersByPrefix(userName);
+    await deletePoliciesByPrefix(policyName);
   });
 
-  test("Attach, list, and detach policy to user", async () => {
-    const listCurrentAttachedUserPolicies = async () => {
-      const { AttachedPolicies: policies } = await listAttachedUserPolicies({
-        UserName: userName,
-      });
-      return policies;
-    };
+  const getNumberOfAttachedUserPolicies = async (UserName?: string) => {
+    const { AttachedPolicies } = await listAttachedUserPolicies({
+      UserName,
+    });
+    return AttachedPolicies?.length ?? 0;
+  };
 
-    expect(await listCurrentAttachedUserPolicies()).toHaveLength(0);
+  test("Attach, list, and detach policy to user", async () => {
+    expect(await getNumberOfAttachedUserPolicies(userName)).toBe(0);
 
     await attachUserPolicy({ UserName: userName, PolicyArn: policyArn });
 
-    expect(await listCurrentAttachedUserPolicies()).toHaveLength(1);
+    expect(await getNumberOfAttachedUserPolicies(userName)).toBe(1);
 
     await detachUserPolicy({ UserName: userName, PolicyArn: policyArn });
 
-    expect(await listCurrentAttachedUserPolicies()).toHaveLength(0);
+    expect(await getNumberOfAttachedUserPolicies(userName)).toBe(0);
   });
 
-  test("Create, list, and delete inline user policy", async () => {
-    const listCurrentUserPolicies = async () => {
-      const { PolicyNames: policyNames } = await listUserPolicies({
-        UserName: userName,
-      });
-      return policyNames;
-    };
+  test("detachAllUserPolicies() helper", async () => {
+    await attachUserPolicy({ UserName: userName, PolicyArn: policyArn });
 
-    expect(await listCurrentUserPolicies()).toHaveLength(0);
+    expect(await getNumberOfAttachedUserPolicies(userName)).toBe(1);
+
+    await detachAllUserPolicies(userName);
+
+    expect(await getNumberOfAttachedUserPolicies(userName)).toBe(0);
+  });
+});
+
+describe("User inline policy APIs", () => {
+  beforeAll(async () => {
+    await deleteUsersByPrefix(userName);
+    await createUser({ UserName: userName });
+  });
+
+  beforeEach(async () => {
+    await deleteAllUserPolicies(userName);
+  });
+
+  afterAll(async () => {
+    await deleteUsersByPrefix(userName);
+  });
+
+  const getNumberOfUserPolicies = async (UserName?: string) => {
+    const { PolicyNames } = await listUserPolicies({ UserName });
+    return PolicyNames?.length ?? 0;
+  };
+
+  test("Create, list, and delete inline user policy", async () => {
+    expect(await getNumberOfUserPolicies(userName)).toBe(0);
 
     await putUserPolicy({
       UserName: userName,
-      PolicyDocument: JSON.stringify(identityBasedPolicyJson),
-      PolicyName: userPolicyName,
+      PolicyDocument: JSON.stringify(managedPolicyJson),
+      PolicyName: policyName,
     });
 
-    expect(await listCurrentUserPolicies()).toHaveLength(1);
+    expect(await getNumberOfUserPolicies(userName)).toBe(1);
 
-    await deleteUserPolicy({
+    await deleteUserPolicy({ UserName: userName, PolicyName: policyName });
+
+    expect(await getNumberOfUserPolicies(userName)).toBe(0);
+  });
+
+  test("deleteAllUserPolicies() helper", async () => {
+    expect(await getNumberOfUserPolicies(userName)).toBe(0);
+
+    await putUserPolicy({
       UserName: userName,
-      PolicyName: userPolicyName,
+      PolicyDocument: JSON.stringify(managedPolicyJson),
+      PolicyName: policyName,
     });
 
-    expect(await listCurrentUserPolicies()).toHaveLength(0);
+    expect(await getNumberOfUserPolicies(userName)).toBe(1);
+
+    await deleteAllUserPolicies(userName);
+
+    expect(await getNumberOfUserPolicies(userName)).toBe(0);
   });
 });
 
@@ -504,40 +643,41 @@ describe("Account alias APIs", () => {
     await createAccountAlias({ AccountAlias: accountAlias });
   });
 
+  const getNumberOfAccountAliases = async () => {
+    const { AccountAliases } = await listAccountAliases({});
+    return AccountAliases?.length ?? 0;
+  };
+
   test("Create, list, and delete account alias", async () => {
-    const listCurrentAccountAliases = async () => {
-      const { AccountAliases: aliases } = await listAccountAliases({});
-      return aliases;
-    };
     const alias2 = `${accountAlias}2`;
     await createAccountAlias({ AccountAlias: alias2 });
-    const aliases = await listCurrentAccountAliases();
+    const { AccountAliases } = await listAccountAliases({});
 
-    expect(aliases).toHaveLength(1);
-    expect(aliases?.[0]).toBe(alias2);
+    expect(await getNumberOfAccountAliases()).toBe(1);
+    expect(AccountAliases?.[0]).toBe(alias2);
 
     await deleteAccountAlias({ AccountAlias: alias2 });
 
-    expect(await listCurrentAccountAliases()).toHaveLength(0);
+    expect(await getNumberOfAccountAliases()).toBe(0);
   });
 });
 
 describe("Account summary APIs", () => {
   beforeAll(async () => {
-    await deleteUsersByPath(path);
-    await createUser({ UserName: userName, Path: path });
+    await deleteUsersByPrefix(userName);
+    await createUser({ UserName: userName });
   });
 
   afterAll(async () => {
-    await deleteUsersByPath(path);
+    await deleteUsersByPrefix(userName);
   });
 
   test("Generate and get credentials report", async () => {
     await createAccessKey({ UserName: userName });
     await generateCredentialReport({});
-    const { Content: content } = await getCredentialReport({});
-    const report = Buffer.from(content ?? []).toString();
-    const [header, ...body] = report
+    const { Content } = await getCredentialReport({});
+    const [header, ...body] = Buffer.from(Content ?? [])
+      .toString()
       .trimEnd()
       .split("\n")
       .map(row => row.split(","));
@@ -547,21 +687,24 @@ describe("Account summary APIs", () => {
   });
 
   test("Get account summary", async () => {
-    const { SummaryMap: summary } = await getAccountSummary({});
+    const { SummaryMap } = await getAccountSummary({});
 
-    expect(summary?.Groups).toBeGreaterThanOrEqual(0);
-    expect(summary?.Users).toBeGreaterThanOrEqual(1);
+    expect(SummaryMap?.Groups).toBeGreaterThanOrEqual(0);
+    expect(SummaryMap?.Users).toBeGreaterThanOrEqual(1);
   });
 
   test("Get account authorization details", async () => {
-    const { UserDetailList: users, Policies: policies } =
-      await getAccountAuthorizationDetails({});
+    const { UserDetailList, Policies } = await getAccountAuthorizationDetails(
+      {}
+    );
 
     expect(
-      users?.findIndex(user => user.UserName === userName)
+      UserDetailList?.findIndex(({ UserName }) => UserName === userName)
     ).toBeGreaterThan(-1);
     expect(
-      policies?.findIndex(policy => policy.PolicyName === "AdministratorAccess")
+      Policies?.findIndex(
+        ({ PolicyName }) => PolicyName === "AdministratorAccess"
+      )
     ).toBeGreaterThan(-1);
   });
 });

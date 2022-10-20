@@ -3,15 +3,12 @@ import { accountAlias } from "../utils";
 
 // IAM
 export const groupName = "DummyGroup";
-export const path = "/dummy/";
 export const policyArn = "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess";
 export const policyName = "DummyPolicy";
-export const roleName = "DummyRole";
-export const rolePolicyName = "DummyRolePolicy";
+export const roleName = "dummy-role";
 export const userName = "DummyUser";
-export const userPolicyName = "DummyUserPolicy";
 
-export const assumeRolePolicyJson = {
+export const trustPolicyJson = {
   Version: "2012-10-17",
   Statement: [
     {
@@ -22,7 +19,7 @@ export const assumeRolePolicyJson = {
   ],
 };
 
-export const identityBasedPolicyJson = {
+export const managedPolicyJson = {
   Version: "2012-10-17",
   Statement: [
     {
@@ -32,6 +29,10 @@ export const identityBasedPolicyJson = {
     },
   ],
 };
+
+// Lambda
+export const funcName = "dummy-function";
+export const funcDir = `${__dirname}/dummy-func`;
 
 // S3
 export const bucket = `dummy-bucket-${accountAlias}`;

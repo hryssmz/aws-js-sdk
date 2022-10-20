@@ -1,2 +1,2 @@
-// s3/actions/__tests__/dummy.ts
-export { bucket, objectKey, objectBody } from "../../utils/dummy";
+// s3/__tests__/dummy.ts
+export { bucket, objectBody, objectKey } from "../../utils/dummy";

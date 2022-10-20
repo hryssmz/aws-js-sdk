@@ -1,4 +1,4 @@
-// sts/actions/legacy.ts
+// sts/legacy.ts
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { defaultSTSClientConfig } from "./wrapper";
 import type {
@@ -6,13 +6,13 @@ import type {
   AssumeRoleCommandInput,
 } from "@aws-sdk/client-sts";
 
-export const stsClient = (config?: STSClientConfig) => {
+export const createSTSClient = (config?: STSClientConfig) => {
   return new STSClient({ ...defaultSTSClientConfig, ...config });
 };
 
 export const assumeRole = async (
   params: AssumeRoleCommandInput,
-  client = stsClient()
+  client = createSTSClient()
 ) => {
   const command = new AssumeRoleCommand(params);
   const result = await client.send(command);

@@ -1,6 +1,5 @@
-// sts/actions/__tests__/dummy.ts
+// sts/__tests__/dummy.ts
 export {
-  path,
   policyName,
   roleName,
   roleSessionName,

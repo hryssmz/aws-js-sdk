@@ -1,4 +1,4 @@
-// sts/actions/wrapper.ts
+// sts/wrapper.ts
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { defaultClientConfig } from "../utils";
 import type {

@@ -1,57 +1,39 @@
 // iam/__tests__/scenarios/createRoUserRwUser.spec.ts
 import { IAMWrapper } from "../..";
 import { S3Wrapper } from "../../../s3";
-import {
-  deleteDummyBuckets,
-  deletePoliciesByPath,
-  deleteUsersByPath,
-  isLocal,
-  sleep,
-} from "../utils";
-import {
-  bucket,
-  objectBody,
-  objectKey,
-  path,
-  policyName,
-  userName,
-} from "../dummy";
+import { isLocal, sleep } from "../utils";
+import { bucket, objectBody, objectKey, policyName, userName } from "../dummy";
 
-jest.setTimeout((isLocal ? 5 : 120) * 1000);
+jest.setTimeout((isLocal ? 5 : 40) * 1000);
+
+const iam = new IAMWrapper();
+const s3 = new S3Wrapper();
 
 beforeAll(async () => {
-  await deleteUsersByPath(path);
-  await deletePoliciesByPath(path);
-  await deleteDummyBuckets();
+  await iam.deleteUsersByPrefix(userName);
+  await iam.deletePoliciesByPrefix(policyName);
+  await s3.deleteBucketsByPrefix(bucket);
 });
 
 afterAll(async () => {
-  await deleteUsersByPath(path);
-  await deletePoliciesByPath(path);
-  await deleteDummyBuckets();
+  await iam.deleteUsersByPrefix(userName);
+  await iam.deletePoliciesByPrefix(policyName);
+  await s3.deleteBucketsByPrefix(bucket);
 });
 
 test("Create read-only and read-write IAM users", async () => {
-  const iam = new IAMWrapper();
-  const s3 = new S3Wrapper();
-  const readOnlyUserName = `ReadOnly${userName}`;
-  const readWriteUserName = `ReadWrite${userName}`;
-  const readOnlyPolicyName = `ReadOnly${policyName}`;
-  const readWritePolicyName = `ReadWrite${policyName}`;
+  const readOnlyUserName = `${userName}RO`;
+  const readWriteUserName = `${userName}RW`;
+  const readOnlyPolicyName = `${policyName}RO`;
+  const readWritePolicyName = `${policyName}RW`;
 
   // Create a bucket.
   const bucketArn = `arn:aws:s3:::${bucket}/*`;
   await s3.createBucket({ Bucket: bucket });
 
   // Create two IAM users.
-  await iam.createUser({
-    UserName: readOnlyUserName,
-    Path: path,
-  });
-  await iam.createUser({
-    UserName: readWriteUserName,
-    Path: path,
-  });
+  await iam.createUser({ UserName: readOnlyUserName });
+  await iam.createUser({ UserName: readWriteUserName });
 
   // Create access keys.
   const { AccessKey: roAccessKey } = await iam.createAccessKey({
@@ -76,21 +58,15 @@ test("Create read-only and read-write IAM users", async () => {
   // Create two policies.
   const { Policy: roPolicy } = await iam.createPolicy({
     PolicyName: readOnlyPolicyName,
-    Path: path,
     PolicyDocument: JSON.stringify({
       Version: "2012-10-17",
       Statement: [
-        {
-          Effect: "Allow",
-          Action: "s3:GetObject",
-          Resource: bucketArn,
-        },
+        { Effect: "Allow", Action: "s3:GetObject", Resource: bucketArn },
       ],
     }),
   });
   const { Policy: rwPolicy } = await iam.createPolicy({
     PolicyName: readWritePolicyName,
-    Path: path,
     PolicyDocument: JSON.stringify({
       Version: "2012-10-17",
       Statement: [
