@@ -11,7 +11,7 @@ import { IAMWrapper } from "../../iam";
 import { funcDir, funcName, roleName } from "./dummy";
 import { isLocal, sleep, zip } from "./utils";
 
-jest.setTimeout((isLocal ? 5 : 30) * 1000);
+jest.setTimeout((isLocal ? 10 : 30) * 1000);
 
 const lambda = new LambdaWrapper();
 const iam = new IAMWrapper();

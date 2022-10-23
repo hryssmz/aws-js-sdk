@@ -2,9 +2,12 @@
  * For a detailed explanation regarding each configuration property and type check, visit:
  * https://jestjs.io/docs/configuration
  */
+import { isLocal } from "./src/config";
 
 export default {
   collectCoverageFrom: [
+    "src/apigateway/legacy.ts",
+    "src/apigateway/wrapper.ts",
     "src/iam/legacy.ts",
     "src/iam/wrapper.ts",
     "src/lambda/legacy.ts",
@@ -13,8 +16,19 @@ export default {
     "src/s3/wrapper.ts",
     "src/sts/legacy.ts",
     "src/sts/wrapper.ts",
+    ...(isLocal
+      ? []
+      : [
+          "src/apigatewayv2/legacy.ts",
+          "src/apigatewayv2/wrapper.ts",
+          "src/ec2/legacy.ts",
+          "src/ec2/wrapper.ts",
+        ]),
+    "src/utils/dummy.ts",
   ],
   testMatch: [
+    "<rootDir>/src/apigateway/__tests__/legacy.spec.ts",
+    "<rootDir>/src/apigateway/__tests__/wrapper.spec.ts",
     "<rootDir>/src/iam/__tests__/legacy.spec.ts",
     "<rootDir>/src/iam/__tests__/wrapper.spec.ts",
     "<rootDir>/src/iam/__tests__/scenarios/createRoUserRwUser.spec.ts",
@@ -33,6 +47,15 @@ export default {
     "<rootDir>/src/s3/__tests__/scenarios/presignedUrl.spec.ts",
     "<rootDir>/src/sts/__tests__/legacy.spec.ts",
     "<rootDir>/src/sts/__tests__/wrapper.spec.ts",
+    ...(isLocal
+      ? []
+      : [
+          "<rootDir>/src/apigatewayv2/__tests__/legacy.spec.ts",
+          "<rootDir>/src/apigatewayv2/__tests__/wrapper.spec.ts",
+          "<rootDir>/src/ec2/__tests__/legacy.spec.ts",
+          "<rootDir>/src/ec2/__tests__/wrapper.spec.ts",
+        ]),
+    "<rootDir>/src/utils/__tests__/dummy.spec.ts",
   ],
 
   // All imported modules in your tests should be mocked automatically

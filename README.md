@@ -107,6 +107,9 @@ npm install -D babel-jest @babel/core @babel/preset-env @babel/preset-typescript
 ---
 
 ```bash
+npm install @aws-sdk/client-api-gateway
+npm install @aws-sdk/client-apigatewayv2
+npm install @aws-sdk/client-ec2
 npm install @aws-sdk/client-iam
 npm install @aws-sdk/client-lambda
 npm install @aws-sdk/client-s3

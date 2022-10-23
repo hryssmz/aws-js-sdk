@@ -1,5 +1,28 @@
 // utils/dummy.ts
-import { accountAlias } from "../utils";
+import { accountAlias } from "../config";
+
+// API Gateway
+export const restApiName = "dummy-rest-api";
+export const pathPart = "dummy-endpoint";
+export const httpMethod = "GET";
+
+// API Gateway V2
+export const apiName = "dummy-api";
+export const routeKey = "GET /dummy-endpoint";
+
+// EC2
+export const keyPairName = "dummy-key-pair";
+export const keyPairPath = `${__dirname}/${keyPairName}.pem`;
+export const sgName = "dummy-security-group";
+export const sgDesc = "Dummy Security Group";
+export const ipPermissions = [
+  {
+    FromPort: 22,
+    ToPort: 22,
+    IpProtocol: "tcp",
+    IpRanges: [{ CidrIp: "0.0.0.0/0" }],
+  },
+];
 
 // IAM
 export const groupName = "DummyGroup";
