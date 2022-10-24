@@ -1,19 +1,12 @@
 // ec2/scripts/createSgRules.ts
 import { EC2Wrapper } from "..";
-import { cidrIp, sgName } from "./args";
+import { ipIngress, sgName } from "./args";
 
 async function main() {
   const ec2 = new EC2Wrapper();
   const { SecurityGroupRules } = await ec2.authorizeSecurityGroupIngress({
     GroupName: sgName,
-    IpPermissions: [
-      {
-        FromPort: 22,
-        ToPort: 22,
-        IpProtocol: "tcp",
-        IpRanges: [{ CidrIp: cidrIp }],
-      },
-    ],
+    IpPermissions: ipIngress,
   });
   return JSON.stringify(SecurityGroupRules, null, 2);
 }

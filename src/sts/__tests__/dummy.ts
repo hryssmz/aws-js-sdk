@@ -1,7 +1,4 @@
 // sts/__tests__/dummy.ts
-export {
-  policyName,
-  roleName,
-  roleSessionName,
-  userName,
-} from "../../utils/dummy";
+export { policyName, roleName, userName } from "../../iam/__tests__/dummy";
+
+export const roleSessionName = "DummyRoleSession";

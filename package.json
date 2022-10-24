@@ -21,6 +21,10 @@
     "create-http-route": "ts-node src/apigatewayv2/scripts/createHttpRoute.ts",
     "delete-http-api": "ts-node src/apigatewayv2/scripts/deleteHttpApi.ts",
     "delete-http-route": "ts-node src/apigatewayv2/scripts/deleteHttpRoute.ts",
+    "CloudFormation": "echo -------------- CloudFormation --------------",
+    "create-stack": "ts-node src/cloudformation/scripts/createStack.ts",
+    "delete-stack": "ts-node src/cloudformation/scripts/deleteStack.ts",
+    "update-stack": "ts-node src/cloudformation/scripts/updateStack.ts",
     "EC2": "echo ------------------------- EC2 -------------------------",
     "connect-instance": "ts-node src/ec2/scripts/connectInstance.ts",
     "create-key-pair": "ts-node src/ec2/scripts/createKeyPair.ts",
@@ -52,6 +56,7 @@
   "dependencies": {
     "@aws-sdk/client-api-gateway": "^3.193.0",
     "@aws-sdk/client-apigatewayv2": "^3.193.0",
+    "@aws-sdk/client-cloudformation": "^3.194.0",
     "@aws-sdk/client-ec2": "^3.194.0",
     "@aws-sdk/client-iam": "^3.188.0",
     "@aws-sdk/client-lambda": "^3.190.0",

@@ -2,13 +2,7 @@
 import type { UpdateFunctionConfigurationCommandInput } from "@aws-sdk/client-lambda";
 
 export const funcName = "my-function";
-export const jsCodeStr = `// index.js
-exports.handler = function (event) {
-  console.log(JSON.stringify(event));
-  // console.log(process.env.foo);
-  // throw new Error("Failed...");
-};
-`;
+export const codePath = `${__dirname}/files/${funcName}.js`;
 export const payload = { a: 1 };
 export const lambdaRoleName = "lambda-basic-execution-role";
 export const lambdaPolicyArn =

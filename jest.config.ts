@@ -24,7 +24,7 @@ export default {
           "src/ec2/legacy.ts",
           "src/ec2/wrapper.ts",
         ]),
-    "src/utils/dummy.ts",
+    "src/iam/__tests__/dummy.ts",
   ],
   testMatch: [
     "<rootDir>/src/apigateway/__tests__/legacy.spec.ts",
@@ -55,7 +55,7 @@ export default {
           "<rootDir>/src/ec2/__tests__/legacy.spec.ts",
           "<rootDir>/src/ec2/__tests__/wrapper.spec.ts",
         ]),
-    "<rootDir>/src/utils/__tests__/dummy.spec.ts",
+    "<rootDir>/src/iam/__tests__/dummy.spec.ts",
   ],
 
   // All imported modules in your tests should be mocked automatically

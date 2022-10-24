@@ -1,2 +1,4 @@
 // lambda/__tests__/dummy.ts
-export { funcDir, funcName, roleName } from "../../utils/dummy";
+export const funcName = "dummy-function";
+export const funcDir = `${__dirname}/dummy-func`;
+export const roleName = "dummy-lambda-role";

@@ -1,2 +1,3 @@
 // apigatewayv2/__tests__/dummy.ts
-export { apiName, routeKey } from "../../utils/dummy";
+export const apiName = "dummy-api";
+export const routeKey = "GET /dummy-endpoint";

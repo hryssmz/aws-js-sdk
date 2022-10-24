@@ -1,11 +1,11 @@
 // lambda/scripts/createFunction.ts
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, rm } from "node:fs/promises";
 import { Architecture, PackageType, Runtime } from "@aws-sdk/client-lambda";
 import { LambdaWrapper } from "..";
 import { IAMWrapper } from "../../iam";
 import { zip } from "../../utils";
 import { funcDir } from "../../utils/dummy";
-import { funcName, jsCodeStr, lambdaRoleName } from "./args";
+import { codePath, funcName, lambdaRoleName } from "./args";
 
 async function main() {
   const lambda = new LambdaWrapper();
@@ -13,7 +13,7 @@ async function main() {
   const { Role } = await iam.getRole({ RoleName: lambdaRoleName });
   await rm(funcDir, { recursive: true, force: true });
   await mkdir(funcDir, { recursive: true });
-  await writeFile(`${funcDir}/index.js`, jsCodeStr);
+  await cp(codePath, `${funcDir}/index.js`);
   const ZipFile = await zip(funcDir);
   await rm(funcDir, { recursive: true, force: true });
   const { FunctionArn } = await lambda.createFunction({
