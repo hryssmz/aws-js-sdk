@@ -1,6 +1,7 @@
 // lambda/scripts/args.ts
 import type { UpdateFunctionConfigurationCommandInput } from "@aws-sdk/client-lambda";
 
+export const funcDir = `${__dirname}/my-func`;
 export const funcName = "my-function";
 export const codePath = `${__dirname}/files/${funcName}.js`;
 export const payload = { a: 1 };

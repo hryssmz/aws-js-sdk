@@ -1,33 +1,53 @@
 // apigateway/wrapper.ts
 import {
   APIGatewayClient,
+  CreateDeploymentCommand,
   CreateResourceCommand,
   CreateRestApiCommand,
+  CreateStageCommand,
+  DeleteDeploymentCommand,
+  DeleteIntegrationCommand,
   DeleteMethodCommand,
   DeleteResourceCommand,
   DeleteRestApiCommand,
+  DeleteStageCommand,
+  GetDeploymentCommand,
+  GetDeploymentsCommand,
+  GetIntegrationCommand,
   GetMethodCommand,
   GetResourceCommand,
   GetResourcesCommand,
   GetRestApiCommand,
   GetRestApisCommand,
+  GetStageCommand,
+  PutIntegrationCommand,
   PutMethodCommand,
 } from "@aws-sdk/client-api-gateway";
 import { defaultClientConfig, sleep } from "../utils";
 import type {
   APIGatewayClientConfig,
+  CreateDeploymentCommandInput,
   CreateResourceCommandInput,
   CreateRestApiCommandInput,
   CreateRestApiCommandOutput,
+  CreateStageCommandInput,
+  DeleteDeploymentCommandInput,
+  DeleteIntegrationCommandInput,
   DeleteMethodCommandInput,
   DeleteResourceCommandInput,
   DeleteRestApiCommandInput,
   DeleteRestApiCommandOutput,
+  DeleteStageCommandInput,
+  GetDeploymentCommandInput,
+  GetDeploymentsCommandInput,
+  GetIntegrationCommandInput,
   GetMethodCommandInput,
   GetResourceCommandInput,
   GetResourcesCommandInput,
   GetRestApiCommandInput,
   GetRestApisCommandInput,
+  GetStageCommandInput,
+  PutIntegrationCommandInput,
   PutMethodCommandInput,
 } from "@aws-sdk/client-api-gateway";
 
@@ -43,6 +63,12 @@ export class APIGatewayWrapper {
       ...defaultAPIGatewayClientConfig,
       ...config,
     });
+  }
+
+  async createDeployment(params: CreateDeploymentCommandInput) {
+    const command = new CreateDeploymentCommand(params);
+    const result = await this.client.send(command);
+    return result;
   }
 
   async createResource(params: CreateResourceCommandInput) {
@@ -67,6 +93,24 @@ export class APIGatewayWrapper {
           throw error;
         }
       });
+    return result;
+  }
+
+  async createStage(params: CreateStageCommandInput) {
+    const command = new CreateStageCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async deleteDeployment(params: DeleteDeploymentCommandInput) {
+    const command = new DeleteDeploymentCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async deleteIntegration(params: DeleteIntegrationCommandInput) {
+    const command = new DeleteIntegrationCommand(params);
+    const result = await this.client.send(command);
     return result;
   }
 
@@ -101,6 +145,30 @@ export class APIGatewayWrapper {
     return result;
   }
 
+  async deleteStage(params: DeleteStageCommandInput) {
+    const command = new DeleteStageCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async getDeployment(params: GetDeploymentCommandInput) {
+    const command = new GetDeploymentCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async getDeployments(params: GetDeploymentsCommandInput) {
+    const command = new GetDeploymentsCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async getIntegration(params: GetIntegrationCommandInput) {
+    const command = new GetIntegrationCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
   async getMethod(params: GetMethodCommandInput) {
     const command = new GetMethodCommand(params);
     const result = await this.client.send(command);
@@ -127,6 +195,18 @@ export class APIGatewayWrapper {
 
   async getRestApis(params: GetRestApisCommandInput) {
     const command = new GetRestApisCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async getStage(params: GetStageCommandInput) {
+    const command = new GetStageCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async putIntegration(params: PutIntegrationCommandInput) {
+    const command = new PutIntegrationCommand(params);
     const result = await this.client.send(command);
     return result;
   }

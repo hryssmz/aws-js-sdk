@@ -2,8 +2,7 @@
 import { cp, mkdir, rm } from "node:fs/promises";
 import { LambdaWrapper } from "..";
 import { zip } from "../../utils";
-import { funcDir } from "../../utils/dummy";
-import { codePath, funcName } from "./args";
+import { codePath, funcDir, funcName } from "./args";
 
 async function main() {
   const lambda = new LambdaWrapper();

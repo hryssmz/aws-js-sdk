@@ -1,6 +1,6 @@
 // index.ts
 async function main() {
-  // Code to run.
+  // code to run.
 }
 
 main()

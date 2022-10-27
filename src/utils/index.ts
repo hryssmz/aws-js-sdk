@@ -3,7 +3,7 @@ import { createWriteStream, statSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import archiver from "archiver";
 
-export { accountAlias, defaultClientConfig, isLocal } from "../config";
+export { accountAlias, defaultClientConfig, isLocal, region } from "../config";
 
 export const sleep = async (sec: number) => {
   await new Promise(resolve => setTimeout(resolve, sec * 1000));

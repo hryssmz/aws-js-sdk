@@ -9,11 +9,7 @@ async function main() {
     resourceParent,
     restApiId
   );
-  await apigateway.createResource({
-    restApiId,
-    pathPart,
-    parentId,
-  });
+  await apigateway.createResource({ restApiId, pathPart, parentId });
   return `${resourceParent.replace(/\/$/, "")}/${pathPart}`;
 }
 

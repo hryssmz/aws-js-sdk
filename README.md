@@ -133,3 +133,21 @@ npm install axios
 npm install archiver
 npm install -D @types/archiver
 ```
+
+#### 1.3.4. luxon
+
+---
+
+```bash
+npm install luxon
+npm install -D @types/luxon
+```
+
+#### 1.3.5. crypto-js
+
+---
+
+```bash
+npm install crypto-js
+npm install -D @types/crypto-js
+```

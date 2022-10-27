@@ -4,7 +4,10 @@ import { restApiName } from "./args";
 
 async function main() {
   const apigateway = new APIGatewayWrapper();
-  await apigateway.createRestApi({ name: restApiName });
+  await apigateway.createRestApi({
+    name: restApiName,
+    endpointConfiguration: { types: ["REGIONAL"] },
+  });
   return restApiName;
 }
 

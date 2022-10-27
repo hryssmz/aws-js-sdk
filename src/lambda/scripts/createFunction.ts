@@ -4,8 +4,7 @@ import { Architecture, PackageType, Runtime } from "@aws-sdk/client-lambda";
 import { LambdaWrapper } from "..";
 import { IAMWrapper } from "../../iam";
 import { zip } from "../../utils";
-import { funcDir } from "../../utils/dummy";
-import { codePath, funcName, lambdaRoleName } from "./args";
+import { codePath, funcDir, funcName, lambdaRoleName } from "./args";
 
 async function main() {
   const lambda = new LambdaWrapper();

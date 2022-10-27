@@ -1,22 +1,26 @@
 // lambda/wrapper.ts
 import {
+  AddPermissionCommand,
   CreateFunctionCommand,
   DeleteFunctionCommand,
   GetFunctionCommand,
   InvokeCommand,
   LambdaClient,
   ListFunctionsCommand,
+  RemovePermissionCommand,
   UpdateFunctionCodeCommand,
   UpdateFunctionConfigurationCommand,
 } from "@aws-sdk/client-lambda";
 import { defaultClientConfig } from "../utils";
 import type {
+  AddPermissionCommandInput,
   CreateFunctionCommandInput,
   DeleteFunctionCommandInput,
   GetFunctionCommandInput,
   InvokeCommandInput,
   LambdaClientConfig,
   ListFunctionsCommandInput,
+  RemovePermissionCommandInput,
   UpdateFunctionCodeCommandInput,
   UpdateFunctionConfigurationCommandInput,
 } from "@aws-sdk/client-lambda";
@@ -30,6 +34,12 @@ export class LambdaWrapper {
 
   constructor(config?: LambdaClientConfig) {
     this.client = new LambdaClient({ ...defaultLambdaClientConfig, ...config });
+  }
+
+  async addPermission(params: AddPermissionCommandInput) {
+    const command = new AddPermissionCommand(params);
+    const result = await this.client.send(command);
+    return result;
   }
 
   async createFunction(params: CreateFunctionCommandInput) {
@@ -58,6 +68,12 @@ export class LambdaWrapper {
 
   async listFunctions(params: ListFunctionsCommandInput) {
     const command = new ListFunctionsCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async removePermission(params: RemovePermissionCommandInput) {
+    const command = new RemovePermissionCommand(params);
     const result = await this.client.send(command);
     return result;
   }
