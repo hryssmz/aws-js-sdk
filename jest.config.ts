@@ -2,61 +2,13 @@
  * For a detailed explanation regarding each configuration property and type check, visit:
  * https://jestjs.io/docs/configuration
  */
-import { isLocal } from "./src/config";
-
 export default {
-  collectCoverageFrom: [
-    "src/apigateway/legacy.ts",
-    "src/apigateway/wrapper.ts",
-    "src/iam/legacy.ts",
-    "src/iam/wrapper.ts",
-    "src/lambda/legacy.ts",
-    "src/lambda/wrapper.ts",
-    "src/s3/legacy.ts",
-    "src/s3/wrapper.ts",
-    "src/sts/legacy.ts",
-    "src/sts/wrapper.ts",
-    ...(isLocal
-      ? []
-      : [
-          "src/apigatewayv2/legacy.ts",
-          "src/apigatewayv2/wrapper.ts",
-          "src/ec2/legacy.ts",
-          "src/ec2/wrapper.ts",
-        ]),
-    "src/iam/__tests__/dummy.ts",
-  ],
-  testMatch: [
-    "<rootDir>/src/apigateway/__tests__/legacy.spec.ts",
-    "<rootDir>/src/apigateway/__tests__/wrapper.spec.ts",
-    "<rootDir>/src/iam/__tests__/legacy.spec.ts",
-    "<rootDir>/src/iam/__tests__/wrapper.spec.ts",
-    "<rootDir>/src/iam/__tests__/scenarios/createRoUserRwUser.spec.ts",
-    "<rootDir>/src/iam/__tests__/scenarios/createUserAssumeRole.spec.ts",
-    "<rootDir>/src/iam/__tests__/scenarios/manageAccessKeys.spec.ts",
-    "<rootDir>/src/iam/__tests__/scenarios/manageAccount.spec.ts",
-    "<rootDir>/src/iam/__tests__/scenarios/managePolicies.spec.ts",
-    "<rootDir>/src/iam/__tests__/scenarios/manageRoles.spec.ts",
-    "<rootDir>/src/iam/__tests__/scenarios/rollbackPolicy.spec.ts",
-    "<rootDir>/src/lambda/__tests__/legacy.spec.ts",
-    "<rootDir>/src/lambda/__tests__/wrapper.spec.ts",
-    "<rootDir>/src/lambda/__tests__/scenarios/getStarted.spec.ts",
-    "<rootDir>/src/s3/__tests__/legacy.spec.ts",
-    "<rootDir>/src/s3/__tests__/wrapper.spec.ts",
-    "<rootDir>/src/s3/__tests__/scenarios/getStarted.spec.ts",
-    "<rootDir>/src/s3/__tests__/scenarios/presignedUrl.spec.ts",
-    "<rootDir>/src/sts/__tests__/legacy.spec.ts",
-    "<rootDir>/src/sts/__tests__/wrapper.spec.ts",
-    ...(isLocal
-      ? []
-      : [
-          "<rootDir>/src/apigatewayv2/__tests__/legacy.spec.ts",
-          "<rootDir>/src/apigatewayv2/__tests__/wrapper.spec.ts",
-          "<rootDir>/src/ec2/__tests__/legacy.spec.ts",
-          "<rootDir>/src/ec2/__tests__/wrapper.spec.ts",
-        ]),
-    "<rootDir>/src/iam/__tests__/dummy.spec.ts",
-  ],
+  // collectCoverageFrom: [
+  //   "src/iam/__tests__/dummy.ts",
+  // ],
+  // testMatch: [
+  //   "<rootDir>/src/iam/__tests__/dummy.spec.ts",
+  // ],
 
   // All imported modules in your tests should be mocked automatically
   // automock: false,

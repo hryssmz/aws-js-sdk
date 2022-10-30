@@ -1,7 +1,13 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.handler = void 0;
-const handler = async (event, context) => {
+import type {
+  APIGatewayEvent,
+  APIGatewayProxyResult,
+  Context,
+} from "aws-lambda";
+
+export const handler = async (
+  event: APIGatewayEvent,
+  context: Context
+): Promise<APIGatewayProxyResult> => {
   console.log(new Date());
   const body = {
     path: event.path,
@@ -11,11 +17,10 @@ const handler = async (event, context) => {
   const headers = {
     "X-Custom-Header": "My custom value",
   };
-  const response = {
+  const response: APIGatewayProxyResult = {
     statusCode: 200,
     headers,
     body: JSON.stringify(body),
   };
   return response;
 };
-exports.handler = handler;

@@ -1,5 +1,5 @@
 // utils/config.ts
-export const isLocal = true;
+export const isLocal = false;
 
 export const accountAlias = "hryssmz";
 

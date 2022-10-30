@@ -55,6 +55,7 @@
     "create-bucket": "ts-node src/s3/scripts/createBucket.ts",
     "delete-bucket": "ts-node src/s3/scripts/deleteBucket.ts",
     "delete-object": "ts-node src/s3/scripts/deleteObject.ts",
+    "get-object": "ts-node src/s3/scripts/getObject.ts",
     "upload-binary": "ts-node src/s3/scripts/uploadBinary.ts",
     "upload-plain": "ts-node src/s3/scripts/uploadPlain.ts",
     "end": "echo ------------------------- END -------------------------"
@@ -82,6 +83,7 @@
     "@babel/preset-env": "^7.19.4",
     "@babel/preset-typescript": "^7.18.6",
     "@types/archiver": "^5.3.1",
+    "@types/aws-lambda": "^8.10.108",
     "@types/crypto-js": "^4.1.1",
     "@types/jest": "^29.1.2",
     "@types/luxon": "^3.0.2",

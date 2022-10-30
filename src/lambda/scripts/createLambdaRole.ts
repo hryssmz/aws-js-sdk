@@ -21,7 +21,7 @@ async function main() {
     PolicyArn: lambdaPolicyArn,
     RoleName: lambdaRoleName,
   });
-  return Role;
+  return Role?.Arn;
 }
 
 main()

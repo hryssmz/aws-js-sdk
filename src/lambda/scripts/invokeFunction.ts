@@ -11,8 +11,9 @@ async function main() {
     LogType: LogType.Tail,
   });
   console.log(Buffer.from(LogResult ?? "", "base64").toString());
-  const result = JSON.parse(Buffer.from(Payload ?? []).toString());
-  return result;
+  const payloadJson = JSON.parse(Buffer.from(Payload ?? []).toString());
+  const result = { ...payloadJson, body: JSON.parse(payloadJson.body) };
+  return JSON.stringify(result, null, 2);
 }
 
 main()
