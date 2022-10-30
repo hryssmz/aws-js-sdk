@@ -91,18 +91,4 @@ export class LambdaWrapper {
     const result = await this.client.send(command);
     return result;
   }
-
-  async deleteFunctionsByPrefix(prefix: string) {
-    const { Functions } = await this.listFunctions({});
-    const promises =
-      Functions?.filter(({ FunctionName }) =>
-        FunctionName?.startsWith(prefix)
-      ).map(async ({ FunctionName }) => {
-        const result = await this.deleteFunction({ FunctionName });
-        return result;
-        /* c8 ignore next */
-      }) ?? [];
-    const results = await Promise.all(promises);
-    return results;
-  }
 }

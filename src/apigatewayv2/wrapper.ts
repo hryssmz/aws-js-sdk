@@ -85,31 +85,6 @@ export class ApiGatewayV2Wrapper {
     return result;
   }
 
-  async deleteAllRoutes(ApiId?: string) {
-    const { Items } = await this.getRoutes({ ApiId });
-    const promises =
-      Items?.map(async ({ RouteId }) => {
-        await this.deleteRoute({ ApiId, RouteId });
-        /* c8 ignore next */
-      }) ?? [];
-    const results = Promise.all(promises);
-    return results;
-  }
-
-  async deleteApisByPrefix(prefix: string) {
-    const { Items } = await this.getApis({});
-    const promises =
-      Items?.filter(({ Name }) => Name?.startsWith(prefix)).map(
-        async ({ ApiId }) => {
-          const result = await this.deleteApi({ ApiId });
-          return result;
-        }
-        /* c8 ignore next */
-      ) ?? [];
-    const results = Promise.all(promises);
-    return results;
-  }
-
   async getApiByName(name: string) {
     const { Items } = await this.getApis({});
     const result = Items?.find(({ Name }) => Name === name);

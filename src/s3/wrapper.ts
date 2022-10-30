@@ -123,19 +123,4 @@ export class S3Wrapper {
     });
     return result;
   }
-
-  async deleteBucketsByPrefix(prefix: string) {
-    const { Buckets } = await this.listBuckets({});
-    const promises =
-      Buckets?.filter(({ Name }) => Name?.startsWith(prefix)).map(
-        async ({ Name }) => {
-          await this.deleteAllObjects(Name);
-          const result = await this.deleteBucket({ Bucket: Name });
-          return result;
-        }
-        /* c8 ignore next */
-      ) ?? [];
-    const results = await Promise.all(promises);
-    return results;
-  }
 }

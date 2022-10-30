@@ -23,7 +23,7 @@ import {
   PutIntegrationCommand,
   PutMethodCommand,
 } from "@aws-sdk/client-api-gateway";
-import { defaultClientConfig, sleep } from "../utils";
+import { defaultClientConfig } from "../utils";
 import type {
   APIGatewayClientConfig,
   CreateDeploymentCommandInput,
@@ -81,18 +81,7 @@ export class APIGatewayWrapper {
     params: CreateRestApiCommandInput
   ): Promise<CreateRestApiCommandOutput> {
     const command = new CreateRestApiCommand(params);
-    const result = await this.client
-      .send(command)
-      .catch(async (error: Error) => {
-        /* c8 ignore next 7 */
-        if (error.name === "TooManyRequestsException") {
-          await sleep(3);
-          const result = await this.createRestApi(params);
-          return result;
-        } else {
-          throw error;
-        }
-      });
+    const result = await this.client.send(command);
     return result;
   }
 
@@ -130,18 +119,7 @@ export class APIGatewayWrapper {
     params: DeleteRestApiCommandInput
   ): Promise<DeleteRestApiCommandOutput> {
     const command = new DeleteRestApiCommand(params);
-    const result = await this.client
-      .send(command)
-      .catch(async (error: Error) => {
-        /* c8 ignore next 7 */
-        if (error.name === "TooManyRequestsException") {
-          await sleep(30);
-          const result = await this.deleteRestApi(params);
-          return result;
-        } else {
-          throw error;
-        }
-      });
+    const result = await this.client.send(command);
     return result;
   }
 
@@ -215,57 +193,6 @@ export class APIGatewayWrapper {
     const command = new PutMethodCommand(params);
     const result = await this.client.send(command);
     return result;
-  }
-
-  async deleteAllMethods(restApiId?: string, resourceId?: string) {
-    const { resourceMethods } = await this.getResource({
-      restApiId,
-      resourceId,
-    });
-    /* c8 ignore next */
-    const promises = Object.keys(resourceMethods ?? {}).map(
-      async httpMethod => {
-        const result = await this.deleteMethod({
-          restApiId,
-          resourceId,
-          httpMethod,
-        });
-        return result;
-      }
-    );
-    const results = await Promise.all(promises);
-    return results;
-  }
-
-  async deleteAllResources(restApiId?: string) {
-    const { items } = await this.getResources({ restApiId });
-    const promises =
-      items
-        ?.filter(({ path }) => path !== "/")
-        .map(async ({ id }) => {
-          const result = await this.deleteResource({
-            resourceId: id,
-            restApiId,
-          });
-          return result;
-          /* c8 ignore next */
-        }) ?? [];
-    const results = await Promise.all(promises);
-    return results;
-  }
-
-  async deleteRestApisByPrefix(prefix: string) {
-    const { items } = await this.getRestApis({});
-    const promises =
-      items
-        ?.filter(({ name }) => name?.startsWith(prefix))
-        .map(async ({ id }) => {
-          const result = await this.deleteRestApi({ restApiId: id });
-          return result;
-          /* c8 ignore next */
-        }) ?? [];
-    const results = await Promise.all(promises);
-    return results;
   }
 
   async getResourceByPath(path: string, restApiId?: string) {

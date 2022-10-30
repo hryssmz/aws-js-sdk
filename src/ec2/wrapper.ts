@@ -136,20 +136,6 @@ export class EC2Wrapper {
     return result;
   }
 
-  async deleteSecurityGroupsByPrefix(prefix: string) {
-    const { SecurityGroups } = await this.describeSecurityGroups({});
-    const promises =
-      SecurityGroups?.filter(({ GroupName }) =>
-        GroupName?.startsWith(prefix)
-      ).map(async ({ GroupId }) => {
-        const result = await this.deleteSecurityGroup({ GroupId });
-        return result;
-        /* c8 ignore next */
-      }) ?? [];
-    const results = await Promise.all(promises);
-    return results;
-  }
-
   async deleteAllSecurityGroupRules(GroupName: string) {
     const rules = await this.listSecurityGroupRules(GroupName);
     if (rules.length === 0) {
@@ -163,17 +149,6 @@ export class EC2Wrapper {
       SecurityGroupRuleIds,
     });
     return result;
-  }
-
-  async deleteAllInstances(keyName: string, groupName: string) {
-    const instances = await this.listInstances(keyName, groupName);
-    if (instances.length === 0) {
-      return;
-    }
-    /* c8 ignore next */
-    const InstanceIds = instances.map(({ InstanceId }) => InstanceId ?? "");
-    const results = this.terminateInstances({ InstanceIds });
-    return results;
   }
 
   async getKeyPairByName(name: string) {

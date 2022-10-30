@@ -441,68 +441,6 @@ export class IAMWrapper {
     return results;
   }
 
-  async deleteGroupsByPrefix(prefix: string) {
-    const { Groups } = await this.listGroups({});
-    const promises =
-      Groups?.filter(({ GroupName }) => GroupName?.startsWith(prefix)).map(
-        async ({ GroupName }) => {
-          const result = await this.deleteGroup({ GroupName });
-          return result;
-        }
-        /* c8 ignore next */
-      ) ?? [];
-    const results = await Promise.all(promises);
-    return results;
-  }
-
-  async deletePoliciesByPrefix(prefix: string) {
-    const { Policies } = await this.listPolicies({ Scope: "Local" });
-    const promises =
-      Policies?.filter(({ PolicyName }) => PolicyName?.startsWith(prefix)).map(
-        async ({ Arn }) => {
-          await this.deleteAllPolicyVersions(Arn);
-          const result = await this.deletePolicy({ PolicyArn: Arn });
-          return result;
-        }
-        /* c8 ignore next */
-      ) ?? [];
-    const results = await Promise.all(promises);
-    return results;
-  }
-
-  async deleteRolesByPrefix(prefix: string) {
-    const { Roles } = await this.listRoles({});
-    const promises =
-      Roles?.filter(({ RoleName }) => RoleName?.startsWith(prefix)).map(
-        async ({ RoleName }) => {
-          await this.detachAllRolePolicies(RoleName);
-          await this.deleteAllRolePolicies(RoleName);
-          const result = await this.deleteRole({ RoleName });
-          return result;
-        }
-        /* c8 ignore next */
-      ) ?? [];
-    const results = await Promise.all(promises);
-    return results;
-  }
-
-  async deleteUsersByPrefix(prefix: string) {
-    const { Users } = await this.listUsers({});
-    const promises =
-      Users?.filter(({ UserName }) => UserName?.startsWith(prefix)).map(
-        async ({ UserName }) => {
-          await this.detachAllUserPolicies(UserName);
-          await this.deleteAllUserPolicies(UserName);
-          await this.deleteAllUserAccessKeys(UserName);
-          const result = await this.deleteUser({ UserName });
-          return result;
-        }
-        /* c8 ignore next */
-      ) ?? [];
-    const results = await Promise.all(promises);
-    return results;
-  }
-
   async detachAllRolePolicies(RoleName?: string) {
     const { AttachedPolicies } = await this.listAttachedRolePolicies({
       RoleName,
