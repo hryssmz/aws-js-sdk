@@ -10,6 +10,11 @@ import { DateTime } from "luxon";
 
 export { accountAlias, defaultClientConfig, isLocal, region } from "../config";
 
+export type Action = (...args: string[]) => Promise<string>;
+
+export const camelize = (s: string) =>
+  s.replace(/-./g, x => x[1].toUpperCase());
+
 export const sleep = async (sec: number) => {
   await new Promise(resolve => setTimeout(resolve, sec * 1000));
 };
