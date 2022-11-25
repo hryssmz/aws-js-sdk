@@ -4,9 +4,9 @@
   "description": "## 1. Setup",
   "main": "index.js",
   "scripts": {
-    "action": "ts-node src/action.ts",
-    "action:js": "node dist/action.js",
-    "build": "npx tsc",
+    "action-ts": "ts-node src/action.ts",
+    "action": "node dist/action.js",
+    "build": "rm -rf dist/ && npx tsc",
     "lint": "tsc --noEmit -p tsconfig.json && eslint --max-warnings=0 .",
     "start": "ts-node src/index.ts",
     "test": "jest -i -o --coverage=false",

@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: REST Api with Lambda non-proxy integration
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: "sts:AssumeRole"
+      Description: Lambda execution role
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  GreetingFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Architectures:
+        - x86_64
+      Code:
+        ZipFile: |
+          "use strict";
+          const days = [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+          ];
+          const times = ["morning", "afternoon", "evening", "night", "day"];
+
+          console.log("Loading function");
+
+          exports.handler = function (event, context, callback) {
+            // Parse the input for the name, city, time and day property values
+            const name = event.name === undefined ? "you" : event.name;
+            const city = event.city === undefined ? "World" : event.city;
+            const time = times.indexOf(event.time) < 0 ? "day" : event.time;
+            const day = days.indexOf(event.day) < 0 ? null : event.day;
+
+            // Generate a greeting
+            const greeting = `Good ${time}, ${name} of ${city}.${
+              day ? " Happy " + day + "!" : ""
+            }`;
+
+            // Log the greeting to CloudWatch
+            console.log("Hello: ", greeting);
+
+            // Return a greeting to the caller
+            callback(null, { greeting });
+          };
+      Description: Greeting Function
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: nodejs16.x
+  GreetingFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GreetingFunction
+      Principal: apigateway.amazonaws.com
+  NonProxyApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: Non-proxy API
+      EndpointConfiguration:
+        Types: [REGIONAL]
+      Name: NonProxyApi
+  CityResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt NonProxyApi.RootResourceId
+      PathPart: "{city}"
+      RestApiId: !Ref NonProxyApi
+  AnyCityMethodRequestModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: application/json
+      Description: AnyCityMethod request model
+      Name: AnyCityMethodRequestModel
+      RestApiId: !Ref NonProxyApi
+      Schema:
+        $schema: "http://json-schema.org/draft-04/schema#"
+        title: AnyCityMethodRequestModel
+        type: object
+        properties:
+          callerName:
+            type: string
+  AnyCityMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: ANY
+      Integration:
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+          - SelectionPattern: ""
+            StatusCode: 200
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestTemplates:
+          application/json: |
+            #set($inputRoot = $input.path('$'))
+            {
+              "city": "$input.params('city')",
+              "time": "$input.params('time')",
+              "day": "$input.params('day')",
+              "name": "$inputRoot.callerName"
+            }
+        Type: AWS
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GreetingFunction.Arn}/invocations"
+      MethodResponses:
+        - StatusCode: 200
+      OperationName: AnyCityMethod
+      RequestModels:
+        application/json: !Ref AnyCityMethodRequestModel
+      RequestParameters:
+        method.request.querystring.time: true
+        method.request.header.day: true
+      ResourceId: !Ref CityResource
+      RestApiId: !Ref NonProxyApi
+  NonProxyApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: AnyCityMethod
+    Properties:
+      Description: Non-proxy API deployment
+      RestApiId: !Ref NonProxyApi
+      StageDescription:
+        Description: Non-proxy API test stage
+      StageName: test
+Outputs:
+  NonProxyApiTestUrl:
+    Value: !Sub "https://${NonProxyApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"

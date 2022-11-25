@@ -40,7 +40,7 @@ async function deleteDynamoItem() {
 async function deleteDynamoTable() {
   const dynamodb = new DynamoDBWrapper();
   await dynamodb.deleteTable({ TableName: tableName });
-  return tableName;
+  return JSON.stringify(tableName, null, 2);
 }
 
 async function describeDynamoTable() {

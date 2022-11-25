@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Sample lambda stack
+Resources:
+  AxiosLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      CompatibleArchitectures:
+        - x86_64
+      CompatibleRuntimes:
+        - nodejs16.x
+      Content:
+        S3Bucket: my-bucket-hryssmz
+        S3Key: AxiosLayer.zip
+      Description: Axios layer
+  SampleLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: "sts:AssumeRole"
+      Description: Sample lambda role
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  SampleFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Architectures:
+        - x86_64
+      Code:
+        ZipFile: |
+          const axios = require("axios");
+
+          const getGlobalIp = async () => {
+            const { data } = await axios("https://ifconfig.me");
+            return data;
+          };
+
+          exports.handler = async (event, context) => {
+            console.log("Begin execute handler");
+            const body = {
+              path: event.path,
+              logStreamName: context.logStreamName,
+              message: "Hello World",
+              isLocal: process.env.IS_LOCAL,
+              globalIp: await getGlobalIp(),
+            };
+            const headers = {
+              "X-Custom-Header": "My custom value",
+            };
+            const response = {
+              statusCode: 200,
+              headers,
+              body: JSON.stringify(body),
+            };
+            return response;
+          };
+      Description: Sample function
+      Environment:
+        Variables:
+          IS_LOCAL: true
+      Handler: index.handler
+      Layers:
+        - !Ref AxiosLayer
+      Role: !GetAtt SampleLambdaRole.Arn
+      Runtime: nodejs16.x
+      Timeout: 3
+  SampleFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SampleFunction
+      Principal: apigateway.amazonaws.com
+  SampleApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: Sample API
+      EndpointConfiguration:
+        Types: [REGIONAL]
+      Name: SampleApi
+  GetRootMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SampleFunction.Arn}/invocations"
+      OperationName: GetRootMethod
+      ResourceId: !GetAtt SampleApi.RootResourceId
+      RestApiId: !Ref SampleApi
+  SampleApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: GetRootMethod
+    Properties:
+      Description: Sample API deployment
+      RestApiId: !Ref SampleApi
+      StageDescription:
+        Description: Sample API test stage
+      StageName: test
+Outputs:
+  SampleApiTestUrl:
+    Value: !Sub "https://${SampleApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"

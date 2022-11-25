@@ -8,13 +8,15 @@ import {
 } from "@aws-sdk/client-lambda";
 import { LambdaWrapper } from ".";
 import { IAMWrapper } from "../iam";
-import { zip } from "../utils";
+import { S3Wrapper } from "../s3";
+import { accountAlias, zip } from "../utils";
 import type { UpdateFunctionConfigurationCommandInput } from "@aws-sdk/client-lambda";
 import type { Action } from "../utils";
 
 const funcDir = `${__dirname}/my-func`;
 const funcName = "my-function";
-const codePath = `${__dirname}/files/${funcName}.js`;
+const codeDir = `${__dirname}/../../src/lambda/files`;
+const codePath = `${codeDir}/${funcName}.js`;
 const payload = { path: "/my-endpoint" };
 const lambdaRoleName = "lambda-basic-execution-role";
 const lambdaPolicyArn =
@@ -23,6 +25,9 @@ const funcConfig: UpdateFunctionConfigurationCommandInput = {
   FunctionName: funcName,
   Environment: { Variables: { foo: "bar" } },
 };
+const bucket = `my-bucket-${accountAlias}`;
+const layerName = "AxiosLayer";
+const layerDir = `${__dirname}/../../src/lambda/files/axios-layer`;
 
 async function configFunction() {
   const lambda = new LambdaWrapper();
@@ -116,6 +121,13 @@ async function updateFunction() {
   return JSON.stringify(FunctionArn, null, 2);
 }
 
+async function uploadLayerZip() {
+  const s3 = new S3Wrapper();
+  const Body = await zip(layerDir);
+  await s3.putObject({ Bucket: bucket, Key: `${layerName}.zip`, Body });
+  return JSON.stringify(layerName, null, 2);
+}
+
 const actions: Record<string, Action> = {
   configFunction,
   createFunction,
@@ -124,6 +136,7 @@ const actions: Record<string, Action> = {
   deleteLambdaRole,
   invokeFunction,
   updateFunction,
+  uploadLayerZip,
 };
 
 export default actions;

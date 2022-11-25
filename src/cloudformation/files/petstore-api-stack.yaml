@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: PetStore API stack
+Resources:
+  PetStoreApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: Simple PetStore (AWS CLI)
+      EndpointConfiguration:
+        Types: [EDGE]
+      Name: PetStoreApi
+  PetsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt PetStoreApi.RootResourceId
+      PathPart: pets
+      RestApiId: !Ref PetStoreApi
+  PetIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !Ref PetsResource
+      PathPart: "{petId}"
+      RestApiId: !Ref PetStoreApi
+  GetPetsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        IntegrationHttpMethod: GET
+        IntegrationResponses:
+          - SelectionPattern: ""
+            StatusCode: 200
+        Type: HTTP
+        Uri: http://petstore-demo-endpoint.execute-api.com/petstore/pets
+      MethodResponses:
+        - StatusCode: 200
+      OperationName: GetPets
+      ResourceId: !Ref PetsResource
+      RestApiId: !Ref PetStoreApi
+  GetPetIdMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        IntegrationHttpMethod: GET
+        IntegrationResponses:
+          - SelectionPattern: ""
+            StatusCode: 200
+        RequestParameters:
+          integration.request.path.id: method.request.path.petId
+        Type: HTTP
+        Uri: http://petstore-demo-endpoint.execute-api.com/petstore/pets/{id}
+      MethodResponses:
+        - StatusCode: 200
+      OperationName: GetPetId
+      RequestParameters:
+        method.request.path.petId: true
+      ResourceId: !Ref PetIdResource
+      RestApiId: !Ref PetStoreApi
+  PetStoreApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: GetPetsMethod
+    Properties:
+      Description: PetStore API deployment
+      RestApiId: !Ref PetStoreApi
+      StageDescription:
+        Description: PetStore API test stage
+      StageName: test
+Outputs:
+  PetStoreApiTestUrl:
+    Value: !Sub "https://${PetStoreApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"

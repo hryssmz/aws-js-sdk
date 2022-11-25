@@ -1,0 +1,44 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: REST Api with HTTP proxy integration
+Resources:
+  HttpProxyApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: Http proxy API
+      EndpointConfiguration:
+        Types: [REGIONAL]
+      Name: HttpProxyApi
+  ProxyResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt HttpProxyApi.RootResourceId
+      PathPart: "{proxy+}"
+      RestApiId: !Ref HttpProxyApi
+  AnyProxyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: ANY
+      Integration:
+        IntegrationHttpMethod: ANY
+        RequestParameters:
+          integration.request.path.proxy: method.request.path.proxy
+        Type: HTTP_PROXY
+        Uri: "http://petstore-demo-endpoint.execute-api.com/petstore/{proxy}"
+      OperationName: AnyProxyMethod
+      RequestParameters:
+        method.request.path.proxy: true
+      ResourceId: !Ref ProxyResource
+      RestApiId: !Ref HttpProxyApi
+  HttpProxyApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: AnyProxyMethod
+    Properties:
+      Description: Http proxy API deployment
+      RestApiId: !Ref HttpProxyApi
+      StageDescription:
+        Description: Http proxy API test stage
+      StageName: test
+Outputs:
+  HttpProxyApiTestUrl:
+    Value: !Sub "https://${HttpProxyApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"

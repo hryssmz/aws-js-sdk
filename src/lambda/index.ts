@@ -7,6 +7,7 @@ import {
   InvokeCommand,
   LambdaClient,
   ListFunctionsCommand,
+  PublishLayerVersionCommand,
   RemovePermissionCommand,
   UpdateFunctionCodeCommand,
   UpdateFunctionConfigurationCommand,
@@ -20,6 +21,7 @@ import type {
   InvokeCommandInput,
   LambdaClientConfig,
   ListFunctionsCommandInput,
+  PublishLayerVersionCommandInput,
   RemovePermissionCommandInput,
   UpdateFunctionCodeCommandInput,
   UpdateFunctionConfigurationCommandInput,
@@ -68,6 +70,12 @@ export class LambdaWrapper {
 
   async listFunctions(params: ListFunctionsCommandInput) {
     const command = new ListFunctionsCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async publishLayerVersion(params: PublishLayerVersionCommandInput) {
+    const command = new PublishLayerVersionCommand(params);
     const result = await this.client.send(command);
     return result;
   }

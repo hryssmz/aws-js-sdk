@@ -8,7 +8,7 @@ const bucket = `my-bucket-${accountAlias}`;
 const objectKey = "my-object.txt";
 const objectBody = "My Body";
 const binaryKey = "s3-logo.png";
-const binaryPath = `${__dirname}/files/s3-logo.png`;
+const binaryPath = `${__dirname}/../../src/s3/files/s3-logo.png`;
 
 async function createBucket() {
   const s3 = new S3Wrapper();

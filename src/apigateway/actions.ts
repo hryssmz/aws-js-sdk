@@ -12,7 +12,7 @@ const resourcePath = `${resourceParent.replace(/\/$/, "")}/${pathPart}`;
 const restMethod = "GET";
 const restAuth = "NONE";
 const stageName = "test";
-const lambdaPolicyStmtId = "APIGateway_InvokeFunction";
+const lambdaPolicyStmtId = "MyAPIGatewayInvokeFunction";
 
 async function createRestApi() {
   const apigateway = new APIGatewayWrapper();

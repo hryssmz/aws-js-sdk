@@ -3,14 +3,18 @@ import {
   CloudFormationClient,
   CreateStackCommand,
   DeleteStackCommand,
+  DescribeStacksCommand,
   UpdateStackCommand,
+  ValidateTemplateCommand,
 } from "@aws-sdk/client-cloudformation";
 import { defaultClientConfig } from "../utils";
 import type {
   CloudFormationClientConfig,
   CreateStackCommandInput,
   DeleteStackCommandInput,
+  DescribeStacksCommandInput,
   UpdateStackCommandInput,
+  ValidateTemplateCommandInput,
 } from "@aws-sdk/client-cloudformation";
 
 export const defaultCloudFormationClientConfig = {
@@ -39,8 +43,20 @@ export class CloudFormationWrapper {
     return result;
   }
 
+  async describeStacks(params: DescribeStacksCommandInput) {
+    const command = new DescribeStacksCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
   async updateStack(params: UpdateStackCommandInput) {
     const command = new UpdateStackCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async validateTemplate(params: ValidateTemplateCommandInput) {
+    const command = new ValidateTemplateCommand(params);
     const result = await this.client.send(command);
     return result;
   }
