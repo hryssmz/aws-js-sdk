@@ -1,0 +1,98 @@
+# stepfunctions/templates/path-examples.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: InputPath, ResultPath and OutputPath Examples
+Resources:
+  LambdaFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for Lambda Function
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  HelloFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Architectures:
+        - x86_64
+      Code:
+        ZipFile: |
+          exports.handler = (event, context, callback) => {
+            callback(null, "Hello from " + event.who + "!");
+          };
+      Description: Lambda function returns a greeting message
+      Handler: index.handler
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+      Runtime: nodejs14.x
+  StateMachineExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Execution policy for State Machine
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+              - xray:GetSamplingRules
+              - xray:GetSamplingTargets
+            Resource:
+              - "*"
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - "*"
+  StateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for State Machine
+      ManagedPolicyArns:
+        - Ref: StateMachineExecutionPolicy
+  LambdaStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      Definition:
+        Comment: A Hello World example of the Amazon States Language using an AWS Lambda function
+        StartAt: HelloWorld
+        States:
+          HelloWorld:
+            Type: Task
+            Resource:
+              Fn::GetAtt: HelloFunction.Arn
+            InputPath: $.lambda
+            ResultPath: $.data.lambdaresult
+            OutputPath: $.data
+            End: true
+      RoleArn:
+        Fn::GetAtt: StateMachineExecutionRole.Arn
+      StateMachineType: STANDARD
+Outputs:
+  LambdaFunctionExecutionRoleArn:
+    Value:
+      Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+  HelloFunctionArn:
+    Value:
+      Fn::GetAtt: HelloFunction.Arn
+  StateMachineExecutionRoleArn:
+    Value:
+      Fn::GetAtt: StateMachineExecutionRole.Arn
+  LambdaStateMachineArn:
+    Value:
+      Ref: LambdaStateMachine

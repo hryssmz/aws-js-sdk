@@ -1,0 +1,123 @@
+# stepfunctions/templates/catch-failure-state-machine.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Handling error conditions using a Step Functions State Machine
+Resources:
+  LambdaFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for Lambda Function
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  FailFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Architectures:
+        - x86_64
+      Code:
+        ZipFile: |
+          exports.handler = async (event, context) => {
+            function CustomError(message) {
+              this.name = "CustomError";
+              this.message = message;
+            }
+            CustomError.prototype = new Error();
+
+            throw new CustomError("This is a custom error!");
+          };
+      Description: Lambda function returns a custom error
+      Handler: index.handler
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+      Runtime: nodejs14.x
+  StateMachineExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Execution policy for State Machine
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+              - xray:GetSamplingRules
+              - xray:GetSamplingTargets
+            Resource:
+              - "*"
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - "*"
+  StateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for State Machine
+      ManagedPolicyArns:
+        - Ref: StateMachineExecutionPolicy
+  CatchFailureStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      Definition:
+        Comment: A Catch example of the Amazon States Language using an AWS Lambda function
+        StartAt: CreateAccount
+        States:
+          CreateAccount:
+            Type: Task
+            Resource:
+              Fn::GetAtt: FailFunction.Arn
+            Catch:
+              - ErrorEquals:
+                  - CustomError
+                Next: CustomErrorFallback
+              - ErrorEquals:
+                  - States.TaskFailed
+                Next: ReservedTypeFallback
+              - ErrorEquals:
+                  - States.ALL
+                Next: CatchAllFallback
+            End: true
+          CustomErrorFallback:
+            Type: Pass
+            Result: This is a fallback from a custom Lambda function exception
+            End: true
+          ReservedTypeFallback:
+            Type: Pass
+            Result: This is a fallback from a reserved error code
+            End: true
+          CatchAllFallback:
+            Type: Pass
+            Result: This is a fallback from any error code
+            End: true
+      RoleArn:
+        Fn::GetAtt: StateMachineExecutionRole.Arn
+      StateMachineType: STANDARD
+Outputs:
+  LambdaFunctionExecutionRoleArn:
+    Value:
+      Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+  FailFunctionArn:
+    Value:
+      Fn::GetAtt: FailFunction.Arn
+  StateMachineExecutionRoleArn:
+    Value:
+      Fn::GetAtt: StateMachineExecutionRole.Arn
+  CatchFailureStateMachineArn:
+    Value:
+      Ref: CatchFailureStateMachine

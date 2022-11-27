@@ -1,17 +1,19 @@
+# apigateway/templates/lambda-non-proxy-api.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: REST Api with Lambda non-proxy integration
 Resources:
-  LambdaExecutionRole:
+  LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          Effect: Allow
-          Principal:
-            Service: lambda.amazonaws.com
-          Action: "sts:AssumeRole"
-      Description: Lambda execution role
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for Lambda Function
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
   GreetingFunction:
@@ -55,13 +57,15 @@ Resources:
           };
       Description: Greeting Function
       Handler: index.handler
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Runtime: nodejs16.x
   GreetingFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !Ref GreetingFunction
+      FunctionName:
+        Ref: GreetingFunction
       Principal: apigateway.amazonaws.com
   NonProxyApi:
     Type: AWS::ApiGateway::RestApi
@@ -73,16 +77,19 @@ Resources:
   CityResource:
     Type: AWS::ApiGateway::Resource
     Properties:
-      ParentId: !GetAtt NonProxyApi.RootResourceId
+      ParentId:
+        Fn::GetAtt: NonProxyApi.RootResourceId
       PathPart: "{city}"
-      RestApiId: !Ref NonProxyApi
+      RestApiId:
+        Ref: NonProxyApi
   AnyCityMethodRequestModel:
     Type: AWS::ApiGateway::Model
     Properties:
       ContentType: application/json
       Description: AnyCityMethod request model
       Name: AnyCityMethodRequestModel
-      RestApiId: !Ref NonProxyApi
+      RestApiId:
+        Ref: NonProxyApi
       Schema:
         $schema: "http://json-schema.org/draft-04/schema#"
         title: AnyCityMethodRequestModel
@@ -111,26 +118,33 @@ Resources:
               "name": "$inputRoot.callerName"
             }
         Type: AWS
-        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GreetingFunction.Arn}/invocations"
+        Uri:
+          Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GreetingFunction.Arn}/invocations"
       MethodResponses:
         - StatusCode: 200
       OperationName: AnyCityMethod
       RequestModels:
-        application/json: !Ref AnyCityMethodRequestModel
+        application/json:
+          Ref: AnyCityMethodRequestModel
       RequestParameters:
         method.request.querystring.time: true
         method.request.header.day: true
-      ResourceId: !Ref CityResource
-      RestApiId: !Ref NonProxyApi
+      ResourceId:
+        Ref: CityResource
+      RestApiId:
+        Ref: NonProxyApi
   NonProxyApiDeployment:
     Type: AWS::ApiGateway::Deployment
-    DependsOn: AnyCityMethod
+    DependsOn:
+      - AnyCityMethod
     Properties:
       Description: Non-proxy API deployment
-      RestApiId: !Ref NonProxyApi
+      RestApiId:
+        Ref: NonProxyApi
       StageDescription:
         Description: Non-proxy API test stage
       StageName: test
 Outputs:
   NonProxyApiTestUrl:
-    Value: !Sub "https://${NonProxyApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"
+    Value:
+      Fn::Sub: "https://${NonProxyApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"

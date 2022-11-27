@@ -1,3 +1,4 @@
+# apigateway/templates/petstore-api.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: PetStore API stack
 Resources:
@@ -11,15 +12,19 @@ Resources:
   PetsResource:
     Type: AWS::ApiGateway::Resource
     Properties:
-      ParentId: !GetAtt PetStoreApi.RootResourceId
+      ParentId:
+        Fn::GetAtt: PetStoreApi.RootResourceId
       PathPart: pets
-      RestApiId: !Ref PetStoreApi
+      RestApiId:
+        Ref: PetStoreApi
   PetIdResource:
     Type: AWS::ApiGateway::Resource
     Properties:
-      ParentId: !Ref PetsResource
+      ParentId:
+        Ref: PetsResource
       PathPart: "{petId}"
-      RestApiId: !Ref PetStoreApi
+      RestApiId:
+        Ref: PetStoreApi
   GetPetsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -35,8 +40,10 @@ Resources:
       MethodResponses:
         - StatusCode: 200
       OperationName: GetPets
-      ResourceId: !Ref PetsResource
-      RestApiId: !Ref PetStoreApi
+      ResourceId:
+        Ref: PetsResource
+      RestApiId:
+        Ref: PetStoreApi
   GetPetIdMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -56,17 +63,23 @@ Resources:
       OperationName: GetPetId
       RequestParameters:
         method.request.path.petId: true
-      ResourceId: !Ref PetIdResource
-      RestApiId: !Ref PetStoreApi
+      ResourceId:
+        Ref: PetIdResource
+      RestApiId:
+        Ref: PetStoreApi
   PetStoreApiDeployment:
     Type: AWS::ApiGateway::Deployment
-    DependsOn: GetPetsMethod
+    DependsOn:
+      - GetPetsMethod
+      - GetPetIdMethod
     Properties:
       Description: PetStore API deployment
-      RestApiId: !Ref PetStoreApi
+      RestApiId:
+        Ref: PetStoreApi
       StageDescription:
         Description: PetStore API test stage
       StageName: test
 Outputs:
   PetStoreApiTestUrl:
-    Value: !Sub "https://${PetStoreApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"
+    Value:
+      Fn::Sub: "https://${PetStoreApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"

@@ -126,6 +126,21 @@ async function deleteRestResource() {
   return JSON.stringify(resourcePath, null, 2);
 }
 
+async function getRestMethod() {
+  const apigateway = new APIGatewayWrapper();
+  const { id: restApiId } = await apigateway.getRestApiByName(restApiName);
+  const { id: resourceId } = await apigateway.getResourceByPath(
+    resourcePath,
+    restApiId
+  );
+  const result = await apigateway.getMethod({
+    restApiId,
+    resourceId,
+    httpMethod: restMethod,
+  });
+  return JSON.stringify(result, null, 2);
+}
+
 async function showRestApi() {
   const apigateway = new APIGatewayWrapper();
   const { id, name } = await apigateway.getRestApiByName(restApiName);
@@ -146,6 +161,7 @@ const actions: Record<string, Action> = {
   deleteRestDeployment,
   deleteRestMethod,
   deleteRestResource,
+  getRestMethod,
   showRestApi,
 };
 

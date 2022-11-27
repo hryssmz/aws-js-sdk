@@ -1,3 +1,4 @@
+# apigateway/templates/http-proxy-api.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: REST Api with HTTP proxy integration
 Resources:
@@ -11,9 +12,11 @@ Resources:
   ProxyResource:
     Type: AWS::ApiGateway::Resource
     Properties:
-      ParentId: !GetAtt HttpProxyApi.RootResourceId
+      ParentId:
+        Fn::GetAtt: HttpProxyApi.RootResourceId
       PathPart: "{proxy+}"
-      RestApiId: !Ref HttpProxyApi
+      RestApiId:
+        Ref: HttpProxyApi
   AnyProxyMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -28,17 +31,22 @@ Resources:
       OperationName: AnyProxyMethod
       RequestParameters:
         method.request.path.proxy: true
-      ResourceId: !Ref ProxyResource
-      RestApiId: !Ref HttpProxyApi
+      ResourceId:
+        Ref: ProxyResource
+      RestApiId:
+        Ref: HttpProxyApi
   HttpProxyApiDeployment:
     Type: AWS::ApiGateway::Deployment
-    DependsOn: AnyProxyMethod
+    DependsOn:
+      - AnyProxyMethod
     Properties:
       Description: Http proxy API deployment
-      RestApiId: !Ref HttpProxyApi
+      RestApiId:
+        Ref: HttpProxyApi
       StageDescription:
         Description: Http proxy API test stage
       StageName: test
 Outputs:
   HttpProxyApiTestUrl:
-    Value: !Sub "https://${HttpProxyApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"
+    Value:
+      Fn::Sub: "https://${HttpProxyApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"

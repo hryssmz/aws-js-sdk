@@ -1,17 +1,19 @@
+# apigateway/templates/lambda-proxy-api.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Lambda proxy API stack
 Resources:
-  LambdaExecutionRole:
+  LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          Effect: Allow
-          Principal:
-            Service: lambda.amazonaws.com
-          Action: "sts:AssumeRole"
-      Description: Lambda execution role
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for Lambda Function
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
   GreetingFunction:
@@ -78,13 +80,15 @@ Resources:
           };
       Description: Greeting Function
       Handler: index.handler
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Runtime: nodejs16.x
   GreetingFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !Ref GreetingFunction
+      FunctionName:
+        Ref: GreetingFunction
       Principal: apigateway.amazonaws.com
   LambdaProxyApi:
     Type: AWS::ApiGateway::RestApi
@@ -96,9 +100,11 @@ Resources:
   HelloworldResource:
     Type: AWS::ApiGateway::Resource
     Properties:
-      ParentId: !GetAtt LambdaProxyApi.RootResourceId
+      ParentId:
+        Fn::GetAtt: LambdaProxyApi.RootResourceId
       PathPart: helloworld
-      RestApiId: !Ref LambdaProxyApi
+      RestApiId:
+        Ref: LambdaProxyApi
   AnyHelloworldMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -107,19 +113,25 @@ Resources:
       Integration:
         IntegrationHttpMethod: POST
         Type: AWS_PROXY
-        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GreetingFunction.Arn}/invocations"
+        Uri:
+          Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GreetingFunction.Arn}/invocations"
       OperationName: AnyHelloworld
-      ResourceId: !Ref HelloworldResource
-      RestApiId: !Ref LambdaProxyApi
+      ResourceId:
+        Ref: HelloworldResource
+      RestApiId:
+        Ref: LambdaProxyApi
   LambdaProxyApiDeployment:
     Type: AWS::ApiGateway::Deployment
-    DependsOn: AnyHelloworldMethod
+    DependsOn:
+      - AnyHelloworldMethod
     Properties:
       Description: Lambda Proxy API deployment
-      RestApiId: !Ref LambdaProxyApi
+      RestApiId:
+        Ref: LambdaProxyApi
       StageDescription:
         Description: Lambda Proxy API test stage
       StageName: test
 Outputs:
   LambdaProxyApiTestUrl:
-    Value: !Sub "https://${LambdaProxyApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"
+    Value:
+      Fn::Sub: "https://${LambdaProxyApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"

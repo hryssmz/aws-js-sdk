@@ -1,0 +1,85 @@
+# stepfunctions/templates/execution-api-gateway.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  APIGatewayExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Execution policy for API Gateway
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - states:DescribeExecution
+              - states:StartExecution
+            Resource:
+              - "*"
+  APIGatewayExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for API Gateway
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+        - arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess
+  StartExecutionApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: StartExecution API
+      EndpointConfiguration:
+        Types: [REGIONAL]
+      Name: StartExecutionAPI
+  ExecutionResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId:
+        Fn::GetAtt: StartExecutionApi.RootResourceId
+      PathPart: execution
+      RestApiId:
+        Ref: StartExecutionApi
+  PostExecutionMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+          - SelectionPattern: 200
+            StatusCode: 200
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:states:action/StartExecution
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: PostExecution
+      ResourceId:
+        Ref: ExecutionResource
+      RestApiId:
+        Ref: StartExecutionApi
+  StartExecutionDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - PostExecutionMethod
+    Properties:
+      Description: StartExecution API deployment
+      RestApiId:
+        Ref: StartExecutionApi
+      StageDescription:
+        Description: StartExecution API test stage
+      StageName: test
+Outputs:
+  StartExecutionApiTestUrl:
+    Value:
+      Fn::Sub: https://${StartExecutionApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test

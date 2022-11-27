@@ -1,5 +1,6 @@
+# lambda/templates/sample-lambda-layer.yml
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Sample lambda stack
+Description: Sample Lambda Layer stack
 Resources:
   AxiosLayer:
     Type: AWS::Lambda::LayerVersion
@@ -12,17 +13,18 @@ Resources:
         S3Bucket: my-bucket-hryssmz
         S3Key: AxiosLayer.zip
       Description: Axios layer
-  SampleLambdaRole:
+  LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          Effect: Allow
-          Principal:
-            Service: lambda.amazonaws.com
-          Action: "sts:AssumeRole"
-      Description: Sample lambda role
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for Lambda Function
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
   SampleFunction:
@@ -64,15 +66,17 @@ Resources:
           IS_LOCAL: true
       Handler: index.handler
       Layers:
-        - !Ref AxiosLayer
-      Role: !GetAtt SampleLambdaRole.Arn
+        - Ref: AxiosLayer
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Runtime: nodejs16.x
       Timeout: 3
   SampleFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !Ref SampleFunction
+      FunctionName:
+        Ref: SampleFunction
       Principal: apigateway.amazonaws.com
   SampleApi:
     Type: AWS::ApiGateway::RestApi
@@ -89,19 +93,25 @@ Resources:
       Integration:
         IntegrationHttpMethod: POST
         Type: AWS_PROXY
-        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SampleFunction.Arn}/invocations"
+        Uri:
+          Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SampleFunction.Arn}/invocations"
       OperationName: GetRootMethod
-      ResourceId: !GetAtt SampleApi.RootResourceId
-      RestApiId: !Ref SampleApi
+      ResourceId:
+        Fn::GetAtt: SampleApi.RootResourceId
+      RestApiId:
+        Ref: SampleApi
   SampleApiDeployment:
     Type: AWS::ApiGateway::Deployment
-    DependsOn: GetRootMethod
+    DependsOn:
+      - GetRootMethod
     Properties:
       Description: Sample API deployment
-      RestApiId: !Ref SampleApi
+      RestApiId:
+        Ref: SampleApi
       StageDescription:
         Description: Sample API test stage
       StageName: test
 Outputs:
   SampleApiTestUrl:
-    Value: !Sub "https://${SampleApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"
+    Value:
+      Fn::Sub: "https://${SampleApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"

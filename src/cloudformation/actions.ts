@@ -4,9 +4,9 @@ import { CloudFormationWrapper } from ".";
 import type { Parameter } from "@aws-sdk/client-cloudformation";
 import type { Action } from "../utils";
 
-const stackName = "http-non-proxy-api";
-const templateDir = `${__dirname}/../../src/cloudformation/files`;
-const templatePath = `${templateDir}/${stackName}.yaml`;
+const stackName = "execution-api-gateway";
+const templateDir = `${__dirname}/../../src/stepfunctions/templates`;
+const templatePath = `${templateDir}/${stackName}.yml`;
 const parameters: Parameter[] = [
   // { ParameterKey: "AxiosLayerBucket", ParameterValue: "my-bucket-hryssmz" },
   // { ParameterKey: "AxiosLayerKey", ParameterValue: "AxiosLayer.zip" },
