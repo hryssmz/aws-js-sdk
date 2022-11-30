@@ -1,0 +1,118 @@
+# sfn/templates/iterate-lambda.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: State machine that iterate Lambda function
+Resources:
+  LambdaFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for Lambda Function
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  IteratorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Architectures:
+        - x86_64
+      Code:
+        ZipFile: |
+          exports.handler = function iterator(event, context, callback) {
+            const index = event.iterator.index;
+            const step = event.iterator.step;
+            const count = event.iterator.count;
+            const newIndex = index + step;
+
+            callback(null, {
+              index: newIndex,
+              step,
+              count,
+              continue: newIndex < count,
+            });
+          };
+      Description: Iteration Lambda function
+      Handler: index.handler
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+      Runtime: nodejs14.x
+  StateMachineExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Execution policy for State Machine
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+              - xray:GetSamplingRules
+              - xray:GetSamplingTargets
+            Resource:
+              - "*"
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - "*"
+  StateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for State Machine
+      ManagedPolicyArns:
+        - Ref: StateMachineExecutionPolicy
+  IterateCountStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      Definition:
+        Comment: Iterator State Machine Example
+        StartAt: ConfigureCount
+        States:
+          ConfigureCount:
+            Type: Pass
+            Result:
+              count: 3
+              index: 0
+              step: 1
+            ResultPath: "$.iterator"
+            Next: Iterator
+          Iterator:
+            Type: Task
+            Resource:
+              Fn::GetAtt: IteratorFunction.Arn
+            ResultPath: $.iterator
+            Next: IsCountReached
+          IsCountReached:
+            Type: Choice
+            Choices:
+              - Variable: $.iterator.continue
+                BooleanEquals: true
+                Next: ExampleWork
+            Default: Done
+          ExampleWork:
+            Comment: Your application logic, to run a specific number of times
+            Type: Pass
+            Result:
+              success: true
+            ResultPath: $.result
+            Next: Iterator
+          Done:
+            Type: Pass
+            End: true
+      RoleArn:
+        Fn::GetAtt: StateMachineExecutionRole.Arn
+      StateMachineType: STANDARD

@@ -1,0 +1,317 @@
+# apigateway/templates/s3-proxy-api.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: REST API as an Amazon S3 proxy
+Resources:
+  APIGatewayExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for API Gateway
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+  MyS3Api:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: My S3 proxy API
+      EndpointConfiguration:
+        Types: [REGIONAL]
+      Name: MyS3
+  FolderResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId:
+        Fn::GetAtt: MyS3Api.RootResourceId
+      PathPart: "{folder}"
+      RestApiId:
+        Ref: MyS3Api
+  ItemResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId:
+        Ref: FolderResource
+      PathPart: "{item}"
+      RestApiId:
+        Ref: MyS3Api
+  GetRootMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: AWS_IAM
+      HttpMethod: GET
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: GET
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Content-Length: integration.response.header.Content-Length
+              method.response.header.Content-Type: integration.response.header.Content-Type
+              method.response.header.Timestamp: integration.response.header.Date
+            SelectionPattern: ""
+            StatusCode: 200
+          - SelectionPattern: 4\d{2}
+            StatusCode: 400
+          - SelectionPattern: 5\d{2}
+            StatusCode: 500
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path//
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Timestamp: true
+            method.response.header.Content-Length: true
+            method.response.header.Content-Type: true
+          StatusCode: 200
+        - ResponseModels:
+            application/json: Error
+          StatusCode: 400
+        - ResponseModels:
+            application/json: Error
+          StatusCode: 500
+      OperationName: GetRoot
+      ResourceId:
+        Fn::GetAtt: MyS3Api.RootResourceId
+      RestApiId:
+        Ref: MyS3Api
+  GetFolderMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: AWS_IAM
+      HttpMethod: GET
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: GET
+        IntegrationResponses:
+          - SelectionPattern: 200
+            StatusCode: 200
+        RequestParameters:
+          integration.request.path.bucket: method.request.path.folder
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path/{bucket}
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: GetFolder
+      RequestParameters:
+        method.request.header.Content-Type: true
+        method.request.path.folder: true
+      ResourceId:
+        Ref: FolderResource
+      RestApiId:
+        Ref: MyS3Api
+  PutFolderMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: AWS_IAM
+      HttpMethod: PUT
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: PUT
+        IntegrationResponses:
+          - SelectionPattern: 200
+            StatusCode: 200
+        RequestParameters:
+          integration.request.path.bucket: method.request.path.folder
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path/{bucket}
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: PutFolder
+      RequestParameters:
+        method.request.header.Content-Type: true
+        method.request.path.folder: true
+      ResourceId:
+        Ref: FolderResource
+      RestApiId:
+        Ref: MyS3Api
+  DeleteFolderMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: AWS_IAM
+      HttpMethod: DELETE
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: DELETE
+        IntegrationResponses:
+          - SelectionPattern: 204
+            StatusCode: 204
+        RequestParameters:
+          integration.request.path.bucket: method.request.path.folder
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path/{bucket}
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 204
+      OperationName: DeleteFolder
+      RequestParameters:
+        method.request.header.Content-Type: true
+        method.request.path.folder: true
+      ResourceId:
+        Ref: FolderResource
+      RestApiId:
+        Ref: MyS3Api
+  GetItemMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: AWS_IAM
+      HttpMethod: GET
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: GET
+        IntegrationResponses:
+          - SelectionPattern: 200
+            StatusCode: 200
+        RequestParameters:
+          integration.request.path.bucket: method.request.path.folder
+          integration.request.path.object: method.request.path.item
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path/{bucket}/{object}
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: GetItem
+      RequestParameters:
+        method.request.header.Content-Type: true
+        method.request.path.folder: true
+        method.request.path.item: true
+      ResourceId:
+        Ref: ItemResource
+      RestApiId:
+        Ref: MyS3Api
+  PutItemMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: AWS_IAM
+      HttpMethod: PUT
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: PUT
+        IntegrationResponses:
+          - SelectionPattern: 200
+            StatusCode: 200
+        RequestParameters:
+          integration.request.path.bucket: method.request.path.folder
+          integration.request.path.object: method.request.path.item
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path/{bucket}/{object}
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: PutItem
+      RequestParameters:
+        method.request.header.Content-Type: true
+        method.request.path.folder: true
+        method.request.path.item: true
+      ResourceId:
+        Ref: ItemResource
+      RestApiId:
+        Ref: MyS3Api
+  HeadItemMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: AWS_IAM
+      HttpMethod: HEAD
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: HEAD
+        IntegrationResponses:
+          - SelectionPattern: 200
+            StatusCode: 200
+        RequestParameters:
+          integration.request.path.bucket: method.request.path.folder
+          integration.request.path.object: method.request.path.item
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path/{bucket}/{object}
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: HeadItem
+      RequestParameters:
+        method.request.header.Content-Type: true
+        method.request.path.folder: true
+        method.request.path.item: true
+      ResourceId:
+        Ref: ItemResource
+      RestApiId:
+        Ref: MyS3Api
+  DeleteItemMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: AWS_IAM
+      HttpMethod: DELETE
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: DELETE
+        IntegrationResponses:
+          - SelectionPattern: 204
+            StatusCode: 204
+        RequestParameters:
+          integration.request.path.bucket: method.request.path.folder
+          integration.request.path.object: method.request.path.item
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path/{bucket}/{object}
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 204
+      OperationName: DeleteItem
+      RequestParameters:
+        method.request.header.Content-Type: true
+        method.request.path.folder: true
+        method.request.path.item: true
+      ResourceId:
+        Ref: ItemResource
+      RestApiId:
+        Ref: MyS3Api
+  MyS3ApiTestDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetRootMethod
+      - GetFolderMethod
+      - PutFolderMethod
+      - DeleteFolderMethod
+      - GetItemMethod
+      - PutItemMethod
+      - HeadItemMethod
+      - DeleteItemMethod
+    Properties:
+      Description: My S3 API test deployment
+      RestApiId:
+        Ref: MyS3Api
+      StageDescription:
+        Description: My S3 API test stage
+      StageName: test
+Outputs:
+  MyS3ApiTestUrl:
+    Value:
+      Fn::Sub: "https://${MyS3Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"

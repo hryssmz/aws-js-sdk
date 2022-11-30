@@ -1,0 +1,57 @@
+# sfn/templates/hello-world-state-machine.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: HelloWorld State Machine Stack
+Resources:
+  StateMachineExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Execution policy for State Machine
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+              - xray:GetSamplingRules
+              - xray:GetSamplingTargets
+            Resource:
+              - "*"
+  StateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for State Machine
+      ManagedPolicyArns:
+        - Ref: StateMachineExecutionPolicy
+  HelloWorldStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      Definition:
+        Comment: A Hello World example of the Amazon States Language using Pass states
+        StartAt: Hello
+        States:
+          Hello:
+            Type: Pass
+            Next: World
+          World:
+            Type: Pass
+            Result: World
+            End: true
+      RoleArn:
+        Fn::GetAtt: StateMachineExecutionRole.Arn
+      StateMachineType: STANDARD
+Outputs:
+  HelloWorldStateMachineArn:
+    Value:
+      Ref: HelloWorldStateMachine
+  StateMachineExecutionRoleArn:
+    Value:
+      Fn::GetAtt: StateMachineExecutionRole.Arn

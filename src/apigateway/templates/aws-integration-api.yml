@@ -1,0 +1,122 @@
+# apigateway/templates/aws-integration-api.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: REST API with AWS integration
+Resources:
+  Topic1:
+    Type: AWS::SNS::Topic
+    Properties:
+      FifoTopic: false
+  Topic2:
+    Type: AWS::SNS::Topic
+    Properties:
+      FifoTopic: false
+  APIGatewayExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Execution policy for API Gateway
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sns:ListTopics
+            Resource:
+              - "*"
+  APIGatewayExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for API Gateway
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+        - Ref: APIGatewayExecutionPolicy
+  MyDemoApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: My demo API
+      EndpointConfiguration:
+        Types: [REGIONAL]
+      Name: MyDemoAPI
+  TopicModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: application/json
+      Description: Topic model
+      Name: Topic
+      RestApiId:
+        Ref: MyDemoApi
+      Schema:
+        $schema: http://json-schema.org/draft-04/schema#
+        title: Topic
+        type: object
+        properties:
+          TopicArn:
+            type: string
+  AWSProxyResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId:
+        Fn::GetAtt: MyDemoApi.RootResourceId
+      PathPart: mydemoawsproxy
+      RestApiId:
+        Ref: MyDemoApi
+  GetAWSProxyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+          - ResponseTemplates:
+              application/json: |
+                #set($result = $input.path('$.ListTopicsResponse.ListTopicsResult'))
+                {
+                  "Topics": [
+                #foreach($topic in $result.Topics)
+                    {
+                      "TopicArn": "$topic.TopicArn"
+                    }#if($foreach.hasNext),#end
+
+                #end
+                  ]
+                }
+            SelectionPattern: 200
+            StatusCode: 200
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:sns:action/ListTopics
+      MethodResponses:
+        - ResponseModels:
+            application/json:
+              Ref: TopicModel
+          StatusCode: 200
+      OperationName: PostExecution
+      ResourceId:
+        Ref: AWSProxyResource
+      RestApiId:
+        Ref: MyDemoApi
+  MyDemoApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetAWSProxyMethod
+    Properties:
+      Description: My demo API deployment
+      RestApiId:
+        Ref: MyDemoApi
+      StageDescription:
+        Description: My demo API test stage
+      StageName: test
+Outputs:
+  MyDemoApiTestUrl:
+    Value:
+      Fn::Sub: https://${MyDemoApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test

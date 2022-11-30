@@ -1,6 +1,6 @@
-# stepfunctions/templates/resultpath-demo.yml
+# sfn/templates/lambda-state-machine.yml
 AWSTemplateFormatVersion: "2010-09-09"
-Description: ResultPath demo
+Description: Step Functions state machine that uses Lambda
 Resources:
   LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
@@ -27,27 +27,6 @@ Resources:
             callback(null, "Hello from " + event.who + "!");
           };
       Description: Lambda function returns a greeting message
-      Handler: index.handler
-      Role:
-        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
-      Runtime: nodejs14.x
-  FailFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      Architectures:
-        - x86_64
-      Code:
-        ZipFile: |
-          exports.handler = async (event, context) => {
-            function CustomError(message) {
-              this.name = "CustomError";
-              this.message = message;
-            }
-            CustomError.prototype = new Error();
-
-            throw new CustomError("This is a custom error!");
-          };
-      Description: Lambda function returns a custom error
       Handler: index.handler
       Role:
         Fn::GetAtt: LambdaFunctionExecutionRole.Arn
@@ -91,53 +70,25 @@ Resources:
     Properties:
       Definition:
         Comment: A state machine that uses Lambda
-        StartAt: CallFunction
+        StartAt: HelloFunctionState
         States:
-          CallFunction:
+          HelloFunctionState:
             Type: Task
-            Resource:
-              Fn::GetAtt: HelloFunction.Arn
-            End: true
-            ResultPath: "$"
-      RoleArn:
-        Fn::GetAtt: StateMachineExecutionRole.Arn
-      StateMachineType: STANDARD
-  CatchFailureStateMachine:
-    Type: AWS::StepFunctions::StateMachine
-    Properties:
-      Definition:
-        Comment: A Catch example of the Amazon States Language using an AWS Lambda function
-        StartAt: CreateAccount
-        States:
-          CreateAccount:
-            Type: Task
-            Resource:
-              Fn::GetAtt: FailFunction.Arn
-            Catch:
+            Resource: arn:aws:states:::lambda:invoke
+            OutputPath: $.Payload
+            Parameters:
+              Payload.$: $
+              FunctionName:
+                Ref: HelloFunction
+            Retry:
               - ErrorEquals:
-                  - CustomError
-                Next: CustomErrorFallback
-                ResultPath: $.error
-              - ErrorEquals:
-                  - States.TaskFailed
-                Next: ReservedTypeFallback
-                ResultPath: $.error
-              - ErrorEquals:
-                  - States.ALL
-                Next: CatchAllFallback
-                ResultPath: $.error
-            End: true
-          CustomErrorFallback:
-            Type: Pass
-            Result: This is a fallback from a custom Lambda function exception
-            End: true
-          ReservedTypeFallback:
-            Type: Pass
-            Result: This is a fallback from a reserved error code
-            End: true
-          CatchAllFallback:
-            Type: Pass
-            Result: This is a fallback from any error code
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 2
+                MaxAttempts: 6
+                BackoffRate: 2
             End: true
       RoleArn:
         Fn::GetAtt: StateMachineExecutionRole.Arn
@@ -149,15 +100,9 @@ Outputs:
   HelloFunctionArn:
     Value:
       Fn::GetAtt: HelloFunction.Arn
-  FailFunctionArn:
-    Value:
-      Fn::GetAtt: FailFunction.Arn
   StateMachineExecutionRoleArn:
     Value:
       Fn::GetAtt: StateMachineExecutionRole.Arn
   LambdaStateMachineArn:
     Value:
       Ref: LambdaStateMachine
-  CatchFailureStateMachineArn:
-    Value:
-      Ref: CatchFailureStateMachine

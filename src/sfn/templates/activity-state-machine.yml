@@ -1,6 +1,6 @@
-# stepfunctions/templates/hello-world-state-machine.yml
+# sfn/templates/resultpath-demo.yml
 AWSTemplateFormatVersion: "2010-09-09"
-Description: HelloWorld State Machine Stack
+Description: Activity and state machine
 Resources:
   StateMachineExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -31,27 +31,31 @@ Resources:
       Description: Execution role for State Machine
       ManagedPolicyArns:
         - Ref: StateMachineExecutionPolicy
-  HelloWorldStateMachine:
+  GetGreetingActivity:
+    Type: AWS::StepFunctions::Activity
+    Properties:
+      Name: GetGreeting
+  ActivityStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
       Definition:
-        Comment: A Hello World example of the Amazon States Language using Pass states
-        StartAt: Hello
+        Comment: An example using a Task state.
+        StartAt: getGreeting
+        Version: "1.0"
+        TimeoutSeconds: 300
         States:
-          Hello:
-            Type: Pass
-            Next: World
-          World:
-            Type: Pass
-            Result: World
+          getGreeting:
+            Type: Task
+            Resource:
+              Ref: GetGreetingActivity
             End: true
       RoleArn:
         Fn::GetAtt: StateMachineExecutionRole.Arn
       StateMachineType: STANDARD
 Outputs:
-  HelloWorldStateMachineName:
+  GetGreetingActivityArn:
     Value:
-      Fn::GetAtt: HelloWorldStateMachine.Name
-  StateMachineExecutionRoleArn:
+      Ref: GetGreetingActivity
+  ActivityStateMachineArn:
     Value:
-      Fn::GetAtt: StateMachineExecutionRole.Arn
+      Ref: ActivityStateMachine

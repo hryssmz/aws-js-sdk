@@ -7,6 +7,7 @@ import ec2Actions from "./ec2/actions";
 import iamActions from "./iam/actions";
 import lambdaActions from "./lambda/actions";
 import s3Actions from "./s3/actions";
+import snsActions from "./sns/actions";
 import { camelize } from "./utils";
 import type { Action } from "./utils";
 
@@ -19,6 +20,7 @@ const actions: Record<string, Action> = {
   ...iamActions,
   ...lambdaActions,
   ...s3Actions,
+  ...snsActions,
 };
 
 async function main() {

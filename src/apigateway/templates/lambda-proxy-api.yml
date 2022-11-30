@@ -114,7 +114,7 @@ Resources:
         IntegrationHttpMethod: POST
         Type: AWS_PROXY
         Uri:
-          Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GreetingFunction.Arn}/invocations"
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GreetingFunction.Arn}/invocations
       OperationName: AnyHelloworld
       ResourceId:
         Ref: HelloworldResource
@@ -134,4 +134,4 @@ Resources:
 Outputs:
   LambdaProxyApiTestUrl:
     Value:
-      Fn::Sub: "https://${LambdaProxyApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"
+      Fn::Sub: https://${LambdaProxyApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test

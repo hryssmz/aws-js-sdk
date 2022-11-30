@@ -33,12 +33,14 @@ Resources:
       Integration:
         IntegrationHttpMethod: GET
         IntegrationResponses:
-          - SelectionPattern: ""
+          - SelectionPattern: 200
             StatusCode: 200
         Type: HTTP
         Uri: http://petstore-demo-endpoint.execute-api.com/petstore/pets
       MethodResponses:
-        - StatusCode: 200
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
       OperationName: GetPets
       ResourceId:
         Ref: PetsResource
@@ -52,14 +54,16 @@ Resources:
       Integration:
         IntegrationHttpMethod: GET
         IntegrationResponses:
-          - SelectionPattern: ""
+          - SelectionPattern: 200
             StatusCode: 200
         RequestParameters:
           integration.request.path.id: method.request.path.petId
         Type: HTTP
         Uri: http://petstore-demo-endpoint.execute-api.com/petstore/pets/{id}
       MethodResponses:
-        - StatusCode: 200
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
       OperationName: GetPetId
       RequestParameters:
         method.request.path.petId: true

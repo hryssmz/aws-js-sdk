@@ -1,0 +1,337 @@
+# apigateway/templates/calc-api.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Calc REST API with two AWS service integrations and one Lambda non-proxy integration
+Resources:
+  LambdaFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for Lambda Function
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  APIGatewayExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Execution policy for API Gateway
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - "*"
+  APIGatewayExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for API Gateway
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+        - Ref: APIGatewayExecutionPolicy
+  CalcFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Architectures:
+        - x86_64
+      Code:
+        ZipFile: |
+          console.log("Loading the Calc function");
+
+          exports.handler = function (event, context, callback) {
+            console.log("Received event:", JSON.stringify(event, null, 2));
+            const { a: x, b: y, op } = event;
+            if (x === undefined || y === undefined || op === undefined) {
+              callback("400 Invalid Input");
+            }
+            const a = Number(x);
+            const b = Number(y);
+
+            if (isNaN(a) || isNaN(b)) {
+              callback("400 Invalid Operand");
+            }
+
+            const res = { a, b, op, c: NaN };
+
+            switch (op) {
+              case "+":
+              case "add":
+                res.c = a + b;
+                break;
+              case "-":
+              case "sub":
+                res.c = a - b;
+                break;
+              case "*":
+              case "mul":
+                res.c = a * b;
+                break;
+              case "/":
+              case "div":
+                res.c = b === 0 ? NaN : Number(a) / Number(b);
+                break;
+              default:
+                callback("400 Invalid Operator");
+                break;
+            }
+            callback(null, res);
+          };
+      Description: Calc Function
+      Handler: index.handler
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+      Runtime: nodejs16.x
+  CalcFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: CalcFunction
+      Principal: apigateway.amazonaws.com
+  LambdaCalcApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: Lambda Calc API
+      EndpointConfiguration:
+        Types: [REGIONAL]
+      Name: LambdaCalc
+  RequestParametersValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      RestApiId:
+        Ref: LambdaCalcApi
+      ValidateRequestBody: false
+      ValidateRequestParameters: true
+  RequestBodyValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      RestApiId:
+        Ref: LambdaCalcApi
+      ValidateRequestBody: true
+      ValidateRequestParameters: false
+  InputModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: application/json
+      Description: Input model
+      Name: Input
+      RestApiId:
+        Ref: LambdaCalcApi
+      Schema:
+        $schema: http://json-schema.org/draft-04/schema#
+        title: Input
+        type: object
+        properties:
+          a:
+            type: number
+          b:
+            type: number
+          op:
+            type: string
+  OutputModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: application/json
+      Description: Output model
+      Name: Output
+      RestApiId:
+        Ref: LambdaCalcApi
+      Schema:
+        $schema: http://json-schema.org/draft-04/schema#
+        title: Output
+        properties:
+          c:
+            type: number
+  ResultModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: application/json
+      Description: Result model
+      Name: Result
+      RestApiId:
+        Ref: LambdaCalcApi
+      Schema:
+        $schema: http://json-schema.org/draft-04/schema#
+        title: Result
+        properties:
+          input:
+            $ref:
+              Fn::Sub: https://apigateway.amazonaws.com/restapis/${LambdaCalcApi}/models/${InputModel}
+          output:
+            $ref:
+              Fn::Sub: https://apigateway.amazonaws.com/restapis/${LambdaCalcApi}/models/${OutputModel}
+  CalcResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId:
+        Fn::GetAtt: LambdaCalcApi.RootResourceId
+      PathPart: calc
+      RestApiId:
+        Ref: LambdaCalcApi
+  GetCalcMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+          - SelectionPattern: ""
+            StatusCode: 200
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestTemplates:
+          application/json: |
+            {
+              "a": "$input.params('operand1')",
+              "b": "$input.params('operand2')",
+              "op": "$input.params('operator')"
+            }
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CalcFunction.Arn}/invocations
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: GetCalc
+      RequestParameters:
+        method.request.querystring.operand1: true
+        method.request.querystring.operand2: true
+        method.request.querystring.operator: true
+      RequestValidatorId:
+        Ref: RequestParametersValidator
+      ResourceId:
+        Ref: CalcResource
+      RestApiId:
+        Ref: LambdaCalcApi
+  PostCalcMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+          - SelectionPattern: ""
+            StatusCode: 200
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CalcFunction.Arn}/invocations
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: PostCalc
+      RequestModels:
+        application/json:
+          Ref: InputModel
+      RequestValidatorId:
+        Ref: RequestBodyValidator
+      ResourceId:
+        Ref: CalcResource
+      RestApiId:
+        Ref: LambdaCalcApi
+  Operand1Resource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId:
+        Ref: CalcResource
+      PathPart: "{operand1}"
+      RestApiId:
+        Ref: LambdaCalcApi
+  Operand2Resource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId:
+        Ref: Operand1Resource
+      PathPart: "{operand2}"
+      RestApiId:
+        Ref: LambdaCalcApi
+  CalcPathResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId:
+        Ref: Operand2Resource
+      PathPart: "{operator}"
+      RestApiId:
+        Ref: LambdaCalcApi
+  GetCalcPathMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+          - ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                {
+                  "input": {
+                    "a": $inputRoot.a,
+                    "b": $inputRoot.b,
+                    "op": "$inputRoot.op"
+                  },
+                  "output": {
+                    "c": $inputRoot.c
+                  }
+                }
+            SelectionPattern: ""
+            StatusCode: 200
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestTemplates:
+          application/json: |
+            {
+              "a": "$input.params('operand1')",
+              "b": "$input.params('operand2')",
+              "op": #if($input.params('operator')=='%2F')"/"#{else}"$input.params('operator')"#end
+
+            }
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CalcFunction.Arn}/invocations
+      MethodResponses:
+        - ResponseModels:
+            application/json:
+              Ref: ResultModel
+          StatusCode: 200
+      OperationName: GetCalcPath
+      ResourceId:
+        Ref: CalcPathResource
+      RestApiId:
+        Ref: LambdaCalcApi
+  LambdaCalcApiTestDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetCalcMethod
+      - PostCalcMethod
+      - GetCalcPathMethod
+    Properties:
+      Description: Lambda Calc API test deployment
+      RestApiId:
+        Ref: LambdaCalcApi
+      StageDescription:
+        Description: Lambda Calc API test stage
+      StageName: test
+Outputs:
+  LambdaCalcApiTestUrl:
+    Value:
+      Fn::Sub: https://${LambdaCalcApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test

@@ -1,6 +1,6 @@
-# stepfunctions/templates/map-lambda.yml
+# sfn/templates/path-examples.yml
 AWSTemplateFormatVersion: "2010-09-09"
-Description: State machine with a Map state
+Description: InputPath, ResultPath and OutputPath Examples
 Resources:
   LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
@@ -65,23 +65,20 @@ Resources:
       Description: Execution role for State Machine
       ManagedPolicyArns:
         - Ref: StateMachineExecutionPolicy
-  MapLambdaStateMachine:
+  LambdaStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
       Definition:
-        Comment: State machine with a Map state
-        StartAt: ExampleMapState
+        Comment: A Hello World example of the Amazon States Language using an AWS Lambda function
+        StartAt: HelloWorld
         States:
-          ExampleMapState:
-            Type: Map
-            Iterator:
-              StartAt: CallLambda
-              States:
-                CallLambda:
-                  Type: Task
-                  Resource:
-                    Fn::GetAtt: HelloFunction.Arn
-                  End: true
+          HelloWorld:
+            Type: Task
+            Resource:
+              Fn::GetAtt: HelloFunction.Arn
+            InputPath: $.lambda
+            ResultPath: $.data.lambdaresult
+            OutputPath: $.data
             End: true
       RoleArn:
         Fn::GetAtt: StateMachineExecutionRole.Arn
@@ -96,6 +93,6 @@ Outputs:
   StateMachineExecutionRoleArn:
     Value:
       Fn::GetAtt: StateMachineExecutionRole.Arn
-  MapLambdaStateMachineArn:
+  LambdaStateMachineArn:
     Value:
-      Ref: MapLambdaStateMachine
+      Ref: LambdaStateMachine

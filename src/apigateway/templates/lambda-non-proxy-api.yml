@@ -74,6 +74,13 @@ Resources:
       EndpointConfiguration:
         Types: [REGIONAL]
       Name: NonProxyApi
+  RequestBodyAndParametersValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      RestApiId:
+        Ref: NonProxyApi
+      ValidateRequestBody: true
+      ValidateRequestParameters: true
   CityResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -121,7 +128,9 @@ Resources:
         Uri:
           Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GreetingFunction.Arn}/invocations"
       MethodResponses:
-        - StatusCode: 200
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
       OperationName: AnyCityMethod
       RequestModels:
         application/json:
@@ -129,6 +138,8 @@ Resources:
       RequestParameters:
         method.request.querystring.time: true
         method.request.header.day: true
+      RequestValidatorId:
+        Ref: RequestBodyAndParametersValidator
       ResourceId:
         Ref: CityResource
       RestApiId:
@@ -147,4 +158,4 @@ Resources:
 Outputs:
   NonProxyApiTestUrl:
     Value:
-      Fn::Sub: "https://${NonProxyApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"
+      Fn::Sub: https://${NonProxyApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test

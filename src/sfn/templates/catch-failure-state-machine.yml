@@ -1,4 +1,4 @@
-# stepfunctions/templates/catch-failure-state-machine.yml
+# sfn/templates/catch-failure-state-machine.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Handling error conditions using a Step Functions State Machine
 Resources:

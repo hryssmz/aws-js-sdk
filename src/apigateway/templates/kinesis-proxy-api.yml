@@ -1,0 +1,451 @@
+# apigateway/templates/kinesis-proxy-api.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: REST API as an Amazon Kinesis proxy
+Resources:
+  APIGatewayExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for API Gateway
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+        - arn:aws:iam::aws:policy/AmazonKinesisFullAccess
+  KinesisProxyApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: Kinesis proxy API
+      EndpointConfiguration:
+        Types: [REGIONAL]
+      Name: KinesisProxy
+  RequestParametersValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      RestApiId:
+        Ref: KinesisProxyApi
+      ValidateRequestBody: false
+      ValidateRequestParameters: true
+  RequestBodyValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      RestApiId:
+        Ref: KinesisProxyApi
+      ValidateRequestBody: true
+      ValidateRequestParameters: false
+  PostStreamNameModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: application/json
+      Description: PostStreamName model
+      Name: PostStreamName
+      RestApiId:
+        Ref: KinesisProxyApi
+      Schema:
+        $schema: http://json-schema.org/draft-04/schema#
+        title: PostStreamName
+        type: object
+        properties:
+          ShardCount:
+            type: number
+  PutRecordModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: application/json
+      Description: PutRecord model
+      Name: PutRecord
+      RestApiId:
+        Ref: KinesisProxyApi
+      Schema:
+        $schema: http://json-schema.org/draft-04/schema#
+        title: PutRecord
+        type: object
+        properties:
+          Data:
+            type: string
+          PartitionKey:
+            type: string
+        required: [Data, PartitionKey]
+  PutRecordsModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: application/json
+      Description: PutRecords model
+      Name: PutRecords
+      RestApiId:
+        Ref: KinesisProxyApi
+      Schema:
+        $schema: http://json-schema.org/draft-04/schema#
+        title: PutRecords
+        type: object
+        properties:
+          records:
+            type: array
+            items:
+              type: object
+              properties:
+                data:
+                  type: string
+                partition-key:
+                  type: string
+              required: [data, partition-key]
+            minItems: 1
+        required: [records]
+  StreamsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId:
+        Fn::GetAtt: KinesisProxyApi.RootResourceId
+      PathPart: streams
+      RestApiId:
+        Ref: KinesisProxyApi
+  StreamNameResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId:
+        Ref: StreamsResource
+      PathPart: "{stream-name}"
+      RestApiId:
+        Ref: KinesisProxyApi
+  RecordsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId:
+        Ref: StreamNameResource
+      PathPart: records
+      RestApiId:
+        Ref: KinesisProxyApi
+  RecordResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId:
+        Ref: StreamNameResource
+      PathPart: record
+      RestApiId:
+        Ref: KinesisProxyApi
+  ShardIteratorResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId:
+        Ref: StreamNameResource
+      PathPart: sharditerator
+      RestApiId:
+        Ref: KinesisProxyApi
+  GetStreamsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+          - SelectionPattern: 200
+            StatusCode: 200
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestParameters:
+          integration.request.header.Content-Type: "'application/x-amz-json-1.1'"
+        RequestTemplates:
+          application/json: "{}"
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/ListStreams
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: GetStreams
+      ResourceId:
+        Ref: StreamsResource
+      RestApiId:
+        Ref: KinesisProxyApi
+  GetStreamNameMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+          - SelectionPattern: 200
+            StatusCode: 200
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestParameters:
+          integration.request.header.Content-Type: "'application/x-amz-json-1.1'"
+        RequestTemplates:
+          application/json: |
+            {
+              "StreamName": "$input.params('stream-name')"
+            }
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/DescribeStream
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: GetStreamName
+      ResourceId:
+        Ref: StreamNameResource
+      RestApiId:
+        Ref: KinesisProxyApi
+  PostStreamNameMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+          - SelectionPattern: 200
+            StatusCode: 200
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestParameters:
+          integration.request.header.Content-Type: "'application/x-amz-json-1.1'"
+        RequestTemplates:
+          application/json: |
+            #set($shardCount = $input.path('$.ShardCount'))
+            {
+              "ShardCount": #if($shardCount == '')1#else$shardCount#end,
+              "StreamName": "$input.params('stream-name')"
+            }
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/CreateStream
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: PostStreamName
+      RequestModels:
+        application/json:
+          Ref: PostStreamNameModel
+      RequestValidatorId:
+        Ref: RequestBodyValidator
+      ResourceId:
+        Ref: StreamNameResource
+      RestApiId:
+        Ref: KinesisProxyApi
+  DeleteStreamNameMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: DELETE
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+          - SelectionPattern: 200
+            StatusCode: 200
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestParameters:
+          integration.request.header.Content-Type: "'application/x-amz-json-1.1'"
+        RequestTemplates:
+          application/json: |
+            {
+              "StreamName": "$input.params('stream-name')"
+            }
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/DeleteStream
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: DeleteStreamName
+      ResourceId:
+        Ref: StreamNameResource
+      RestApiId:
+        Ref: KinesisProxyApi
+  PutRecordMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: PUT
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+          - SelectionPattern: 200
+            StatusCode: 200
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestParameters:
+          integration.request.header.Content-Type: "'application/x-amz-json-1.1'"
+        RequestTemplates:
+          application/json: |
+            {
+              "StreamName": "$input.params('stream-name')",
+              "Data": "$util.base64Encode($input.json('$.Data'))",
+              "PartitionKey": "$input.path('$.PartitionKey')"
+            }
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/PutRecord
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: PutRecord
+      RequestModels:
+        application/json:
+          Ref: PutRecordModel
+      RequestValidatorId:
+        Ref: RequestBodyValidator
+      ResourceId:
+        Ref: RecordResource
+      RestApiId:
+        Ref: KinesisProxyApi
+  PutRecordsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: PUT
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+          - SelectionPattern: 200
+            StatusCode: 200
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestParameters:
+          integration.request.header.Content-Type: "'application/x-amz-json-1.1'"
+        RequestTemplates:
+          application/json: |
+            {
+              "StreamName": "$input.params('stream-name')",
+              "Records": [
+            #foreach($elem in $input.path('$.records'))
+              {
+                "Data": "$util.base64Encode($elem.data)",
+                "PartitionKey": "$elem.partition-key"
+              }#if($foreach.hasNext),#end
+
+            #end
+              ]
+            }
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/PutRecords
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: PutRecords
+      RequestValidatorId:
+        Ref: RequestBodyValidator
+      RequestModels:
+        application/json:
+          Ref: PutRecordsModel
+      ResourceId:
+        Ref: RecordsResource
+      RestApiId:
+        Ref: KinesisProxyApi
+  GetShardIteratorMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+          - SelectionPattern: 200
+            StatusCode: 200
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestParameters:
+          integration.request.header.Content-Type: "'application/x-amz-json-1.1'"
+        RequestTemplates:
+          application/json: |
+            {
+              "ShardId": "$input.params('shard-id')",
+              "ShardIteratorType": "TRIM_HORIZON",
+              "StreamName": "$input.params('stream-name')"
+            }
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/GetShardIterator
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: GetShardIterator
+      RequestParameters:
+        method.request.querystring.shard-id: true
+      RequestValidatorId:
+        Ref: RequestParametersValidator
+      ResourceId:
+        Ref: ShardIteratorResource
+      RestApiId:
+        Ref: KinesisProxyApi
+  GetRecordsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        Credentials:
+          Fn::GetAtt: APIGatewayExecutionRole.Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+          - SelectionPattern: 200
+            StatusCode: 200
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestParameters:
+          integration.request.header.Content-Type: "'application/x-amz-json-1.1'"
+        RequestTemplates:
+          application/json: |
+            {
+              "ShardIterator": "$input.params('Shard-Iterator')"
+            }
+        Type: AWS
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/GetRecords
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          StatusCode: 200
+      OperationName: GetRecords
+      RequestParameters:
+        method.request.header.Shard-Iterator: true
+      RequestValidatorId:
+        Ref: RequestParametersValidator
+      ResourceId:
+        Ref: RecordsResource
+      RestApiId:
+        Ref: KinesisProxyApi
+  KinesisProxyApiTestDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetStreamsMethod
+      - GetStreamNameMethod
+      - PostStreamNameMethod
+      - DeleteStreamNameMethod
+      - PutRecordMethod
+      - PutRecordsMethod
+      - GetShardIteratorMethod
+      - GetRecordsMethod
+    Properties:
+      Description: Kinesis proxy API test deployment
+      RestApiId:
+        Ref: KinesisProxyApi
+      StageDescription:
+        Description: Kinesis proxy API test stage
+      StageName: test
+Outputs:
+  KinesisProxyApiTestUrl:
+    Value:
+      Fn::Sub: "https://${KinesisProxyApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test"

@@ -1,6 +1,53 @@
-# stepfunctions/templates/execution-api-gateway.yml
+# sfn/templates/execution-api-gateway.yml
 AWSTemplateFormatVersion: "2010-09-09"
+Description: Execute Step Function from API Gateway
 Resources:
+  StateMachineExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Execution policy for State Machine
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+              - xray:GetSamplingRules
+              - xray:GetSamplingTargets
+            Resource:
+              - "*"
+  StateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for State Machine
+      ManagedPolicyArns:
+        - Ref: StateMachineExecutionPolicy
+  HelloWorldStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      Definition:
+        Comment: A Hello World example of the Amazon States Language using Pass states
+        StartAt: Hello
+        States:
+          Hello:
+            Type: Pass
+            Next: World
+          World:
+            Type: Pass
+            Result: World
+            End: true
+      RoleArn:
+        Fn::GetAtt: StateMachineExecutionRole.Arn
+      StateMachineType: STANDARD
   APIGatewayExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -28,7 +75,7 @@ Resources:
       Description: Execution role for API Gateway
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
-        - arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess
+        - Ref: APIGatewayExecutionPolicy
   StartExecutionApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
@@ -80,6 +127,15 @@ Resources:
         Description: StartExecution API test stage
       StageName: test
 Outputs:
+  HelloWorldStateMachineArn:
+    Value:
+      Ref: HelloWorldStateMachine
+  StateMachineExecutionRoleArn:
+    Value:
+      Fn::GetAtt: StateMachineExecutionRole.Arn
+  APIGatewayExecutionRoleArn:
+    Value:
+      Fn::GetAtt: APIGatewayExecutionRole.Arn
   StartExecutionApiTestUrl:
     Value:
       Fn::Sub: https://${StartExecutionApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test
