@@ -1,6 +1,7 @@
 # apigateway/templates/lambda-proxy-api.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Lambda proxy API stack
+
 Resources:
   LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
@@ -16,6 +17,7 @@ Resources:
       Description: Execution role for Lambda Function
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
   GreetingFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -83,6 +85,7 @@ Resources:
       Role:
         Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Runtime: nodejs16.x
+
   GreetingFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -90,6 +93,7 @@ Resources:
       FunctionName:
         Ref: GreetingFunction
       Principal: apigateway.amazonaws.com
+
   LambdaProxyApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
@@ -97,6 +101,7 @@ Resources:
       EndpointConfiguration:
         Types: [REGIONAL]
       Name: LambdaProxyApi
+
   HelloworldResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -105,6 +110,7 @@ Resources:
       PathPart: helloworld
       RestApiId:
         Ref: LambdaProxyApi
+
   AnyHelloworldMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -120,6 +126,7 @@ Resources:
         Ref: HelloworldResource
       RestApiId:
         Ref: LambdaProxyApi
+
   LambdaProxyApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
@@ -131,6 +138,7 @@ Resources:
       StageDescription:
         Description: Lambda Proxy API test stage
       StageName: test
+
 Outputs:
   LambdaProxyApiTestUrl:
     Value:

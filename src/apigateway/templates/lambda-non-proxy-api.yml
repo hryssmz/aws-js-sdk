@@ -1,6 +1,7 @@
 # apigateway/templates/lambda-non-proxy-api.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: REST Api with Lambda non-proxy integration
+
 Resources:
   LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
@@ -16,6 +17,7 @@ Resources:
       Description: Execution role for Lambda Function
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
   GreetingFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -60,6 +62,7 @@ Resources:
       Role:
         Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Runtime: nodejs16.x
+
   GreetingFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -67,6 +70,7 @@ Resources:
       FunctionName:
         Ref: GreetingFunction
       Principal: apigateway.amazonaws.com
+
   NonProxyApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
@@ -74,6 +78,7 @@ Resources:
       EndpointConfiguration:
         Types: [REGIONAL]
       Name: NonProxyApi
+
   RequestBodyAndParametersValidator:
     Type: AWS::ApiGateway::RequestValidator
     Properties:
@@ -81,6 +86,7 @@ Resources:
         Ref: NonProxyApi
       ValidateRequestBody: true
       ValidateRequestParameters: true
+
   CityResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -89,6 +95,7 @@ Resources:
       PathPart: "{city}"
       RestApiId:
         Ref: NonProxyApi
+
   AnyCityMethodRequestModel:
     Type: AWS::ApiGateway::Model
     Properties:
@@ -104,6 +111,7 @@ Resources:
         properties:
           callerName:
             type: string
+
   AnyCityMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -144,6 +152,7 @@ Resources:
         Ref: CityResource
       RestApiId:
         Ref: NonProxyApi
+
   NonProxyApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
@@ -155,6 +164,7 @@ Resources:
       StageDescription:
         Description: Non-proxy API test stage
       StageName: test
+
 Outputs:
   NonProxyApiTestUrl:
     Value:

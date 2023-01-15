@@ -1,6 +1,7 @@
 # sfn/templates/hello-world-state-machine.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: HelloWorld State Machine Stack
+
 Resources:
   StateMachineExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -17,6 +18,7 @@ Resources:
               - xray:GetSamplingTargets
             Resource:
               - "*"
+
   StateMachineExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -31,6 +33,7 @@ Resources:
       Description: Execution role for State Machine
       ManagedPolicyArns:
         - Ref: StateMachineExecutionPolicy
+
   HelloWorldStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -48,10 +51,12 @@ Resources:
       RoleArn:
         Fn::GetAtt: StateMachineExecutionRole.Arn
       StateMachineType: STANDARD
+
 Outputs:
   HelloWorldStateMachineArn:
     Value:
       Ref: HelloWorldStateMachine
+
   StateMachineExecutionRoleArn:
     Value:
       Fn::GetAtt: StateMachineExecutionRole.Arn

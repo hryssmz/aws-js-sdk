@@ -1,6 +1,7 @@
 # apigateway/templates/http-non-proxy-api.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Http non-proxy API stack
+
 Resources:
   HttpNonProxyApi:
     Type: AWS::ApiGateway::RestApi
@@ -9,6 +10,7 @@ Resources:
       EndpointConfiguration:
         Types: [EDGE]
       Name: HttpNonProxyApi
+
   PetsResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -17,6 +19,7 @@ Resources:
       PathPart: pets
       RestApiId:
         Ref: HttpNonProxyApi
+
   GetPetsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -42,6 +45,7 @@ Resources:
         Ref: PetsResource
       RestApiId:
         Ref: HttpNonProxyApi
+
   PetstoreResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -50,6 +54,7 @@ Resources:
       PathPart: petstorewalkthrough
       RestApiId:
         Ref: HttpNonProxyApi
+
   PetstorePetsResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -58,6 +63,7 @@ Resources:
       PathPart: pets
       RestApiId:
         Ref: HttpNonProxyApi
+
   PetstorePetIdResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -66,6 +72,7 @@ Resources:
       PathPart: "{petId}"
       RestApiId:
         Ref: HttpNonProxyApi
+
   GetPetstorePetsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -91,6 +98,7 @@ Resources:
         Ref: PetstorePetsResource
       RestApiId:
         Ref: HttpNonProxyApi
+
   GetPetstorePetIdMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -114,6 +122,7 @@ Resources:
         Ref: PetstorePetIdResource
       RestApiId:
         Ref: HttpNonProxyApi
+
   PostPetstorePetsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -133,6 +142,7 @@ Resources:
         Ref: PetstorePetsResource
       RestApiId:
         Ref: HttpNonProxyApi
+
   PetsModelNoFlatten:
     Type: AWS::ApiGateway::Model
     Properties:
@@ -154,6 +164,7 @@ Resources:
               type: string
             salesPrice:
               type: number
+
   PetsModelFlattenSome:
     Type: AWS::ApiGateway::Model
     Properties:
@@ -173,6 +184,7 @@ Resources:
               type: string
             askingPrice:
               type: number
+
   PetsModelFlattenAll:
     Type: AWS::ApiGateway::Model
     Properties:
@@ -190,6 +202,7 @@ Resources:
             type: array
             items:
               type: string
+
   PetstoreNoflattenResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -198,6 +211,7 @@ Resources:
       PathPart: noflatten
       RestApiId:
         Ref: HttpNonProxyApi
+
   PetstoreFlattensomeResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -206,6 +220,7 @@ Resources:
       PathPart: flattensome
       RestApiId:
         Ref: HttpNonProxyApi
+
   PetstoreFlattenallResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -214,6 +229,7 @@ Resources:
       PathPart: flattenall
       RestApiId:
         Ref: HttpNonProxyApi
+
   PetstoreLambdaflattensomeResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -222,6 +238,7 @@ Resources:
       PathPart: lambdaflattensome
       RestApiId:
         Ref: HttpNonProxyApi
+
   GetPetstoreFlattenallMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -255,6 +272,7 @@ Resources:
         Ref: PetstoreFlattenallResource
       RestApiId:
         Ref: HttpNonProxyApi
+
   GetPetstoreLambdaflattensomeMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -290,6 +308,7 @@ Resources:
         Ref: PetstoreLambdaflattensomeResource
       RestApiId:
         Ref: HttpNonProxyApi
+
   GetPetstoreFlattensomeMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -324,6 +343,7 @@ Resources:
         Ref: PetstoreFlattensomeResource
       RestApiId:
         Ref: HttpNonProxyApi
+
   GetPetstoreNoflattenMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -359,6 +379,7 @@ Resources:
         Ref: PetstoreNoflattenResource
       RestApiId:
         Ref: HttpNonProxyApi
+
   LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -373,6 +394,7 @@ Resources:
       Description: Execution role for Lambda Function
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
   GetPetsInfoFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -394,6 +416,7 @@ Resources:
       Role:
         Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Runtime: nodejs16.x
+
   GetPetsInfoPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -401,6 +424,7 @@ Resources:
       FunctionName:
         Ref: GetPetsInfoFunction
       Principal: apigateway.amazonaws.com
+
   HttpNonProxyApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
@@ -419,6 +443,7 @@ Resources:
       StageDescription:
         Description: Http non-proxy API test stage
       StageName: test
+
 Outputs:
   HttpNonProxyApiTestUrl:
     Value:

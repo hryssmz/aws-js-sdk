@@ -1,6 +1,7 @@
 # sfn/templates/resultpath-demo.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: ResultPath demo
+
 Resources:
   LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
@@ -16,6 +17,7 @@ Resources:
       Description: Execution role for Lambda Function
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
   HelloFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -31,6 +33,7 @@ Resources:
       Role:
         Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Runtime: nodejs14.x
+
   FailFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -52,6 +55,7 @@ Resources:
       Role:
         Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Runtime: nodejs14.x
+
   StateMachineExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -72,6 +76,7 @@ Resources:
               - lambda:InvokeFunction
             Resource:
               - "*"
+
   StateMachineExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -86,6 +91,7 @@ Resources:
       Description: Execution role for State Machine
       ManagedPolicyArns:
         - Ref: StateMachineExecutionPolicy
+
   LambdaStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -102,6 +108,7 @@ Resources:
       RoleArn:
         Fn::GetAtt: StateMachineExecutionRole.Arn
       StateMachineType: STANDARD
+
   CatchFailureStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -142,22 +149,28 @@ Resources:
       RoleArn:
         Fn::GetAtt: StateMachineExecutionRole.Arn
       StateMachineType: STANDARD
+
 Outputs:
   LambdaFunctionExecutionRoleArn:
     Value:
       Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+
   HelloFunctionArn:
     Value:
       Fn::GetAtt: HelloFunction.Arn
+
   FailFunctionArn:
     Value:
       Fn::GetAtt: FailFunction.Arn
+
   StateMachineExecutionRoleArn:
     Value:
       Fn::GetAtt: StateMachineExecutionRole.Arn
+
   LambdaStateMachineArn:
     Value:
       Ref: LambdaStateMachine
+
   CatchFailureStateMachineArn:
     Value:
       Ref: CatchFailureStateMachine

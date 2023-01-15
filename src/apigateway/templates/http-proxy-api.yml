@@ -1,6 +1,7 @@
 # apigateway/templates/http-proxy-api.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: REST Api with HTTP proxy integration
+
 Resources:
   HttpProxyApi:
     Type: AWS::ApiGateway::RestApi
@@ -9,6 +10,7 @@ Resources:
       EndpointConfiguration:
         Types: [REGIONAL]
       Name: HttpProxyApi
+
   ProxyResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -17,6 +19,7 @@ Resources:
       PathPart: "{proxy+}"
       RestApiId:
         Ref: HttpProxyApi
+
   AnyProxyMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -35,6 +38,7 @@ Resources:
         Ref: ProxyResource
       RestApiId:
         Ref: HttpProxyApi
+
   HttpProxyApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
@@ -46,6 +50,7 @@ Resources:
       StageDescription:
         Description: Http proxy API test stage
       StageName: test
+
 Outputs:
   HttpProxyApiTestUrl:
     Value:

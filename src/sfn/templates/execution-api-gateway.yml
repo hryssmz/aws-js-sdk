@@ -1,6 +1,7 @@
 # sfn/templates/execution-api-gateway.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Execute Step Function from API Gateway
+
 Resources:
   StateMachineExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -17,6 +18,7 @@ Resources:
               - xray:GetSamplingTargets
             Resource:
               - "*"
+
   StateMachineExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -31,6 +33,7 @@ Resources:
       Description: Execution role for State Machine
       ManagedPolicyArns:
         - Ref: StateMachineExecutionPolicy
+
   HelloWorldStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -48,6 +51,7 @@ Resources:
       RoleArn:
         Fn::GetAtt: StateMachineExecutionRole.Arn
       StateMachineType: STANDARD
+
   APIGatewayExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -61,6 +65,7 @@ Resources:
               - states:StartExecution
             Resource:
               - "*"
+
   APIGatewayExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -76,6 +81,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
         - Ref: APIGatewayExecutionPolicy
+
   StartExecutionApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
@@ -83,6 +89,7 @@ Resources:
       EndpointConfiguration:
         Types: [REGIONAL]
       Name: StartExecutionAPI
+
   ExecutionResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -91,6 +98,7 @@ Resources:
       PathPart: execution
       RestApiId:
         Ref: StartExecutionApi
+
   PostExecutionMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -115,6 +123,7 @@ Resources:
         Ref: ExecutionResource
       RestApiId:
         Ref: StartExecutionApi
+
   StartExecutionDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
@@ -126,16 +135,20 @@ Resources:
       StageDescription:
         Description: StartExecution API test stage
       StageName: test
+
 Outputs:
   HelloWorldStateMachineArn:
     Value:
       Ref: HelloWorldStateMachine
+
   StateMachineExecutionRoleArn:
     Value:
       Fn::GetAtt: StateMachineExecutionRole.Arn
+
   APIGatewayExecutionRoleArn:
     Value:
       Fn::GetAtt: APIGatewayExecutionRole.Arn
+
   StartExecutionApiTestUrl:
     Value:
       Fn::Sub: https://${StartExecutionApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/test

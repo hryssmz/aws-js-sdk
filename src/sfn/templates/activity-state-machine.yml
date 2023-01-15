@@ -1,6 +1,7 @@
 # sfn/templates/resultpath-demo.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Activity and state machine
+
 Resources:
   StateMachineExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -17,6 +18,7 @@ Resources:
               - xray:GetSamplingTargets
             Resource:
               - "*"
+
   StateMachineExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -31,10 +33,12 @@ Resources:
       Description: Execution role for State Machine
       ManagedPolicyArns:
         - Ref: StateMachineExecutionPolicy
+
   GetGreetingActivity:
     Type: AWS::StepFunctions::Activity
     Properties:
       Name: GetGreeting
+
   ActivityStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -52,10 +56,12 @@ Resources:
       RoleArn:
         Fn::GetAtt: StateMachineExecutionRole.Arn
       StateMachineType: STANDARD
+
 Outputs:
   GetGreetingActivityArn:
     Value:
       Ref: GetGreetingActivity
+
   ActivityStateMachineArn:
     Value:
       Ref: ActivityStateMachine

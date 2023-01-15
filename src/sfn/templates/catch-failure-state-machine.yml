@@ -1,6 +1,7 @@
 # sfn/templates/catch-failure-state-machine.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Handling error conditions using a Step Functions State Machine
+
 Resources:
   LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
@@ -16,6 +17,7 @@ Resources:
       Description: Execution role for Lambda Function
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
   FailFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -37,6 +39,7 @@ Resources:
       Role:
         Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Runtime: nodejs14.x
+
   StateMachineExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -57,6 +60,7 @@ Resources:
               - lambda:InvokeFunction
             Resource:
               - "*"
+
   StateMachineExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -71,6 +75,7 @@ Resources:
       Description: Execution role for State Machine
       ManagedPolicyArns:
         - Ref: StateMachineExecutionPolicy
+
   CatchFailureStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -108,16 +113,20 @@ Resources:
       RoleArn:
         Fn::GetAtt: StateMachineExecutionRole.Arn
       StateMachineType: STANDARD
+
 Outputs:
   LambdaFunctionExecutionRoleArn:
     Value:
       Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+
   FailFunctionArn:
     Value:
       Fn::GetAtt: FailFunction.Arn
+
   StateMachineExecutionRoleArn:
     Value:
       Fn::GetAtt: StateMachineExecutionRole.Arn
+
   CatchFailureStateMachineArn:
     Value:
       Ref: CatchFailureStateMachine

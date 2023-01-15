@@ -1,6 +1,7 @@
 # apigateway/templates/calc-api.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Calc REST API with two AWS service integrations and one Lambda non-proxy integration
+
 Resources:
   LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
@@ -16,6 +17,7 @@ Resources:
       Description: Execution role for Lambda Function
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
   APIGatewayExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -28,6 +30,7 @@ Resources:
               - lambda:InvokeFunction
             Resource:
               - "*"
+
   APIGatewayExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -43,6 +46,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
         - Ref: APIGatewayExecutionPolicy
+
   CalcFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -95,6 +99,7 @@ Resources:
       Role:
         Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Runtime: nodejs16.x
+
   CalcFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -102,6 +107,7 @@ Resources:
       FunctionName:
         Ref: CalcFunction
       Principal: apigateway.amazonaws.com
+
   LambdaCalcApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
@@ -109,6 +115,7 @@ Resources:
       EndpointConfiguration:
         Types: [REGIONAL]
       Name: LambdaCalc
+
   RequestParametersValidator:
     Type: AWS::ApiGateway::RequestValidator
     Properties:
@@ -116,6 +123,7 @@ Resources:
         Ref: LambdaCalcApi
       ValidateRequestBody: false
       ValidateRequestParameters: true
+
   RequestBodyValidator:
     Type: AWS::ApiGateway::RequestValidator
     Properties:
@@ -123,6 +131,7 @@ Resources:
         Ref: LambdaCalcApi
       ValidateRequestBody: true
       ValidateRequestParameters: false
+
   InputModel:
     Type: AWS::ApiGateway::Model
     Properties:
@@ -142,6 +151,7 @@ Resources:
             type: number
           op:
             type: string
+
   OutputModel:
     Type: AWS::ApiGateway::Model
     Properties:
@@ -156,6 +166,7 @@ Resources:
         properties:
           c:
             type: number
+
   ResultModel:
     Type: AWS::ApiGateway::Model
     Properties:
@@ -174,6 +185,7 @@ Resources:
           output:
             $ref:
               Fn::Sub: https://apigateway.amazonaws.com/restapis/${LambdaCalcApi}/models/${OutputModel}
+
   CalcResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -182,6 +194,7 @@ Resources:
       PathPart: calc
       RestApiId:
         Ref: LambdaCalcApi
+
   GetCalcMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -220,6 +233,7 @@ Resources:
         Ref: CalcResource
       RestApiId:
         Ref: LambdaCalcApi
+
   PostCalcMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -249,6 +263,7 @@ Resources:
         Ref: CalcResource
       RestApiId:
         Ref: LambdaCalcApi
+
   Operand1Resource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -257,6 +272,7 @@ Resources:
       PathPart: "{operand1}"
       RestApiId:
         Ref: LambdaCalcApi
+
   Operand2Resource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -265,6 +281,7 @@ Resources:
       PathPart: "{operand2}"
       RestApiId:
         Ref: LambdaCalcApi
+
   CalcPathResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -273,6 +290,7 @@ Resources:
       PathPart: "{operator}"
       RestApiId:
         Ref: LambdaCalcApi
+
   GetCalcPathMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -318,6 +336,7 @@ Resources:
         Ref: CalcPathResource
       RestApiId:
         Ref: LambdaCalcApi
+
   LambdaCalcApiTestDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
@@ -331,6 +350,7 @@ Resources:
       StageDescription:
         Description: Lambda Calc API test stage
       StageName: test
+
 Outputs:
   LambdaCalcApiTestUrl:
     Value:

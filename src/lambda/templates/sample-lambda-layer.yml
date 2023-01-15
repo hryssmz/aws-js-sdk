@@ -1,6 +1,7 @@
 # lambda/templates/sample-lambda-layer.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Sample Lambda Layer stack
+
 Resources:
   AxiosLayer:
     Type: AWS::Lambda::LayerVersion
@@ -13,6 +14,7 @@ Resources:
         S3Bucket: my-bucket-hryssmz
         S3Key: AxiosLayer.zip
       Description: Axios layer
+
   LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -27,6 +29,7 @@ Resources:
       Description: Execution role for Lambda Function
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
   SampleFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -71,6 +74,7 @@ Resources:
         Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Runtime: nodejs16.x
       Timeout: 3
+
   SampleFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -78,6 +82,7 @@ Resources:
       FunctionName:
         Ref: SampleFunction
       Principal: apigateway.amazonaws.com
+
   SampleApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
@@ -85,6 +90,7 @@ Resources:
       EndpointConfiguration:
         Types: [REGIONAL]
       Name: SampleApi
+
   GetRootMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -100,6 +106,7 @@ Resources:
         Fn::GetAtt: SampleApi.RootResourceId
       RestApiId:
         Ref: SampleApi
+
   SampleApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
@@ -111,6 +118,7 @@ Resources:
       StageDescription:
         Description: Sample API test stage
       StageName: test
+
 Outputs:
   SampleApiTestUrl:
     Value:

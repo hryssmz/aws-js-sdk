@@ -1,0 +1,169 @@
+# appsync/templates/type-resolution.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Type resolution example
+
+Resources:
+  GraphQLApiLoggingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Logging role for GraphQl API
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
+
+  GraphQLApi:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      AuthenticationType: API_KEY
+      Name:
+        Ref: AWS::StackName
+      LogConfig:
+        CloudWatchLogsRoleArn:
+          Fn::GetAtt: GraphQLApiLoggingRole.Arn
+        ExcludeVerboseContent: true
+        FieldLogLevel: ERROR
+
+  GraphQLSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Definition: |
+        schema {
+          query: Query
+        }
+
+        type Query {
+          # Retrieve Events at a specific Venue
+          findEventsAtVenue(venueId: ID!): [Event]
+          # Search across all content
+          search(query: String!): [SearchResult]
+        }
+
+        union SearchResult = Conference | Festival | Concert | Venue
+
+        type Venue {
+          id: ID!
+          name: String!
+          address: String
+          maxOccupancy: Int
+        }
+
+        interface Event {
+          id: ID!
+          name: String!
+          startsAt: String
+          endsAt: String
+          venue: Venue
+          minAgeRestriction: Int
+        }
+
+        type Festival implements Event {
+          id: ID!
+          name: String!
+          startsAt: String
+          endsAt: String
+          venue: Venue
+          minAgeRestriction: Int
+          performers: [String]
+        }
+
+        type Conference implements Event {
+          id: ID!
+          name: String!
+          startsAt: String
+          endsAt: String
+          venue: Venue
+          minAgeRestriction: Int
+          speakers: [String]
+          workshops: [String]
+        }
+
+        type Concert implements Event {
+          id: ID!
+          name: String!
+          startsAt: String
+          endsAt: String
+          venue: Venue
+          minAgeRestriction: Int
+          performingBand: String
+        }
+
+  GraphQLApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Description: My GraphQl API key
+
+  StubDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Description: My stub data source
+      Name: StubDataSource
+      Type: NONE
+
+  SearchResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: UNIT
+      DataSourceName:
+        Fn::GetAtt: StubDataSource.Name
+      TypeName: Query
+      FieldName: search
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          ## We are effectively mocking our search results for this example
+          "payload": [
+            {
+              "id": "Venue-1",
+              "name": "Venue 1",
+              "address": "2121 7th Ave, Seattle, WA 98121",
+              "maxOccupancy": 1000
+            },
+            {
+              "id": "Festival-2",
+              "name": "Festival 2",
+              "performers": ["The Singers", "The Screamers"]
+            },
+            {
+              "id": "Concert-3",
+              "name": "Concert 3",
+              "performingBand": "The Jumpers"
+            },
+            {
+              "id": "Conference-4",
+              "name": "Conference 4",
+              "speakers": ["The Storytellers"],
+              "workshops": ["Writing", "Reading"]
+            }
+          ]
+        }
+      ResponseMappingTemplate: |
+        #foreach($result in $context.result)
+            ## Extract type name from the id field.
+            #set($typeName = $result.id.split("-")[0])
+            #set($ignore = $result.put("__typename", $typeName))
+        #end
+        $util.toJson($context.result)
+
+Outputs:
+  GraphQLApiId:
+    Value:
+      Fn::GetAtt: GraphQLApi.ApiId
+
+  GraphQLApiKey:
+    Value:
+      Fn::GetAtt: GraphQLApiKey.ApiKey

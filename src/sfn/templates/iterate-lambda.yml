@@ -1,6 +1,7 @@
 # sfn/templates/iterate-lambda.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: State machine that iterate Lambda function
+
 Resources:
   LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
@@ -16,6 +17,7 @@ Resources:
       Description: Execution role for Lambda Function
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
   IteratorFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -41,6 +43,7 @@ Resources:
       Role:
         Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Runtime: nodejs14.x
+
   StateMachineExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -61,6 +64,7 @@ Resources:
               - lambda:InvokeFunction
             Resource:
               - "*"
+
   StateMachineExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -75,6 +79,7 @@ Resources:
       Description: Execution role for State Machine
       ManagedPolicyArns:
         - Ref: StateMachineExecutionPolicy
+
   IterateCountStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:

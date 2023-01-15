@@ -1,6 +1,7 @@
 # apigateway/templates/kinesis-proxy-api.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: REST API as an Amazon Kinesis proxy
+
 Resources:
   APIGatewayExecutionRole:
     Type: AWS::IAM::Role
@@ -17,6 +18,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
         - arn:aws:iam::aws:policy/AmazonKinesisFullAccess
+
   KinesisProxyApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
@@ -24,6 +26,7 @@ Resources:
       EndpointConfiguration:
         Types: [REGIONAL]
       Name: KinesisProxy
+
   RequestParametersValidator:
     Type: AWS::ApiGateway::RequestValidator
     Properties:
@@ -31,6 +34,7 @@ Resources:
         Ref: KinesisProxyApi
       ValidateRequestBody: false
       ValidateRequestParameters: true
+
   RequestBodyValidator:
     Type: AWS::ApiGateway::RequestValidator
     Properties:
@@ -38,6 +42,7 @@ Resources:
         Ref: KinesisProxyApi
       ValidateRequestBody: true
       ValidateRequestParameters: false
+
   PostStreamNameModel:
     Type: AWS::ApiGateway::Model
     Properties:
@@ -53,6 +58,7 @@ Resources:
         properties:
           ShardCount:
             type: number
+
   PutRecordModel:
     Type: AWS::ApiGateway::Model
     Properties:
@@ -71,6 +77,7 @@ Resources:
           PartitionKey:
             type: string
         required: [Data, PartitionKey]
+
   PutRecordsModel:
     Type: AWS::ApiGateway::Model
     Properties:
@@ -96,6 +103,7 @@ Resources:
               required: [data, partition-key]
             minItems: 1
         required: [records]
+
   StreamsResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -104,6 +112,7 @@ Resources:
       PathPart: streams
       RestApiId:
         Ref: KinesisProxyApi
+
   StreamNameResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -112,6 +121,7 @@ Resources:
       PathPart: "{stream-name}"
       RestApiId:
         Ref: KinesisProxyApi
+
   RecordsResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -120,6 +130,7 @@ Resources:
       PathPart: records
       RestApiId:
         Ref: KinesisProxyApi
+
   RecordResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -128,6 +139,7 @@ Resources:
       PathPart: record
       RestApiId:
         Ref: KinesisProxyApi
+
   ShardIteratorResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -136,6 +148,7 @@ Resources:
       PathPart: sharditerator
       RestApiId:
         Ref: KinesisProxyApi
+
   GetStreamsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -165,6 +178,7 @@ Resources:
         Ref: StreamsResource
       RestApiId:
         Ref: KinesisProxyApi
+
   GetStreamNameMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -197,6 +211,7 @@ Resources:
         Ref: StreamNameResource
       RestApiId:
         Ref: KinesisProxyApi
+
   PostStreamNameMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -236,6 +251,7 @@ Resources:
         Ref: StreamNameResource
       RestApiId:
         Ref: KinesisProxyApi
+
   DeleteStreamNameMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -268,6 +284,7 @@ Resources:
         Ref: StreamNameResource
       RestApiId:
         Ref: KinesisProxyApi
+
   PutRecordMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -307,6 +324,7 @@ Resources:
         Ref: RecordResource
       RestApiId:
         Ref: KinesisProxyApi
+
   PutRecordsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -353,6 +371,7 @@ Resources:
         Ref: RecordsResource
       RestApiId:
         Ref: KinesisProxyApi
+
   GetShardIteratorMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -391,6 +410,7 @@ Resources:
         Ref: ShardIteratorResource
       RestApiId:
         Ref: KinesisProxyApi
+
   GetRecordsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -427,6 +447,7 @@ Resources:
         Ref: RecordsResource
       RestApiId:
         Ref: KinesisProxyApi
+
   KinesisProxyApiTestDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
@@ -445,6 +466,7 @@ Resources:
       StageDescription:
         Description: Kinesis proxy API test stage
       StageName: test
+
 Outputs:
   KinesisProxyApiTestUrl:
     Value:

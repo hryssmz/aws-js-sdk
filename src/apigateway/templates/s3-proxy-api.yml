@@ -1,6 +1,7 @@
 # apigateway/templates/s3-proxy-api.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: REST API as an Amazon S3 proxy
+
 Resources:
   APIGatewayExecutionRole:
     Type: AWS::IAM::Role
@@ -17,6 +18,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
         - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
   MyS3Api:
     Type: AWS::ApiGateway::RestApi
     Properties:
@@ -24,6 +26,7 @@ Resources:
       EndpointConfiguration:
         Types: [REGIONAL]
       Name: MyS3
+
   FolderResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -32,6 +35,7 @@ Resources:
       PathPart: "{folder}"
       RestApiId:
         Ref: MyS3Api
+
   ItemResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -40,6 +44,7 @@ Resources:
       PathPart: "{item}"
       RestApiId:
         Ref: MyS3Api
+
   GetRootMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -82,6 +87,7 @@ Resources:
         Fn::GetAtt: MyS3Api.RootResourceId
       RestApiId:
         Ref: MyS3Api
+
   GetFolderMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -111,6 +117,7 @@ Resources:
         Ref: FolderResource
       RestApiId:
         Ref: MyS3Api
+
   PutFolderMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -140,6 +147,7 @@ Resources:
         Ref: FolderResource
       RestApiId:
         Ref: MyS3Api
+
   DeleteFolderMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -169,6 +177,7 @@ Resources:
         Ref: FolderResource
       RestApiId:
         Ref: MyS3Api
+
   GetItemMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -200,6 +209,7 @@ Resources:
         Ref: ItemResource
       RestApiId:
         Ref: MyS3Api
+
   PutItemMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -231,6 +241,7 @@ Resources:
         Ref: ItemResource
       RestApiId:
         Ref: MyS3Api
+
   HeadItemMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -262,6 +273,7 @@ Resources:
         Ref: ItemResource
       RestApiId:
         Ref: MyS3Api
+
   DeleteItemMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -293,6 +305,7 @@ Resources:
         Ref: ItemResource
       RestApiId:
         Ref: MyS3Api
+
   MyS3ApiTestDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
@@ -311,6 +324,7 @@ Resources:
       StageDescription:
         Description: My S3 API test stage
       StageName: test
+
 Outputs:
   MyS3ApiTestUrl:
     Value:

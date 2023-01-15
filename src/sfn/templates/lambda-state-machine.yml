@@ -1,6 +1,7 @@
 # sfn/templates/lambda-state-machine.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Step Functions state machine that uses Lambda
+
 Resources:
   LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
@@ -16,6 +17,7 @@ Resources:
       Description: Execution role for Lambda Function
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
   HelloFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -31,6 +33,7 @@ Resources:
       Role:
         Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Runtime: nodejs14.x
+
   StateMachineExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -51,6 +54,7 @@ Resources:
               - lambda:InvokeFunction
             Resource:
               - "*"
+
   StateMachineExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -65,6 +69,7 @@ Resources:
       Description: Execution role for State Machine
       ManagedPolicyArns:
         - Ref: StateMachineExecutionPolicy
+
   LambdaStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -93,16 +98,20 @@ Resources:
       RoleArn:
         Fn::GetAtt: StateMachineExecutionRole.Arn
       StateMachineType: STANDARD
+
 Outputs:
   LambdaFunctionExecutionRoleArn:
     Value:
       Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+
   HelloFunctionArn:
     Value:
       Fn::GetAtt: HelloFunction.Arn
+
   StateMachineExecutionRoleArn:
     Value:
       Fn::GetAtt: StateMachineExecutionRole.Arn
+
   LambdaStateMachineArn:
     Value:
       Ref: LambdaStateMachine

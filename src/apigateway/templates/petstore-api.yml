@@ -1,6 +1,7 @@
 # apigateway/templates/petstore-api.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: PetStore API stack
+
 Resources:
   PetStoreApi:
     Type: AWS::ApiGateway::RestApi
@@ -9,6 +10,7 @@ Resources:
       EndpointConfiguration:
         Types: [EDGE]
       Name: PetStoreApi
+
   PetsResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -17,6 +19,7 @@ Resources:
       PathPart: pets
       RestApiId:
         Ref: PetStoreApi
+
   PetIdResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -25,6 +28,7 @@ Resources:
       PathPart: "{petId}"
       RestApiId:
         Ref: PetStoreApi
+
   GetPetsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -46,6 +50,7 @@ Resources:
         Ref: PetsResource
       RestApiId:
         Ref: PetStoreApi
+
   GetPetIdMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -71,6 +76,7 @@ Resources:
         Ref: PetIdResource
       RestApiId:
         Ref: PetStoreApi
+
   PetStoreApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
@@ -83,6 +89,7 @@ Resources:
       StageDescription:
         Description: PetStore API test stage
       StageName: test
+
 Outputs:
   PetStoreApiTestUrl:
     Value:
