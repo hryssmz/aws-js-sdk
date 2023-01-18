@@ -1,6 +1,6 @@
-# appsync/templates/dynamodb-data-source.yml
+# appsync/templates/dynamodb-data-source-vtl.yml
 AWSTemplateFormatVersion: "2010-09-09"
-Description: DynamoDB data source example
+Description: DynamoDB data source example (VTL)
 
 Resources:
   DynamoDBDataSourcePolicy:
@@ -193,177 +193,97 @@ Resources:
         TableName:
           Ref: CommentTable
 
-  CreateTodoFunction:
-    Type: AWS::AppSync::FunctionConfiguration
-    Properties:
-      ApiId:
-        Fn::GetAtt: GraphQLApi.ApiId
-      Name: CREATE_TODO
-      Description: Create Todo function
-      DataSourceName:
-        Fn::GetAtt: TodoTableDataSource.Name
-      Runtime:
-        Name: APPSYNC_JS
-        RuntimeVersion: 1.0.0
-      Code: |
-        import { util } from "@aws-appsync/utils";
-
-        // Sends a request to `put` an item in the DynamoDB data source
-        export function request(ctx) {
-          const { id, ...values } = ctx.args;
-          return {
-            operation: "PutItem",
-            key: util.dynamodb.toMapValues({ id }),
-            attributeValues: util.dynamodb.toMapValues(values),
-          };
-        }
-
-        // returns the result of the `put` operation
-        export function response(ctx) {
-          return ctx.result;
-        }
-
-  ScanTodosFunction:
-    Type: AWS::AppSync::FunctionConfiguration
-    Properties:
-      ApiId:
-        Fn::GetAtt: GraphQLApi.ApiId
-      Name: SCAN_TODOS
-      Description: Scan Todos function
-      DataSourceName:
-        Fn::GetAtt: TodoTableDataSource.Name
-      Runtime:
-        Name: APPSYNC_JS
-        RuntimeVersion: 1.0.0
-      Code: |
-        import { util } from "@aws-appsync/utils";
-
-        // Performs a scan on the dynamodb data source
-        export function request(ctx) {
-          const { limit = 20, nextToken } = ctx.args;
-          return { operation: "Scan", limit, nextToken };
-        }
-
-        // return a list of scanned todo items
-        export function response(ctx) {
-          const { items: todos = [], nextToken } = ctx.result;
-          return { todos, nextToken };
-        }
-
-  TodoCommentsFunction:
-    Type: AWS::AppSync::FunctionConfiguration
-    Properties:
-      ApiId:
-        Fn::GetAtt: GraphQLApi.ApiId
-      Name: TODO_COMMENTS
-      Description: Todo comments function
-      DataSourceName:
-        Fn::GetAtt: CommentTableDataSource.Name
-      Runtime:
-        Name: APPSYNC_JS
-        RuntimeVersion: 1.0.0
-      Code: |
-        import { util } from "@aws-appsync/utils";
-
-        export function request(ctx) {
-          const { id } = ctx.source;
-          return {
-            operation: "Query",
-            index: "todoid-index",
-            query: {
-              expression: "todoid = :todoid",
-              expressionValues: util.dynamodb.toMapValues({ ":todoid": id }),
-            },
-          };
-        }
-
-        export function response(ctx) {
-          return ctx.result.items;
-        }
-
-  CreateCommentFunction:
-    Type: AWS::AppSync::FunctionConfiguration
-    Properties:
-      ApiId:
-        Fn::GetAtt: GraphQLApi.ApiId
-      Name: CREATE_COMMENT
-      Description: Create comment function
-      DataSourceName:
-        Fn::GetAtt: CommentTableDataSource.Name
-      Runtime:
-        Name: APPSYNC_JS
-        RuntimeVersion: 1.0.0
-      Code: |
-        import { util } from "@aws-appsync/utils";
-
-        export function request(ctx) {
-          const { todoid, ...values } = ctx.args;
-          return {
-            operation: "PutItem",
-            key: util.dynamodb.toMapValues({ todoid, commentid: util.autoId() }),
-            attributeValues: util.dynamodb.toMapValues(values),
-          };
-        }
-
-        export function response(ctx) {
-          return ctx.result;
-        }
-
   AddTodoResolver:
     Type: AWS::AppSync::Resolver
     Properties:
       ApiId:
         Fn::GetAtt: GraphQLApi.ApiId
-      Kind: PIPELINE
+      Kind: UNIT
+      DataSourceName:
+        Fn::GetAtt: TodoTableDataSource.Name
       TypeName: Mutation
       FieldName: addTodo
-      RequestMappingTemplate: "{}"
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "PutItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson($ctx.args.id)
+          },
+          "attributeValues": $util.dynamodb.toMapValuesJson($ctx.args)
+        }
       ResponseMappingTemplate: $util.toJson($ctx.result)
-      PipelineConfig:
-        Functions:
-          - Fn::GetAtt: CreateTodoFunction.FunctionId
 
   GetTodosResolver:
     Type: AWS::AppSync::Resolver
     Properties:
       ApiId:
         Fn::GetAtt: GraphQLApi.ApiId
-      Kind: PIPELINE
+      Kind: UNIT
+      DataSourceName:
+        Fn::GetAtt: TodoTableDataSource.Name
       TypeName: Query
       FieldName: getTodos
-      RequestMappingTemplate: "{}"
-      ResponseMappingTemplate: $util.toJson($ctx.result)
-      PipelineConfig:
-        Functions:
-          - Fn::GetAtt: ScanTodosFunction.FunctionId
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Scan",
+          "limit": $util.defaultIfNull(${ctx.args.limit}, 20),
+          "nextToken": $util.toJson($util.defaultIfNullOrBlank($ctx.args.nextToken, null))
+        }
+      ResponseMappingTemplate: |
+        {
+          "todos": $util.toJson($context.result.items),
+          "nextToken": $util.toJson($context.result.nextToken)
+        }
 
   TodoCommentsResolver:
     Type: AWS::AppSync::Resolver
     Properties:
       ApiId:
         Fn::GetAtt: GraphQLApi.ApiId
-      Kind: PIPELINE
+      Kind: UNIT
+      DataSourceName:
+        Fn::GetAtt: CommentTableDataSource.Name
       TypeName: Todo
       FieldName: comments
-      RequestMappingTemplate: "{}"
-      ResponseMappingTemplate: $util.toJson($ctx.result)
-      PipelineConfig:
-        Functions:
-          - Fn::GetAtt: TodoCommentsFunction.FunctionId
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Query",
+          "index": "todoid-index",
+          "query": {
+            "expression": "todoid = :todoid",
+            "expressionValues": {
+              ":todoid": {
+                "S": $util.toJson($context.source.id)
+              }
+            }
+          }
+        }
+      ResponseMappingTemplate: $util.toJson($ctx.result.items)
 
   AddCommentResolver:
     Type: AWS::AppSync::Resolver
     Properties:
       ApiId:
         Fn::GetAtt: GraphQLApi.ApiId
-      Kind: PIPELINE
+      Kind: UNIT
+      DataSourceName:
+        Fn::GetAtt: CommentTableDataSource.Name
       TypeName: Mutation
       FieldName: addComment
-      RequestMappingTemplate: "{}"
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "PutItem",
+          "key": {
+            "todoid": { "S": $util.toJson($context.arguments.todoid) },
+            "commentid": { "S": "$util.autoId()" }
+          },
+          "attributeValues": $util.dynamodb.toMapValuesJson($ctx.args)
+        }
       ResponseMappingTemplate: $util.toJson($ctx.result)
-      PipelineConfig:
-        Functions:
-          - Fn::GetAtt: CreateCommentFunction.FunctionId
 
 Outputs:
   GraphQLApiId:

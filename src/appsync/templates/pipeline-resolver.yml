@@ -1,0 +1,167 @@
+# appsync/templates/pipeline-resolver.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Pipeline resolver example
+
+Resources:
+  GraphQLApiLoggingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Logging role for GraphQl API
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
+
+  GraphQLApi:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      AuthenticationType: API_KEY
+      Name:
+        Ref: AWS::StackName
+      LogConfig:
+        CloudWatchLogsRoleArn:
+          Fn::GetAtt: GraphQLApiLoggingRole.Arn
+        ExcludeVerboseContent: true
+        FieldLogLevel: ERROR
+
+  GraphQLSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Definition: |
+        schema {
+          query: Query
+          mutation: Mutation
+        }
+
+        type Mutation {
+          signUp(input: Signup): User
+        }
+
+        type Query {
+          getUser(id: ID!): User
+        }
+
+        input Signup {
+          username: String!
+          email: String!
+        }
+
+        type User {
+          id: ID!
+          username: String
+          email: AWSEmail
+        }
+
+  GraphQLApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Description: My GraphQl API key
+
+  StubDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Description: My stub data source
+      Name: StubDataSource
+      Type: NONE
+
+  ValidateEmailFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: validateEmail
+      Description: Validate email function
+      DataSourceName:
+        Fn::GetAtt: StubDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from "@aws-appsync/utils";
+
+        export function request(ctx) {
+          const { email } = ctx.stash;
+          const valid = util.matches(
+            "^[a-zA-Z0-9_.+-]+@(?:(?:[a-zA-Z0-9-]+.)?[a-zA-Z]+.)?(myvaliddomain).com",
+            email
+          );
+          if (!valid) {
+            util.error(`"${email}" is not a valid email.`);
+          }
+
+          return { payload: { email } };
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+
+  SaveUserFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: saveUser
+      Description: Save user function
+      DataSourceName:
+        Fn::GetAtt: StubDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from "@aws-appsync/utils";
+
+        export function request(ctx) {
+          return { payload: ctx.arguments.input };
+        }
+
+        export function response(ctx) {
+          ctx.result.id = util.autoId();
+          return ctx.result;
+        }
+
+  SignUpResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Mutation
+      FieldName: signUp
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request(ctx) {
+          ctx.stash.email = ctx.args.input.email;
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.prev.result;
+        }
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: ValidateEmailFunction.FunctionId
+          - Fn::GetAtt: SaveUserFunction.FunctionId
+
+Outputs:
+  GraphQLApiId:
+    Value:
+      Fn::GetAtt: GraphQLApi.ApiId
+
+  GraphQLApiKey:
+    Value:
+      Fn::GetAtt: GraphQLApiKey.ApiKey

@@ -1,0 +1,144 @@
+# appsync/templates/pipeline-resolver-vtl.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Pipeline resolver example (VTL)
+
+Resources:
+  GraphQLApiLoggingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Logging role for GraphQl API
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
+
+  GraphQLApi:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      AuthenticationType: API_KEY
+      Name:
+        Ref: AWS::StackName
+      LogConfig:
+        CloudWatchLogsRoleArn:
+          Fn::GetAtt: GraphQLApiLoggingRole.Arn
+        ExcludeVerboseContent: true
+        FieldLogLevel: ERROR
+
+  GraphQLSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Definition: |
+        schema {
+          query: Query
+          mutation: Mutation
+        }
+
+        type Mutation {
+          signUp(input: Signup): User
+        }
+
+        type Query {
+          getUser(id: ID!): User
+        }
+
+        input Signup {
+          username: String!
+          email: String!
+        }
+
+        type User {
+          id: ID!
+          username: String
+          email: AWSEmail
+        }
+
+  GraphQLApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Description: My GraphQl API key
+
+  StubDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Description: My stub data source
+      Name: StubDataSource
+      Type: NONE
+
+  ValidateEmailFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: validateEmail
+      Description: Validate email function
+      DataSourceName:
+        Fn::GetAtt: StubDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: |
+        #set($valid = $util.matches("^[a-zA-Z0-9_.+-]+@(?:(?:[a-zA-Z0-9-]+\.)?[a-zA-Z]+\.)?(myvaliddomain)\.com", $ctx.stash.email))
+        #if(!$valid)
+          $util.error("$ctx.stash.email is not a valid email.")
+        #end
+        {
+          "payload": { "email": $util.toJson(${ctx.stash.email}) }
+        }
+      ResponseMappingTemplate: $util.toJson($ctx.result)
+
+  SaveUserFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: saveUser
+      Description: Save user function
+      DataSourceName:
+        Fn::GetAtt: StubDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: |
+        ## $ctx.args.input contains the signup input values.
+        {
+          "payload": $util.toJson($ctx.args.input)
+        }
+      ResponseMappingTemplate: |
+        ## an id is required so let's add a unique random identifier to the output
+        $util.qr($ctx.result.put("id", $util.autoId()))
+        $util.toJson($ctx.result)
+
+  SignUpResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Mutation
+      FieldName: signUp
+      RequestMappingTemplate: |
+        ## store email input field into a generic email key
+        $util.qr($ctx.stash.put("email", $ctx.args.input.email))
+        {}
+      ResponseMappingTemplate: $util.toJson($ctx.result)
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: ValidateEmailFunction.FunctionId
+          - Fn::GetAtt: SaveUserFunction.FunctionId
+
+Outputs:
+  GraphQLApiId:
+    Value:
+      Fn::GetAtt: GraphQLApi.ApiId
+
+  GraphQLApiKey:
+    Value:
+      Fn::GetAtt: GraphQLApiKey.ApiKey

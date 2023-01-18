@@ -1,0 +1,775 @@
+# appsync/templates/resolver-tutorial-js.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Resolver tutorial (JavaScript)
+
+Resources:
+  DynamoDBDataSourcePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: CRUD policy for DynamoDB data source
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:DeleteItem
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:Query
+              - dynamodb:Scan
+              - dynamodb:UpdateItem
+            Resource:
+              - "*"
+
+  DynamoDBDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: CRUD role for DynamoDB data source
+      ManagedPolicyArns:
+        - Ref: DynamoDBDataSourcePolicy
+
+  PostTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: author
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      GlobalSecondaryIndexes:
+        - IndexName: author-index
+          KeySchema:
+            - AttributeName: author
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+
+  GraphQLApiLoggingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Logging role for GraphQl API
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
+
+  GraphQLApi:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      AuthenticationType: API_KEY
+      Name:
+        Ref: AWS::StackName
+      LogConfig:
+        CloudWatchLogsRoleArn:
+          Fn::GetAtt: GraphQLApiLoggingRole.Arn
+        ExcludeVerboseContent: true
+        FieldLogLevel: ERROR
+
+  GraphQLSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Definition: |
+        schema {
+          query: Query
+          mutation: Mutation
+        }
+
+        type Query {
+          allPostsByTag(tag: String!, limit: Int, nextToken: String): PaginatedPosts!
+          allPostsByAuthor(
+            author: String!
+            limit: Int
+            nextToken: String
+          ): PaginatedPosts!
+          allPost(limit: Int, nextToken: String): PaginatedPosts!
+          getPost(id: ID): Post
+        }
+
+        type Mutation {
+          addTag(id: ID!, tag: String!): Post
+          removeTag(id: ID!, tag: String!): Post
+          deletePost(id: ID!, expectedVersion: Int): Post
+          vote(id: ID!, direction: DIRECTION!): Post
+          updatePost(
+            id: ID!
+            author: String
+            title: String
+            content: String
+            url: String
+            expectedVersion: Int!
+          ): Post
+          addPost(
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+            url: String!
+          ): Post!
+        }
+
+        type Post {
+          id: ID!
+          author: String
+          title: String
+          content: String
+          url: String
+          ups: Int!
+          downs: Int!
+          version: Int!
+          tags: [String!]
+        }
+
+        type PaginatedPosts {
+          posts: [Post!]!
+          nextToken: String
+        }
+
+        enum DIRECTION {
+          UP
+          DOWN
+        }
+
+  GraphQLApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Description: My GraphQl API key
+
+  PostTableDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Description: PostTable data source
+      Name: PostTableDataSource
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn:
+        Fn::GetAtt: DynamoDBDataSourceRole.Arn
+      DynamoDBConfig:
+        AwsRegion:
+          Ref: AWS::Region
+        TableName:
+          Ref: PostTable
+
+  AddPostFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: ADD_POST
+      Description: Add post function
+      DataSourceName:
+        Fn::GetAtt: PostTableDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from "@aws-appsync/utils";
+
+        export function request(ctx) {
+          const { id, ...values } = ctx.arguments;
+          values.ups = 1;
+          values.downs = 0;
+          values.version = 1;
+          return {
+            operation: "PutItem",
+            key: util.dynamodb.toMapValues({ id }),
+            attributeValues: util.dynamodb.toMapValues(values),
+          };
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+
+  GetPostFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: GET_POST
+      Description: Get post function
+      DataSourceName:
+        Fn::GetAtt: PostTableDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from "@aws-appsync/utils";
+
+        export function request(ctx) {
+          return {
+            operation: "GetItem",
+            key: util.dynamodb.toMapValues({ id: ctx.args.id }),
+          };
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+
+  UpdatePostFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: UPDATE_POST
+      Description: Update post function
+      DataSourceName:
+        Fn::GetAtt: PostTableDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from "@aws-appsync/utils";
+
+        export function request(ctx) {
+          const { id, expectedVersion, ...values } = ctx.args;
+          const condition = { version: { eq: expectedVersion } };
+          return dynamodbUpdateRequest({ key: { id }, values, condition });
+        }
+
+        export function response(ctx) {
+          const { error, result } = ctx;
+          if (error) {
+            util.appendError(error.message, error.type);
+          }
+          return result;
+        }
+
+        function dynamodbUpdateRequest({ key, values, condition }) {
+          const sets = [];
+          const removes = [];
+          const expressionNames = {};
+          const expValues = {};
+
+          // iterate through the entries (key, value) of the values to be updated
+          for (const [k, value] of Object.entries(values)) {
+            // set the name
+            expressionNames[`#${k}`] = k;
+            if (value && value.length) {
+              // if the value exists, and it to the list to be SET
+              sets.push(`#${k} = :${k}`);
+              expValues[`:${k}`] = value;
+            } else {
+              // if not, mark it to be REMOVED
+              removes.push(`#${k}`);
+            }
+          }
+
+          let expression = sets.length ? `SET ${sets.join(", ")}` : "";
+          expression += removes.length ? ` REMOVE ${removes.join(", ")}` : "";
+
+          // increase the value of the version by 1
+          expressionNames["#version"] = "version";
+          expValues[":version"] = 1;
+          expression += " ADD #version :version";
+
+          return {
+            operation: "UpdateItem",
+            key: util.dynamodb.toMapValues(key),
+            update: {
+              expression,
+              expressionNames,
+              expressionValues: util.dynamodb.toMapValues(expValues),
+            },
+            condition: JSON.parse(
+              util.transform.toDynamoDBConditionExpression(condition)
+            ),
+          };
+        }
+
+  VoteFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: VOTE
+      Description: Vote function
+      DataSourceName:
+        Fn::GetAtt: PostTableDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from "@aws-appsync/utils";
+
+        export function request(ctx) {
+          const { id, direction } = ctx.arguments;
+          const field = direction === "UP" ? "ups" : "downs";
+
+          return {
+            operation: "UpdateItem",
+            key: util.dynamodb.toMapValues({ id }),
+            update: {
+              expression: `ADD ${field} :plusOne, version :plusOne`,
+              expressionValues: util.dynamodb.toMapValues({ ":plusOne": 1 }),
+            },
+          };
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+
+  DeletePostFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: DELETE_POST
+      Description: Delete post function
+      DataSourceName:
+        Fn::GetAtt: PostTableDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from "@aws-appsync/utils";
+
+        export function request(ctx) {
+          const { id, expectedVersion } = ctx.arguments;
+
+          const request = {
+            operation: "DeleteItem",
+            key: util.dynamodb.toMapValues({ id }),
+          };
+
+          if (expectedVersion) {
+            request.condition = JSON.parse(
+              util.transform.toDynamoDBConditionExpression({
+                or: [
+                  { id: { attributeExists: false } },
+                  { version: { eq: expectedVersion } },
+                ],
+              })
+            );
+          }
+
+          return request;
+        }
+
+        export function response(ctx) {
+          const { error, result } = ctx;
+          if (error) {
+            util.appendError(error.message, error.type);
+          }
+          return result;
+        }
+
+  AllPostFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: ALL_POST
+      Description: All post function
+      DataSourceName:
+        Fn::GetAtt: PostTableDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from "@aws-appsync/utils";
+
+        export function request(ctx) {
+          const { limit = 20, nextToken } = ctx.arguments;
+          return { operation: "Scan", limit, nextToken };
+        }
+
+        export function response(ctx) {
+          const { items: posts = [], nextToken } = ctx.result;
+          return { posts, nextToken };
+        }
+
+  AllPostsByAuthorFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: ALL_POSTS_BY_AUTHOR
+      Description: All posts by author function
+      DataSourceName:
+        Fn::GetAtt: PostTableDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from "@aws-appsync/utils";
+
+        export function request(ctx) {
+          const { limit = 20, nextToken, author } = ctx.arguments;
+          const index = "author-index";
+          const query = JSON.parse(
+            util.transform.toDynamoDBConditionExpression({ author: { eq: author } })
+          );
+          return { operation: "Query", index, query, limit, nextToken };
+        }
+
+        export function response(ctx) {
+          const { items: posts = [], nextToken } = ctx.result;
+          return { posts, nextToken };
+        }
+
+  ScanByTagFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: SCAN_BY_TAG
+      Description: Scan by tag function
+      DataSourceName:
+        Fn::GetAtt: PostTableDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from "@aws-appsync/utils";
+
+        export function request(ctx) {
+          const { limit = 20, nextToken, tag } = ctx.arguments;
+          const filter = JSON.parse(
+            util.transform.toDynamoDBFilterExpression({
+              tags: { contains: tag },
+            })
+          );
+          return { operation: "Scan", limit, filter, nextToken };
+        }
+
+        export function response(ctx) {
+          const { items: posts = [], nextToken } = ctx.result;
+          return { posts, nextToken };
+        }
+
+  AddTagFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: ADD_TAG
+      Description: Add tag function
+      DataSourceName:
+        Fn::GetAtt: PostTableDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from "@aws-appsync/utils";
+
+        export function request(ctx) {
+          const { id, tag } = ctx.arguments;
+          const expressionValues = util.dynamodb.toMapValues({ ":plusOne": 1 });
+          expressionValues[":tags"] = util.dynamodb.toStringSet([tag]);
+
+          return {
+            operation: "UpdateItem",
+            key: util.dynamodb.toMapValues({ id }),
+            update: {
+              expression: `ADD tags :tags, version :plusOne`,
+              expressionValues,
+            },
+          };
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+
+  RemoveTagFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: REMOVE_TAG
+      Description: Remove tag function
+      DataSourceName:
+        Fn::GetAtt: PostTableDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from "@aws-appsync/utils";
+
+        export function request(ctx) {
+          const { id, tag } = ctx.arguments;
+          const expressionValues = util.dynamodb.toMapValues({ ":plusOne": 1 });
+          expressionValues[":tags"] = util.dynamodb.toStringSet([tag]);
+
+          return {
+            operation: "UpdateItem",
+            key: util.dynamodb.toMapValues({ id }),
+            update: {
+              expression: `DELETE tags :tags ADD version :plusOne`,
+              expressionValues,
+            },
+          };
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+
+  AddPostResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Mutation
+      FieldName: addPost
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request(ctx) {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: AddPostFunction.FunctionId
+
+  GetPostResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Query
+      FieldName: getPost
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request(ctx) {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: GetPostFunction.FunctionId
+
+  UpdatePostResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Mutation
+      FieldName: updatePost
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request(ctx) {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: UpdatePostFunction.FunctionId
+
+  VoteResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Mutation
+      FieldName: vote
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request(ctx) {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: VoteFunction.FunctionId
+
+  DeletePostResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Mutation
+      FieldName: deletePost
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request(ctx) {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: DeletePostFunction.FunctionId
+
+  AllPostResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Query
+      FieldName: allPost
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request(ctx) {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: AllPostFunction.FunctionId
+
+  AllPostsByAuthorResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Query
+      FieldName: allPostsByAuthor
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request(ctx) {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: AllPostsByAuthorFunction.FunctionId
+
+  AllPostsByTagResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Query
+      FieldName: allPostsByTag
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request(ctx) {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: ScanByTagFunction.FunctionId
+
+  AddTagResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Mutation
+      FieldName: addTag
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request(ctx) {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: AddTagFunction.FunctionId
+
+  RemoveTagResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Mutation
+      FieldName: removeTag
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request(ctx) {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: RemoveTagFunction.FunctionId
+
+Outputs:
+  GraphQLApiId:
+    Value:
+      Fn::GetAtt: GraphQLApi.ApiId
+
+  GraphQLApiKey:
+    Value:
+      Fn::GetAtt: GraphQLApiKey.ApiKey

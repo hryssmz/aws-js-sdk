@@ -20,8 +20,7 @@ async function createStack() {
     TemplateBody: templateBody,
     Parameters: parameters,
     Capabilities: ["CAPABILITY_IAM"],
-    // OnFailure: "DELETE",
-    DisableRollback: true,
+    OnFailure: "DELETE",
   });
   return JSON.stringify(stackName, null, 2);
 }
@@ -55,6 +54,7 @@ async function updateStack() {
     TemplateBody: templateBody,
     Parameters: parameters,
     Capabilities: ["CAPABILITY_IAM"],
+    DisableRollback: true,
   });
   return JSON.stringify(stackName, null, 2);
 }

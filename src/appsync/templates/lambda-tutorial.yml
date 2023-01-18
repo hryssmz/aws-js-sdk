@@ -1,0 +1,348 @@
+# appsync/templates/lambda-tutorial.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Resolver tutorial (Lambda)
+
+Resources:
+  LambdaDataSourcePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Policy for data source to invoke Lambda Functions
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - "*"
+
+  LambdaFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for Lambda Function
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  GraphQLApiLoggingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Logging role for GraphQl API
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
+
+  LambdaDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Role for data source to invoke Lambda Functions
+      ManagedPolicyArns:
+        - Ref: LambdaDataSourcePolicy
+
+  HandlePostFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Architectures:
+        - x86_64
+      Code:
+        ZipFile: |
+          exports.handler = async event => {
+            console.log("Received event {}", JSON.stringify(event, null, 2));
+            // throw new Error("I fail. always");
+
+            const posts = {
+              1: {
+                id: "1",
+                title: "First book",
+                author: "Author1",
+                url: "https://amazon.com/",
+                content:
+                  "SAMPLE TEXT AUTHOR 1 SAMPLE TEXT AUTHOR 1 SAMPLE TEXT AUTHOR 1 SAMPLE TEXT AUTHOR 1 SAMPLE TEXT AUTHOR 1 SAMPLE TEXT AUTHOR 1",
+                ups: "100",
+                downs: "10",
+              },
+              2: {
+                id: "2",
+                title: "Second book",
+                author: "Author2",
+                url: "https://amazon.com",
+                content: "SAMPLE TEXT AUTHOR 2 SAMPLE TEXT AUTHOR 2 SAMPLE TEXT",
+                ups: "100",
+                downs: "10",
+              },
+              3: {
+                id: "3",
+                title: "Third book",
+                author: "Author3",
+                url: null,
+                content: null,
+                ups: null,
+                downs: null,
+              },
+              4: {
+                id: "4",
+                title: "Fourth book",
+                author: "Author4",
+                url: "https://www.amazon.com/",
+                content:
+                  "SAMPLE TEXT AUTHOR 4 SAMPLE TEXT AUTHOR 4 SAMPLE TEXT AUTHOR 4 SAMPLE TEXT AUTHOR 4 SAMPLE TEXT AUTHOR 4 SAMPLE TEXT AUTHOR 4 SAMPLE TEXT AUTHOR 4 SAMPLE TEXT AUTHOR 4",
+                ups: "1000",
+                downs: "0",
+              },
+              5: {
+                id: "5",
+                title: "Fifth book",
+                author: "Author5",
+                url: "https://www.amazon.com/",
+                content:
+                  "SAMPLE TEXT AUTHOR 5 SAMPLE TEXT AUTHOR 5 SAMPLE TEXT AUTHOR 5 SAMPLE TEXT AUTHOR 5 SAMPLE TEXT",
+                ups: "50",
+                downs: "0",
+              },
+            };
+
+            const relatedPosts = {
+              1: [posts["4"]],
+              2: [posts["3"], posts["5"]],
+              3: [posts["2"], posts["1"]],
+              4: [posts["2"], posts["1"]],
+              5: [],
+            };
+
+            if (!event.field && event.length) {
+              console.log(
+                `Got a BatchInvoke Request. The payload has ${event.length} items to resolve.`
+              );
+              return event.map(e => {
+                // return an error for post 2
+                if (e.source.id === "2") {
+                  return {
+                    data: null,
+                    errorMessage: "Error Happened",
+                    errorType: "ERROR",
+                  };
+                }
+                return { data: relatedPosts[e.source.id] };
+              });
+            }
+
+            console.log("Got an Invoke Request.");
+            switch (event.field) {
+              case "getPost":
+                return posts[event.arguments.id];
+              case "allPosts":
+                return Object.values(posts);
+              case "addPost":
+                // return the arguments back
+                return event.arguments;
+              case "addPostErrorWithData":
+                return {
+                  ...posts[event.arguments.id],
+                  // attached additional error information to the post
+                  errorMessage: "Error with mutation, data has changed",
+                  errorType: "MUTATION_ERROR",
+                };
+              case "relatedPosts":
+                return relatedPosts[event.source.id];
+              default:
+                throw new Error("Unknown field, unable to resolve " + event.field);
+            }
+          };
+      Description: Handle post function
+      Handler: index.handler
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+      Runtime: nodejs16.x
+
+  GraphQLApi:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      AuthenticationType: API_KEY
+      Name:
+        Ref: AWS::StackName
+      LogConfig:
+        CloudWatchLogsRoleArn:
+          Fn::GetAtt: GraphQLApiLoggingRole.Arn
+        ExcludeVerboseContent: true
+        FieldLogLevel: ERROR
+
+  GraphQLSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Definition: |
+        schema {
+          query: Query
+          mutation: Mutation
+        }
+
+        type Query {
+          getPost(id: ID!): Post
+          allPosts: [Post]
+        }
+
+        type Mutation {
+          addPost(
+            id: ID!
+            author: String!
+            title: String
+            content: String
+            url: String
+          ): Post!
+        }
+
+        type Post {
+          id: ID!
+          author: String!
+          title: String
+          content: String
+          url: String
+          ups: Int
+          downs: Int
+          relatedPosts: [Post]
+        }
+
+  GraphQLApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Description: My GraphQl API key
+
+  LambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Description: My Lambda data source
+      Name: LambdaDataSource
+      Type: AWS_LAMBDA
+      ServiceRoleArn:
+        Fn::GetAtt: LambdaDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn:
+          Fn::GetAtt: HandlePostFunction.Arn
+
+  LambdaInvokerFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Name: lambdaInvoker
+      Description: Lambda invoker function
+      DataSourceName:
+        Fn::GetAtt: LambdaDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from "@aws-appsync/utils";
+
+        export function request(ctx) {
+          const { source, args } = ctx;
+          return {
+            operation: ctx.info.fieldName === "relatedPosts" ? "BatchInvoke" : "Invoke",
+            payload: { field: ctx.info.fieldName, arguments: args, source },
+          };
+        }
+
+        export function response(ctx) {
+          const { error, result } = ctx;
+          if (error) {
+            util.appendError(error.message, error.type, result);
+          } else if (result.errorMessage) {
+            util.appendError(result.errorMessage, result.errorType, result.data);
+          } else if (ctx.info.fieldName === "relatedPosts") {
+            return result.data;
+          } else {
+            return result;
+          }
+        }
+
+  GetPostResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Query
+      FieldName: getPost
+      RequestMappingTemplate: "{}"
+      ResponseMappingTemplate: $util.toJson($ctx.result)
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: LambdaInvokerFunction.FunctionId
+
+  AllPostsResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Query
+      FieldName: allPosts
+      RequestMappingTemplate: "{}"
+      ResponseMappingTemplate: $util.toJson($ctx.result)
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: LambdaInvokerFunction.FunctionId
+
+  AddPostResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Mutation
+      FieldName: addPost
+      RequestMappingTemplate: "{}"
+      ResponseMappingTemplate: $util.toJson($ctx.result)
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: LambdaInvokerFunction.FunctionId
+
+  RelatedPostsResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt: GraphQLApi.ApiId
+      Kind: PIPELINE
+      TypeName: Post
+      FieldName: relatedPosts
+      RequestMappingTemplate: "{}"
+      ResponseMappingTemplate: $util.toJson($ctx.result)
+      PipelineConfig:
+        Functions:
+          - Fn::GetAtt: LambdaInvokerFunction.FunctionId
+
+Outputs:
+  GraphQLApiId:
+    Value:
+      Fn::GetAtt: GraphQLApi.ApiId
+
+  GraphQLApiKey:
+    Value:
+      Fn::GetAtt: GraphQLApiKey.ApiKey
