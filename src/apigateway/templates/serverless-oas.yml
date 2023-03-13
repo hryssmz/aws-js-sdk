@@ -1,0 +1,888 @@
+# apigateway/templates/serverless-oas.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Sample SAM App
+
+Parameters:
+  EnvironmentType:
+    Type: String
+    Description: API Gateway deployment stage
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+
+  Architecture:
+    Type: String
+    Description: Lambda CPU architecture
+    Default: arm64
+    AllowedValues:
+      - arm64
+      - x86_64
+
+Globals:
+  Function:
+    Handler: index.handler
+    Runtime: python3.9
+    Timeout: 10
+    Architectures:
+      - Ref: Architecture
+
+Resources:
+  # Managed policies
+  ListBucketsFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Managed policy for ListBucketsFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:ListAllMyBuckets
+            Resource:
+              - "*"
+
+  CreateBucketFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Managed policy for CreateBucketFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:CreateBucket
+            Resource:
+              - "*"
+
+  DeleteBucketFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Managed policy for DeleteBucketFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:DeleteBucket
+            Resource:
+              - "*"
+
+  ListObjectsFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Managed policy for ListObjectsFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+            Resource:
+              - "*"
+
+  CreateObjectFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Managed policy for CreateObjectFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+            Resource:
+              - "*"
+
+  GetObjectFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Managed policy for GetObjectFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource:
+              - "*"
+
+  DeleteObjectFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Managed policy for DeleteObjectFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:DeleteObject
+            Resource:
+              - "*"
+
+  # REST API
+  HelloWorldApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Description: Hello World REST API
+      StageName:
+        Ref: EnvironmentType
+      Cors:
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: serverless-oas-api
+          version: "1.0"
+        servers:
+          - url: https://{restApiId}.execute-api.{region}.amazonaws.com/{basePath}
+            variables:
+              restApiId:
+                default: example123
+              region:
+                default: ap-northeast-1
+              basePath:
+                default: dev
+        paths:
+          /buckets:
+            get:
+              operationId: GetBuckets
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/GetBucketsResponse"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: "#/components/headers/Access-Control-Allow-Origin"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ListBucketsFunction.Arn}/invocations
+                httpMethod: POST
+          /buckets/{bucket}:
+            parameters:
+              - $ref: "#/components/parameters/bucketParam"
+            put:
+              operationId: PutBucket
+              responses:
+                "201":
+                  description: 201 Created
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/EmptyObject"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: "#/components/headers/Access-Control-Allow-Origin"
+                "204":
+                  $ref: "#/components/responses/NoContent"
+                "403":
+                  $ref: "#/components/responses/Forbidden"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateBucketFunction.Arn}/invocations
+                httpMethod: POST
+            delete:
+              operationId: DeleteBucket
+              responses:
+                "204":
+                  $ref: "#/components/responses/NoContent"
+                "403":
+                  $ref: "#/components/responses/Forbidden"
+                "404":
+                  $ref: "#/components/responses/NotFound"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DeleteBucketFunction.Arn}/invocations
+                httpMethod: POST
+            get:
+              operationId: GetBucket
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/GetBucketResponse"
+                "403":
+                  $ref: "#/components/responses/Forbidden"
+                "404":
+                  $ref: "#/components/responses/NotFound"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ListObjectsFunction.Arn}/invocations
+                httpMethod: POST
+          /buckets/{bucket}/{key}:
+            parameters:
+              - $ref: "#/components/parameters/bucketParam"
+              - $ref: "#/components/parameters/keyParam"
+            put:
+              operationId: PutObject
+              requestBody:
+                description: PutObject request body
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      $ref: "#/components/schemas/PutObjectRequest"
+              responses:
+                "201":
+                  description: 201 Created
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/EmptyObject"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: "#/components/headers/Access-Control-Allow-Origin"
+                "400":
+                  $ref: "#/components/responses/BadRequest"
+                "403":
+                  $ref: "#/components/responses/Forbidden"
+                "404":
+                  $ref: "#/components/responses/NotFound"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateObjectFunction.Arn}/invocations
+                httpMethod: POST
+            get:
+              operationId: GetObject
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/GetObjectResponse"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: "#/components/headers/Access-Control-Allow-Origin"
+                "403":
+                  $ref: "#/components/responses/Forbidden"
+                "404":
+                  $ref: "#/components/responses/NotFound"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetObjectFunction.Arn}/invocations
+                httpMethod: POST
+            delete:
+              operationId: DeleteObject
+              responses:
+                "204":
+                  $ref: "#/components/responses/NoContent"
+                "403":
+                  $ref: "#/components/responses/Forbidden"
+                "404":
+                  $ref: "#/components/responses/NotFound"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DeleteObjectFunction.Arn}/invocations
+                httpMethod: POST
+        components:
+          schemas:
+            EmptyObject:
+              description: Empty object
+              type: object
+              properties: {}
+              example: {}
+            ClientError:
+              description: Client error object
+              type: object
+              required:
+                - code
+                - message
+              properties:
+                code:
+                  type: string
+                message:
+                  type: string
+              example:
+                code: ClientError
+                message: Error message
+            GetBucketsResponse:
+              description: Response body for GET /buckets
+              type: object
+              required:
+                - buckets
+              properties:
+                buckets:
+                  type: array
+                  items:
+                    type: string
+              example:
+                buckets:
+                  - my-bucket
+                  - another-bucket
+            GetBucketResponse:
+              description: Response body for GET /buckets/{bucket}
+              type: object
+              required:
+                - objects
+              properties:
+                objects:
+                  type: array
+                  items:
+                    type: string
+              example:
+                objects:
+                  - foo.txt
+                  - bar/baz.png
+            PutObjectRequest:
+              description: Request body for PUT /buckets/{bucket}/{key}
+              type: object
+              required:
+                - content
+              properties:
+                content:
+                  type: string
+              example:
+                content: sample file text content
+            GetObjectResponse:
+              description: Response body for GET /buckets/{bucket}/{key}
+              type: object
+              required:
+                - content
+              properties:
+                content:
+                  type: string
+              example:
+                content: sample file text content
+          parameters:
+            bucketParam:
+              name: bucket
+              in: path
+              description: S3 bucket name
+              required: true
+              schema:
+                type: string
+                example: my-bucket
+            keyParam:
+              name: key
+              in: path
+              description: S3 object key
+              required: true
+              schema:
+                type: string
+                example: foo.txt
+          headers:
+            Access-Control-Allow-Origin:
+              description: Response header for CORS support
+              schema:
+                type: string
+                example: "*"
+          responses:
+            NoContent:
+              description: 204 No Content
+              headers:
+                Access-Control-Allow-Origin:
+                  $ref: "#/components/headers/Access-Control-Allow-Origin"
+            BadRequest:
+              description: 400 Bad Request
+              content:
+                application/json:
+                  schema:
+                    $ref: "#/components/schemas/ClientError"
+              headers:
+                Access-Control-Allow-Origin:
+                  $ref: "#/components/headers/Access-Control-Allow-Origin"
+            Forbidden:
+              description: 403 Forbidden
+              content:
+                application/json:
+                  schema:
+                    $ref: "#/components/schemas/ClientError"
+              headers:
+                Access-Control-Allow-Origin:
+                  $ref: "#/components/headers/Access-Control-Allow-Origin"
+            NotFound:
+              description: 404 Not Found
+              content:
+                application/json:
+                  schema:
+                    $ref: "#/components/schemas/ClientError"
+              headers:
+                Access-Control-Allow-Origin:
+                  $ref: "#/components/headers/Access-Control-Allow-Origin"
+
+  # Lambda functions (REST API)
+  ListBucketsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      InlineCode: |
+        # aws_s3_app/list_buckets/index.py
+        import json
+        import logging
+        from typing import Any
+
+        import boto3
+
+
+        def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+            logger = logging.getLogger(context.function_name)
+            logger.setLevel(logging.INFO)
+
+            client = boto3.client("s3")
+            res = client.list_buckets()
+            bucket_names = [bucket["Name"] for bucket in res["Buckets"]]
+
+            response = {
+                "statusCode": 200,
+                "headers": {"Access-Control-Allow-Origin": "*"},
+                "body": json.dumps({"buckets": bucket_names}),
+                "multiValueHeaders": {},
+                "isBase64Encoded": False,
+            }
+            return response
+      Description: List buckets function
+      Policies:
+        - Ref: ListBucketsFunctionPolicy
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /buckets
+            RestApiId:
+              Ref: HelloWorldApi
+
+  CreateBucketFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      InlineCode: |
+        # aws_s3_app/create_bucket/index.py
+        import json
+        import logging
+        import os
+        from typing import Any
+
+        import boto3
+        from botocore.exceptions import ClientError
+
+
+        def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+            logger = logging.getLogger(context.function_name)
+            logger.setLevel(logging.INFO)
+
+            bucket_name = event["pathParameters"]["bucket"]
+            region = os.environ["AWS_REGION"]
+            s3 = boto3.resource("s3")
+            bucket = s3.Bucket(bucket_name)
+            try:
+                res = bucket.create(
+                    CreateBucketConfiguration={"LocationConstraint": region}
+                )
+                response = {
+                    "statusCode": 201,
+                    "headers": {"Access-Control-Allow-Origin": "*"},
+                    "body": json.dumps({"location": res["Location"]}),
+                    "multiValueHeaders": {},
+                    "isBase64Encoded": False,
+                }
+            except ClientError as exc:
+                error = exc.response["Error"]
+                if error["Code"] == "BucketAlreadyOwnedByYou":
+                    response = {
+                        "statusCode": 204,
+                        "headers": {"Access-Control-Allow-Origin": "*"},
+                        "body": json.dumps(None),
+                        "multiValueHeaders": {},
+                        "isBase64Encoded": False,
+                    }
+                elif error["Code"] == "BucketAlreadyExists":
+                    response = {
+                        "statusCode": 403,
+                        "headers": {"Access-Control-Allow-Origin": "*"},
+                        "body": json.dumps(
+                            {"code": error["Code"], "message": error["Message"]}
+                        ),
+                        "multiValueHeaders": {},
+                        "isBase64Encoded": False,
+                    }
+                else:
+                    raise exc
+
+            return response
+      Description: Create bucket function
+      Policies:
+        - Ref: CreateBucketFunctionPolicy
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: PUT
+            Path: /buckets/{bucket}
+            RestApiId:
+              Ref: HelloWorldApi
+
+  DeleteBucketFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      InlineCode: |
+        # aws_s3_app/delete_bucket/index.py
+        import json
+        import logging
+        from typing import Any
+
+        import boto3
+        from botocore.exceptions import ClientError
+
+
+        def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+            logger = logging.getLogger(context.function_name)
+            logger.setLevel(logging.INFO)
+
+            bucket_name = event["pathParameters"]["bucket"]
+            s3 = boto3.resource("s3")
+            bucket = s3.Bucket(bucket_name)
+
+            try:
+                bucket.delete()
+                response = {
+                    "statusCode": 204,
+                    "headers": {"Access-Control-Allow-Origin": "*"},
+                    "body": json.dumps(None),
+                    "multiValueHeaders": {},
+                    "isBase64Encoded": False,
+                }
+            except ClientError as exc:
+                error = exc.response["Error"]
+                if error["Code"] == "NoSuchBucket":
+                    response = {
+                        "statusCode": 404,
+                        "headers": {"Access-Control-Allow-Origin": "*"},
+                        "body": json.dumps(
+                            {"code": error["Code"], "message": error["Message"]}
+                        ),
+                        "multiValueHeaders": {},
+                        "isBase64Encoded": False,
+                    }
+                elif error["Code"] in ["AccessDenied", "BucketNotEmpty"]:
+                    response = {
+                        "statusCode": 403,
+                        "headers": {"Access-Control-Allow-Origin": "*"},
+                        "body": json.dumps(
+                            {"code": error["Code"], "message": error["Message"]}
+                        ),
+                        "multiValueHeaders": {},
+                        "isBase64Encoded": False,
+                    }
+                else:
+                    raise exc
+
+            return response
+      Description: Delete bucket function
+      Policies:
+        - Ref: DeleteBucketFunctionPolicy
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: DELETE
+            Path: /buckets/{bucket}
+            RestApiId:
+              Ref: HelloWorldApi
+
+  ListObjectsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      InlineCode: |
+        # aws_s3_app/list_objects/index.py
+        import json
+        import logging
+        from typing import Any
+
+        import boto3
+        from botocore.exceptions import ClientError
+
+
+        def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+            logger = logging.getLogger(context.function_name)
+            logger.setLevel(logging.INFO)
+
+            bucket_name = event["pathParameters"]["bucket"]
+            s3 = boto3.resource("s3")
+            bucket = s3.Bucket(bucket_name)
+
+            try:
+                objects = [object.key for object in bucket.objects.all()]
+                response = {
+                    "statusCode": 200,
+                    "headers": {"Access-Control-Allow-Origin": "*"},
+                    "body": json.dumps({"objects": objects}),
+                    "multiValueHeaders": {},
+                    "isBase64Encoded": False,
+                }
+            except ClientError as exc:
+                error = exc.response["Error"]
+                if error["Code"] == "NoSuchBucket":
+                    response = {
+                        "statusCode": 404,
+                        "headers": {"Access-Control-Allow-Origin": "*"},
+                        "body": json.dumps(
+                            {"code": error["Code"], "message": error["Message"]}
+                        ),
+                        "multiValueHeaders": {},
+                        "isBase64Encoded": False,
+                    }
+                elif error["Code"] == "AccessDenied":
+                    response = {
+                        "statusCode": 403,
+                        "headers": {"Access-Control-Allow-Origin": "*"},
+                        "body": json.dumps(
+                            {"code": error["Code"], "message": error["Message"]}
+                        ),
+                        "multiValueHeaders": {},
+                        "isBase64Encoded": False,
+                    }
+                else:
+                    raise exc
+
+            return response
+      Description: List objects function
+      Policies:
+        - Ref: ListObjectsFunctionPolicy
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /buckets/{bucket}
+            RestApiId:
+              Ref: HelloWorldApi
+
+  CreateObjectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      InlineCode: |
+        # aws_s3_app/create_object/index.py
+        import json
+        import logging
+        from typing import Any
+
+        import boto3
+        from botocore.exceptions import ClientError
+
+
+        def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+            logger = logging.getLogger(context.function_name)
+            logger.setLevel(logging.INFO)
+
+            bucket_name = event["pathParameters"]["bucket"]
+            key = event["pathParameters"]["key"]
+            req_body = json.loads(event["body"])
+
+            s3 = boto3.resource("s3")
+            object = s3.Object(bucket_name, key)
+
+            try:
+                content: str = req_body["content"]
+                object.put(Body=content.encode("utf-8"))
+                response = {
+                    "statusCode": 201,
+                    "headers": {"Access-Control-Allow-Origin": "*"},
+                    "body": json.dumps({}),
+                    "multiValueHeaders": {},
+                    "isBase64Encoded": False,
+                }
+            except KeyError as exc:
+                response = {
+                    "statusCode": 400,
+                    "headers": {"Access-Control-Allow-Origin": "*"},
+                    "body": json.dumps({"code": "KeyError", "message": repr(exc)}),
+                    "multiValueHeaders": {},
+                    "isBase64Encoded": False,
+                }
+            except ClientError as exc:
+                error = exc.response["Error"]
+                if error["Code"] == "NoSuchBucket":
+                    response = {
+                        "statusCode": 404,
+                        "headers": {"Access-Control-Allow-Origin": "*"},
+                        "body": json.dumps(
+                            {"code": error["Code"], "message": error["Message"]}
+                        ),
+                        "multiValueHeaders": {},
+                        "isBase64Encoded": False,
+                    }
+                elif error["Code"] == "AccessDenied":
+                    response = {
+                        "statusCode": 403,
+                        "headers": {"Access-Control-Allow-Origin": "*"},
+                        "body": json.dumps(
+                            {"code": error["Code"], "message": error["Message"]}
+                        ),
+                        "multiValueHeaders": {},
+                        "isBase64Encoded": False,
+                    }
+                else:
+                    raise exc
+
+            return response
+      Description: Create object function
+      Policies:
+        - Ref: CreateObjectFunctionPolicy
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: PUT
+            Path: /buckets/{bucket}/{key}
+            RestApiId:
+              Ref: HelloWorldApi
+
+  GetObjectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      InlineCode: |
+        # aws_s3_app/get_object/index.py
+        import json
+        import logging
+        from typing import Any
+
+        import boto3
+        from botocore.exceptions import ClientError
+
+
+        def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+            logger = logging.getLogger(context.function_name)
+            logger.setLevel(logging.INFO)
+
+            bucket_name = event["pathParameters"]["bucket"]
+            key = event["pathParameters"]["key"]
+            s3 = boto3.resource("s3")
+            object = s3.Object(bucket_name, key)
+
+            try:
+                res = object.get()
+                content = res["Body"].read().decode("utf-8")
+                response = {
+                    "statusCode": 200,
+                    "headers": {"Access-Control-Allow-Origin": "*"},
+                    "body": json.dumps({"content": content}),
+                    "multiValueHeaders": {},
+                    "isBase64Encoded": False,
+                }
+            except ClientError as exc:
+                error = exc.response["Error"]
+                if error["Code"] in ["NoSuchBucket", "NoSuchKey"]:
+                    response = {
+                        "statusCode": 404,
+                        "headers": {"Access-Control-Allow-Origin": "*"},
+                        "body": json.dumps(
+                            {"code": error["Code"], "message": error["Message"]}
+                        ),
+                        "multiValueHeaders": {},
+                        "isBase64Encoded": False,
+                    }
+                elif error["Code"] == "AccessDenied":
+                    response = {
+                        "statusCode": 403,
+                        "headers": {"Access-Control-Allow-Origin": "*"},
+                        "body": json.dumps(
+                            {"code": error["Code"], "message": error["Message"]}
+                        ),
+                        "multiValueHeaders": {},
+                        "isBase64Encoded": False,
+                    }
+                else:
+                    raise exc
+
+            return response
+      Description: Get object function
+      Policies:
+        - Ref: GetObjectFunctionPolicy
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /buckets/{bucket}/{key}
+            RestApiId:
+              Ref: HelloWorldApi
+
+  DeleteObjectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      InlineCode: |
+        # aws_s3_app/delete_object/index.py
+        import json
+        import logging
+        from typing import Any
+
+        import boto3
+        from botocore.exceptions import ClientError
+
+
+        def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+            logger = logging.getLogger(context.function_name)
+            logger.setLevel(logging.INFO)
+
+            bucket_name = event["pathParameters"]["bucket"]
+            key = event["pathParameters"]["key"]
+            s3 = boto3.resource("s3")
+            object = s3.Object(bucket_name, key)
+
+            try:
+                object.delete()
+                response = {
+                    "statusCode": 204,
+                    "headers": {"Access-Control-Allow-Origin": "*"},
+                    "body": json.dumps(None),
+                    "multiValueHeaders": {},
+                    "isBase64Encoded": False,
+                }
+            except ClientError as exc:
+                error = exc.response["Error"]
+                if error["Code"] == "NoSuchBucket":
+                    response = {
+                        "statusCode": 404,
+                        "headers": {"Access-Control-Allow-Origin": "*"},
+                        "body": json.dumps(
+                            {"code": error["Code"], "message": error["Message"]}
+                        ),
+                        "multiValueHeaders": {},
+                        "isBase64Encoded": False,
+                    }
+                elif error["Code"] == "AccessDenied":
+                    response = {
+                        "statusCode": 403,
+                        "headers": {"Access-Control-Allow-Origin": "*"},
+                        "body": json.dumps(
+                            {"code": error["Code"], "message": error["Message"]}
+                        ),
+                        "multiValueHeaders": {},
+                        "isBase64Encoded": False,
+                    }
+                else:
+                    raise exc
+
+            return response
+      Description: Delete object function
+      Policies:
+        - Ref: DeleteObjectFunctionPolicy
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: DELETE
+            Path: /buckets/{bucket}/{key}
+            RestApiId:
+              Ref: HelloWorldApi
+
+Outputs:
+  HelloWorldApi:
+    Value:
+      Fn::Sub: https://${HelloWorldApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${HelloWorldApi.Stage}

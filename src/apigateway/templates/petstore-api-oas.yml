@@ -1,0 +1,74 @@
+# apigateway/templates/petstore-api-oas.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: PetStore API stack
+
+Parameters:
+  StageName:
+    Type: String
+    Description: API Gateway deployment stage
+    Default: dev
+    AllowedValues: [dev, prod]
+
+Resources:
+  PetStoreApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: Simple PetStore (AWS CLI)
+      EndpointConfiguration:
+        Types: [EDGE]
+      Name: PetStoreApi
+      Body:
+        openapi: "3.0.1"
+        info:
+          version: "1.0"
+        paths:
+          /pets:
+            get:
+              responses:
+                "200":
+                  description: 200 response
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: 200
+                uri: http://petstore-demo-endpoint.execute-api.com/petstore/pets
+                httpMethod: GET
+                type: http
+          /pets/{petId}:
+            get:
+              parameters:
+                - name: petId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+              responses:
+                "200":
+                  description: 200 response
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: 200
+                requestParameters:
+                  integration.request.path.id: method.request.path.petId
+                uri: http://petstore-demo-endpoint.execute-api.com/petstore/pets/{id}
+                httpMethod: GET
+                type: http
+
+  PetStoreApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      Description:
+        Fn::Sub: PetStore API ${StageName} deployment
+      RestApiId:
+        Ref: PetStoreApi
+      StageDescription:
+        Description:
+          Fn::Sub: PetStore API ${StageName} stage
+      StageName:
+        Ref: StageName
+
+Outputs:
+  PetStoreApiTestUrl:
+    Value:
+      Fn::Sub: https://${PetStoreApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${StageName}

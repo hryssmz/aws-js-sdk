@@ -1,0 +1,236 @@
+# codedeploy/templates/wordpress-app.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Deploy WordPress to an Amazon EC2 instance
+
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: CodeDeploy application name
+    Default: WordPress_App
+
+  DeploymentGroupName:
+    Type: String
+    Description: Deployment group name
+    Default: WordPress_DepGroup
+
+  RevisionS3Key:
+    Type: String
+    Description: S3 key for the app revision
+    Default: WordPressApp.zip
+
+  CreateDeployment:
+    Type: String
+    Description: Ready to create deployment (must be false on stack creation)
+    Default: "false"
+    AllowedValues:
+      - "false"
+      - "true"
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+
+  PublicKeyBody:
+    Type: String
+    Description: EC2 public key
+    AllowedPattern: ssh-rsa .*
+
+  IngressCidr:
+    Type: String
+    Description: IP address for ingress
+    Default: 0.0.0.0/0
+    AllowedPattern: \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x
+
+  Ec2InstanceName:
+    Type: String
+    Description: Name for the EC2 instance
+    Default: CodeDeployDemo
+
+Conditions:
+  DeploymentReady:
+    Fn::Equals:
+      - Ref: CreateDeployment
+      - "true"
+
+Mappings:
+  RegionOS2AMI:
+    ap-northeast-1:
+      Linux: ami-030cf0a1edb8636ab
+      Windows: ami-0500753a8b9c3c925
+
+Resources:
+  DemoBucket:
+    Type: AWS::S3::Bucket
+
+  DemoBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: DemoBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - s3:Get*
+              - s3:List*
+            Effect: Allow
+            Resource:
+              Fn::Sub: arn:aws:s3:::${DemoBucket}/*
+            Principal:
+              AWS:
+                - Fn::GetAtt: CodeDeployRole.Arn
+
+  CodeDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codedeploy.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for AWS CodeDeploy
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
+
+  CodeDeployApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName:
+        Ref: ApplicationName
+      ComputePlatform: Server
+
+  MyDeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      ApplicationName:
+        Ref: CodeDeployApplication
+      Deployment:
+        Fn::If:
+          - DeploymentReady
+          - Description: Deployment for WordPress app
+            Revision:
+              RevisionType: S3
+              S3Location:
+                Bucket:
+                  Ref: DemoBucket
+                BundleType: zip
+                Key:
+                  Ref: RevisionS3Key
+          - Ref: AWS::NoValue
+      DeploymentConfigName: CodeDeployDefault.OneAtATime
+      DeploymentGroupName:
+        Ref: DeploymentGroupName
+      DeploymentStyle:
+        DeploymentOption: WITHOUT_TRAFFIC_CONTROL
+        DeploymentType: IN_PLACE
+      Ec2TagFilters:
+        - Key: Name
+          Value:
+            Ref: Ec2InstanceName
+          Type: KEY_AND_VALUE
+      ServiceRoleArn:
+        Fn::GetAtt: CodeDeployRole.Arn
+
+  MyKeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName:
+        Fn::Sub: ${AWS::StackName}-keypair
+      PublicKeyMaterial:
+        Ref: PublicKeyBody
+
+  MySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription:
+        Fn::Sub: Security group for ${AWS::StackName} stack
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp:
+            Ref: IngressCidr
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:
+            Ref: IngressCidr
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Execution role for EC2 instance
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforAWSCodeDeploy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      AWS::CloudFormation::Init:
+        services:
+          sysvinit:
+            codedeploy-agent:
+              enabled: true
+              ensureRunning: true
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+          - RegionOS2AMI
+          - Ref: AWS::Region
+          - Linux
+      InstanceType:
+        Ref: InstanceType
+      KeyName:
+        Ref: MyKeyPair
+      SecurityGroups:
+        - Ref: MySecurityGroup
+      Tags:
+        - Key: Name
+          Value:
+            Ref: Ec2InstanceName
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/bash -ex
+            # CodeDeploy Agent requires ruby
+            yum install -y ruby
+
+            # Download and install CodeDeploy Agent
+            aws s3 cp s3://aws-codedeploy-${AWS::Region}/latest/codedeploy-agent.noarch.rpm /tmp
+            yum install -y /tmp/codedeploy-agent.noarch.rpm
+            rm -rf /tmp/codedeploy-agent.noarch.rpm
+
+            # Start CodeDeploy Agent and other services
+            /opt/aws/bin/cfn-init -s ${AWS::StackId} -r EC2Instance --region ${AWS::Region}
+
+Outputs:
+  DemoBucketName:
+    Value:
+      Ref: DemoBucket
+  RevisionURL:
+    Value:
+      Fn::Sub: s3://${DemoBucket}/${RevisionS3Key}
