@@ -1,0 +1,98 @@
+# codebuild/templates/maven-example.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Build Maven project with CodeBuild
+
+Parameters:
+  BuildProjectName:
+    Type: String
+    Description: CodeBuild project name
+    Default: codebuild-demo-project
+
+  S3SourceKey:
+    Type: String
+    Description: S3 key of the source archive
+    Default: MessageUtil.zip
+
+Resources:
+  InputBucket:
+    Type: AWS::S3::Bucket
+
+  OutputBucket:
+    Type: AWS::S3::Bucket
+
+  BuildProjectPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Execution policy for CodeBuild
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SourceBucketPermissions
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:GetObject*
+              - s3:GetBucket*
+            Resource:
+              - Fn::GetAtt: InputBucket.Arn
+              - Fn::Sub: ${InputBucket.Arn}/${S3SourceKey}
+          - Sid: OutputBucketPermissions
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetBucket*
+            Resource:
+              - Fn::GetAtt: OutputBucket.Arn
+              - Fn::Sub: ${OutputBucket.Arn}/*
+          - Sid: CloudWatchLogPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: "*"
+          - Sid: CodeBuildRunTestsPermissions
+            Effect: Allow
+            Action:
+              - codebuild:CreateReportGroup
+              - codebuild:CreateReport
+              - codebuild:UpdateReport
+              - codebuild:BatchPutTestCases
+              - codebuild:BatchPutCodeCoverages
+            Resource: "*"
+
+  BuildProjectRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Service role for AWS CodeBuild
+      ManagedPolicyArns:
+        - Ref: BuildProjectPolicy
+
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Description: Maven app project
+      Name:
+        Ref: BuildProjectName
+      Source:
+        Type: S3
+        Location:
+          Fn::Sub: ${InputBucket}/${S3SourceKey}
+      Artifacts:
+        Type: S3
+        Location:
+          Ref: OutputBucket
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+      ServiceRole:
+        Fn::GetAtt: BuildProjectRole.Arn

@@ -13,6 +13,7 @@ import {
   DeleteStageCommand,
   GetDeploymentCommand,
   GetDeploymentsCommand,
+  GetExportCommand,
   GetIntegrationCommand,
   GetMethodCommand,
   GetResourceCommand,
@@ -40,6 +41,7 @@ import type {
   DeleteStageCommandInput,
   GetDeploymentCommandInput,
   GetDeploymentsCommandInput,
+  GetExportCommandInput,
   GetIntegrationCommandInput,
   GetMethodCommandInput,
   GetResourceCommandInput,
@@ -137,6 +139,21 @@ export class APIGatewayWrapper {
 
   async getDeployments(params: GetDeploymentsCommandInput) {
     const command = new GetDeploymentsCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async getExport(params: GetExportCommandInput) {
+    const command = new GetExportCommand(params);
+    command.middlewareStack.add(
+      next => async args => {
+        const request: any = args.request;
+        request.headers.accept = params.accepts;
+        const result = await next(args);
+        return result;
+      },
+      { step: "build" }
+    );
     const result = await this.client.send(command);
     return result;
   }

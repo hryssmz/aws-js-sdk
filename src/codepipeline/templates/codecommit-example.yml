@@ -1,6 +1,6 @@
-# codepipeline/templates/demobucket-example.yml
+# codepipeline/templates/codecommit-example.yml
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Simple S3 bucket pipeline
+Description: Simple CodeCommit pipeline
 
 Parameters:
   ApplicationName:
@@ -13,30 +13,20 @@ Parameters:
     Description: Deployment group name
     Default: MyDemoDeploymentGroup
 
-  DeploymentGroupName2:
+  RepositoryName:
     Type: String
-    Description: The second group name. When specified, the deployment fails
-    Default: ""
-    # Default: CodePipelineProductionFleet
+    Description: CodeCommit repository name
+    Default: MyDemoRepo
 
-  S3SourceKey:
+  DeploymentBranch:
     Type: String
-    Description: Object key for app bundle
-    Default: SampleApp_Linux.zip
+    Description: Branch for deployment
+    Default: main
 
   PipelineName:
     Type: String
     Description: CodePipeline pipeline name
     Default: MyFirstPipeline
-
-  SourceChangeDetection:
-    Type: String
-    Description: Detect the changes for source
-    Default: "false"
-    AllowedValues:
-      - "false"
-      - "true"
-    ConstraintDescription: must be either "true" or "false"
 
   InstanceType:
     Type: String
@@ -62,18 +52,6 @@ Parameters:
     Description: Name for the EC2 instance
     Default: MyCodePipelineDemo
 
-Conditions:
-  CreateSecondDeploymentGroupCondition:
-    Fn::Not:
-      - Fn::Equals:
-          - Ref: DeploymentGroupName2
-          - ""
-
-  SourceChangeDetectionCondition:
-    Fn::Equals:
-      - Ref: SourceChangeDetection
-      - "true"
-
 Mappings:
   ImageIdMapping:
     ap-northeast-1:
@@ -81,37 +59,101 @@ Mappings:
       Windows: ami-0500753a8b9c3c925
 
 Resources:
-  DemoBucket:
+  ArtifactBucket:
     Type: AWS::S3::Bucket
-    Properties:
-      VersioningConfiguration:
-        Status: Enabled
 
-  DemoBucketTrailPolicy:
-    Type: AWS::S3::BucketPolicy
-    Condition: SourceChangeDetectionCondition
+  ExecutePipelineFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
     Properties:
-      Bucket:
-        Ref: DemoBucket
+      Description: Lambda Function policy to execute pipeline
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal:
-              Service:
-                - cloudtrail.amazonaws.com
             Action:
-              - s3:GetBucketAcl
+              - codepipeline:StartPipelineExecution
             Resource:
-              Fn::GetAtt: DemoBucket.Arn
+              - Fn::Sub: arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:${PipelineName}
+
+  ExecutePipelineFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
           - Effect: Allow
             Principal:
-              Service:
-                - cloudtrail.amazonaws.com
+              Service: lambda.amazonaws.com
             Action:
-              - s3:PutObject
-            Resource:
-              Fn::Sub: ${DemoBucket.Arn}/*
+              - sts:AssumeRole
+      Description: Lambda Function role to execute pipeline
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: ExecutePipelineFunctionPolicy
+
+  ExecutePipelineFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Execute pipeline
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Handler: index.handler
+      Environment:
+        Variables:
+          PIPELINE_NAME:
+            Ref: PipelineName
+      Role:
+        Fn::GetAtt: ExecutePipelineFunctionRole.Arn
+      Code:
+        ZipFile: |
+          const {
+            CodePipelineClient,
+            StartPipelineExecutionCommand,
+          } = require("@aws-sdk/client-codepipeline");
+
+          exports.handler = async () => {
+            const client = new CodePipelineClient({});
+            const command = new StartPipelineExecutionCommand({
+              name: process.env.PIPELINE_NAME,
+            });
+            const response = await client.send(command);
+            console.log(`Pipeline started: (${response.pipelineExecutionId})`);
+          };
+
+  ExecutePipelineFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: ExecutePipelineFunction
+      Principal: sns.amazonaws.com
+      SourceArn:
+        Ref: UpdateReferenceTopic
+
+  UpdateReferenceTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      FifoTopic: false
+      Subscription:
+        - Protocol: lambda
+          Endpoint:
+            Fn::GetAtt: ExecutePipelineFunction.Arn
+
+  DemoRepository:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryDescription: My demo repository
+      RepositoryName:
+        Ref: RepositoryName
+      Triggers:
+        - Name: UpdateReferenceTrigger
+          DestinationArn:
+            Ref: UpdateReferenceTopic
+          Branches:
+            - Ref: DeploymentBranch
+          Events:
+            - updateReference
 
   CodeDeployRole:
     Type: AWS::IAM::Role
@@ -170,26 +212,6 @@ Resources:
       ServiceRoleArn:
         Fn::GetAtt: CodeDeployRole.Arn
 
-  SecondDeploymentGroup:
-    Type: AWS::CodeDeploy::DeploymentGroup
-    Condition: CreateSecondDeploymentGroupCondition
-    Properties:
-      ApplicationName:
-        Ref: CodeDeployApplication
-      DeploymentConfigName: CodeDeployDefault.OneAtATime
-      DeploymentGroupName:
-        Ref: DeploymentGroupName2
-      DeploymentStyle:
-        DeploymentOption: WITHOUT_TRAFFIC_CONTROL
-        DeploymentType: IN_PLACE
-      Ec2TagFilters:
-        - Key: Name
-          Value:
-            Ref: Ec2InstanceName
-          Type: KEY_AND_VALUE
-      ServiceRoleArn:
-        Fn::GetAtt: CodeDeployRole.Arn
-
   CodePipelinePolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -203,19 +225,24 @@ Resources:
               - s3:List*
               - s3:Get*
             Resource:
-              - Fn::GetAtt: DemoBucket.Arn
+              - Fn::GetAtt: ArtifactBucket.Arn
           - Sid: ArtifactObjectsPermissions
             Effect: Allow
             Action:
               - s3:*
             Resource:
-              - Fn::Sub: ${DemoBucket.Arn}/${PipelineName}/*
-          - Sid: S3SourceObjectPermissions
+              - Fn::Sub: ${ArtifactBucket.Arn}/${PipelineName}/*
+          - Sid: CodeCommitPermissions
             Effect: Allow
             Action:
-              - s3:*
+              - codecommit:CancelUploadArchive
+              - codecommit:GetBranch
+              - codecommit:GetCommit
+              - codecommit:GetRepository
+              - codecommit:GetUploadArchiveStatus
+              - codecommit:UploadArchive
             Resource:
-              - Fn::Sub: ${DemoBucket.Arn}/${S3SourceKey}
+              - Fn::GetAtt: DemoRepository.Arn
           - Sid: CodeDeployPermissions
             Effect: Allow
             Action:
@@ -247,7 +274,7 @@ Resources:
     Properties:
       ArtifactStore:
         Location:
-          Ref: DemoBucket
+          Ref: ArtifactBucket
         Type: S3
       Name:
         Ref: PipelineName
@@ -256,26 +283,25 @@ Resources:
       Stages:
         - Name: Source
           Actions:
-            - Name: S3SourceAction
+            - Name: SourceAction
               RunOrder: 1
               ActionTypeId:
                 Category: Source
                 Owner: AWS
-                Provider: S3
+                Provider: CodeCommit
                 Version: 1
               Configuration:
-                S3Bucket:
-                  Ref: DemoBucket
-                S3ObjectKey:
-                  Ref: S3SourceKey
+                RepositoryName:
+                  Ref: RepositoryName
+                BranchName:
+                  Ref: DeploymentBranch
                 PollForSourceChanges: false
               InputArtifacts: []
               OutputArtifacts:
                 - Name: SourceOutput
         - Name: Deploy
           Actions:
-            - Name:
-                Fn::Sub: Deploy${ApplicationName}
+            - Name: DeployAction
               RunOrder: 1
               ActionTypeId:
                 Category: Deploy
@@ -290,105 +316,6 @@ Resources:
               InputArtifacts:
                 - Name: SourceOutput
               OutputArtifacts: []
-        - Fn::If:
-            - CreateSecondDeploymentGroupCondition
-            - Name: Production
-              Actions:
-                - Name:
-                    Fn::Sub: Deploy${ApplicationName}2
-                  RunOrder: 1
-                  ActionTypeId:
-                    Category: Deploy
-                    Owner: AWS
-                    Provider: CodeDeploy
-                    Version: 1
-                  Configuration:
-                    ApplicationName:
-                      Ref: ApplicationName
-                    DeploymentGroupName:
-                      Ref: SecondDeploymentGroup
-                  InputArtifacts:
-                    - Name: SourceOutput
-                  OutputArtifacts: []
-            - Ref: AWS::NoValue
-
-  CloudWatchEventPolicy:
-    Type: AWS::IAM::ManagedPolicy
-    Condition: SourceChangeDetectionCondition
-    Properties:
-      Description: Execution policy for CloudWatch Event
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Action:
-              - codepipeline:StartPipelineExecution
-            Resource:
-              - Fn::Sub: arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:${PipelineName}
-
-  CloudWatchEventRole:
-    Type: AWS::IAM::Role
-    Condition: SourceChangeDetectionCondition
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: events.amazonaws.com
-            Action:
-              - sts:AssumeRole
-      Description: Service role for CloudWatch Event
-      ManagedPolicyArns:
-        - Ref: CloudWatchEventPolicy
-
-  CloudWatchEventRule:
-    Type: AWS::Events::Rule
-    Condition: SourceChangeDetectionCondition
-    Properties:
-      EventPattern:
-        source:
-          - aws.s3
-        detail-type:
-          - AWS API Call via CloudTrail
-        detail:
-          eventSource:
-            - s3.amazonaws.com
-          eventName:
-            - CopyObject
-            - PutObject
-            - CompleteMultipartUpload
-          requestParameters:
-            bucketName:
-              - Ref: DemoBucket
-            key:
-              - Ref: S3SourceKey
-      Targets:
-        - Id:
-            Fn::Sub: codepipeline-${PipelineName}
-          Arn:
-            Fn::Sub: arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:${PipelineName}
-          RoleArn:
-            Fn::GetAtt: CloudWatchEventRole.Arn
-
-  MyTrail:
-    Type: AWS::CloudTrail::Trail
-    Condition: SourceChangeDetectionCondition
-    DependsOn:
-      - DemoBucketTrailPolicy
-    Properties:
-      S3BucketName:
-        Ref: DemoBucket
-      EventSelectors:
-        - DataResources:
-            - Type: AWS::S3::Object
-              Values:
-                - Fn::Sub: ${DemoBucket.Arn}/${S3SourceKey}
-          ReadWriteType: WriteOnly
-          IncludeManagementEvents: false
-      IncludeGlobalServiceEvents: true
-      IsLogging: true
-      IsMultiRegionTrail: true
 
   MyKeyPair:
     Type: AWS::EC2::KeyPair
@@ -459,6 +386,10 @@ Resources:
         Ref: EC2InstanceProfile
 
 Outputs:
-  DemoBucketName:
+  CloneUrlHttp:
     Value:
-      Ref: DemoBucket
+      Fn::GetAtt: DemoRepository.CloneUrlHttp
+
+  CloneUrlSsh:
+    Value:
+      Fn::GetAtt: DemoRepository.CloneUrlSsh

@@ -1,9 +1,9 @@
 {
   "configurations": [
     {
-      "name": "npm run test",
+      "name": "npm run action-ts",
       "request": "launch",
-      "runtimeArgs": ["run", "test"],
+      "runtimeArgs": ["run", "action-ts", "get-rest-export"],
       "runtimeExecutable": "npm",
       "skipFiles": ["<node_internals>/**"],
       "type": "node"

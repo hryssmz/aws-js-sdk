@@ -1,18 +1,20 @@
 // apigateway/actions.ts
+import { writeFileSync } from "node:fs";
 import { APIGatewayWrapper } from ".";
 import { LambdaWrapper } from "../lambda";
 import { region } from "../utils";
 import type { Action } from "../utils";
 
 const funcName = "my-function";
-const restApiName = "my-rest-api";
+const restApiName = "sam-helloworld-python-HelloWorldApi";
 const resourceParent = "/";
 const pathPart = "my-endpoint";
 const resourcePath = `${resourceParent.replace(/\/$/, "")}/${pathPart}`;
 const restMethod = "GET";
 const restAuth = "NONE";
-const stageName = "test";
+const stageName = "dev";
 const lambdaPolicyStmtId = "MyAPIGatewayInvokeFunction";
+const openApiPath = "openapi.yaml";
 
 async function createRestApi() {
   const apigateway = new APIGatewayWrapper();
@@ -126,6 +128,22 @@ async function deleteRestResource() {
   return JSON.stringify(resourcePath, null, 2);
 }
 
+async function getRestExport() {
+  const apigateway = new APIGatewayWrapper();
+  const { id: restApiId } = await apigateway.getRestApiByName(restApiName);
+  const response = await apigateway.getExport({
+    parameters: { extensions: "apigateway" },
+    restApiId,
+    stageName,
+    exportType: "oas30",
+    accepts: "application/yaml",
+  });
+  if (response.body !== undefined) {
+    writeFileSync(openApiPath, response.body);
+  }
+  return openApiPath;
+}
+
 async function getRestIntegration() {
   const apigateway = new APIGatewayWrapper();
   const { id: restApiId } = await apigateway.getRestApiByName(restApiName);
@@ -176,6 +194,7 @@ const actions: Record<string, Action> = {
   deleteRestDeployment,
   deleteRestMethod,
   deleteRestResource,
+  getRestExport,
   getRestIntegration,
   getRestMethod,
   showRestApi,
