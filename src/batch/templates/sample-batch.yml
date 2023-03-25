@@ -1,0 +1,207 @@
+# ecs/templates/sample-batch.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Getting started batch
+
+Parameters:
+  MyIP:
+    Type: String
+    Description: My IPv4 address
+    Default: 116.64.133.211
+    AllowedPattern: \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}
+    ConstraintDescription: must be a valid IP address of the form x.x.x.x
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 172.20.0.0/16
+      Tags:
+        - Key: Name
+          Value: CustomVPC
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: CustomInternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 172.20.0.0/20
+      VpcId:
+        Ref: VPC
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: CustomSubnet
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: CustomRouteTable
+
+  SubnetRouteTableTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-WebSecurityGroup
+      GroupDescription: Web security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp:
+            Fn::Sub: ${MyIP}/32
+      Tags:
+        - Key: Name
+          Value: CustomSecurityGroup
+
+  ECSTasksServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ECSTasksServiceRole
+      Description: Service role for ECS tasks
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  BatchJobExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-BatchJobExecutionPolicy
+      Description: Execution policy for batch jobs
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:ListAllMyBuckets
+            Resource: "*"
+
+  BatchJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-BatchJobRole
+      Description: Service role for Batch jobs
+      ManagedPolicyArns:
+        - Ref: BatchJobExecutionPolicy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  BatchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/batch/${AWS::StackName}-BatchLogGroup
+
+  BatchComputeEnvironment:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      ComputeEnvironmentName:
+        Fn::Sub: ${AWS::StackName}-BatchComputeEnvironment
+      Type: MANAGED
+      State: ENABLED
+      ComputeResources:
+        Type: FARGATE
+        MaxvCpus: 1
+        SecurityGroupIds:
+          - Ref: WebSecurityGroup
+        Subnets:
+          - Ref: Subnet
+
+  JobQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName:
+        Fn::Sub: ${AWS::StackName}-JobQueue
+      State: ENABLED
+      Priority: 0
+      ComputeEnvironmentOrder:
+        - ComputeEnvironment:
+            Ref: BatchComputeEnvironment
+          Order: 1
+
+  JobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      JobDefinitionName:
+        Fn::Sub: ${AWS::StackName}-JobDefinition
+      Type: container
+      PlatformCapabilities:
+        - FARGATE
+      SchedulingPriority: 0
+      Timeout:
+        AttemptDurationSeconds: 60
+      ContainerProperties:
+        Command:
+          - cat
+          - /etc/os-release
+        Image: amazonlinux
+        ExecutionRoleArn:
+          Fn::GetAtt: ECSTasksServiceRole.Arn
+        JobRoleArn:
+          Fn::GetAtt: BatchJobRole.Arn
+        FargatePlatformConfiguration:
+          PlatformVersion: LATEST
+        NetworkConfiguration:
+          AssignPublicIp: ENABLED
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group:
+              Ref: BatchLogGroup
+        ResourceRequirements:
+          - Type: MEMORY
+            Value: 512
+          - Type: VCPU
+            Value: 0.25
