@@ -1,0 +1,132 @@
+# eventbridge/templates/cloudtrail-rule.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: CloudTrail event rule
+
+Mappings:
+  RegionProfile2AMI:
+    ap-northeast-1:
+      AL2023: ami-067871d950411e643
+
+  RegionProfile2Type:
+    ap-northeast-1:
+      AL2023: t2.micro
+
+Resources:
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+          - RegionProfile2AMI
+          - Ref: AWS::Region
+          - AL2023
+      InstanceType:
+        Fn::FindInMap:
+          - RegionProfile2Type
+          - Ref: AWS::Region
+          - AL2023
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-i-al2023
+
+  LogEC2StopFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-LogEC2StopFunction
+      Description: Serverless function with EventBridge rule configured
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Events:
+        EventBridgeEvent:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.ec2
+              detail-type:
+                - AWS API Call via CloudTrail
+              detail:
+                eventSource:
+                  - ec2.amazonaws.com
+                eventName:
+                  - StopInstances
+      InlineCode: |
+        exports.handler = async event => {
+          console.log("LogEC2StopInstance");
+          console.log("Received event:", JSON.stringify(event, null, 2));
+          return "Finished";
+        };
+
+  LogEC2StopFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${LogEC2StopFunction}
+
+  Trail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: TrailBucketPolicy
+    Properties:
+      TrailName:
+        Fn::Sub: ${AWS::StackName}-Trail
+      IsLogging: true
+      S3BucketName:
+        Ref: TrailBucket
+      IncludeGlobalServiceEvents: true
+      EnableLogFileValidation: true
+      EventSelectors:
+        - IncludeManagementEvents: true
+          ReadWriteType: All
+          ExcludeManagementEventSources:
+            - kms.amazonaws.com
+            - rdsdata.amazonaws.com
+
+  TrailBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-trailbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  TrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: TrailBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+            Resource:
+              - Fn::GetAtt: TrailBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${AWS::StackName}-Trail
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${TrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${AWS::StackName}-Trail

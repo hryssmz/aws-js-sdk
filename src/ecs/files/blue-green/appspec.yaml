@@ -1,0 +1,10 @@
+version: 0.0
+Resources:
+  - TargetService:
+      Type: AWS::ECS::Service
+      Properties:
+        TaskDefinition: arn:aws:ecs:ap-northeast-1:512667299293:task-definition/blue-green-TaskDefinition:1
+        LoadBalancerInfo:
+          ContainerName: sample-app
+          ContainerPort: 80
+        PlatformVersion: LATEST

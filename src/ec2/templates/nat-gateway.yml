@@ -1,0 +1,429 @@
+# ec2/templates/nat-gateway.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: NAT Gateway
+
+Mappings:
+  RegionProfile2AMI:
+    ap-northeast-1:
+      AL2023: ami-067871d950411e643
+
+  RegionProfile2Type:
+    ap-northeast-1:
+      AL2023: t2.micro
+
+Resources:
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 172.20.0.0/16
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-vpc
+
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 172.20.0.0/20
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sn
+
+  Subnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 172.20.16.0/20
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sn2
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-rtb
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet
+      RouteTableId:
+        Ref: RouteTable
+
+  Subnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet2
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-igw
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  # Private subnet
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 172.20.128.0/20
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-pvsn
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 172.20.144.0/20
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-pvsn2
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-pvrtb
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-pvrtb2
+
+  PrivateSubnetPrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  PrivateSubnet2PrivateRouteTable2Association:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet2
+      RouteTableId:
+        Ref: PrivateRouteTable2
+
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGatewayEIP2:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt: NatGatewayEIP.AllocationId
+      SubnetId:
+        Ref: Subnet
+
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt: NatGatewayEIP2.AllocationId
+      SubnetId:
+        Ref: Subnet2
+
+  NatGatewayRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NatGateway
+
+  NatGatewayRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NatGateway2
+
+  # EC2
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg-ec2
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+          - RegionProfile2AMI
+          - Ref: AWS::Region
+          - AL2023
+      InstanceType:
+        Fn::FindInMap:
+          - RegionProfile2Type
+          - Ref: AWS::Region
+          - AL2023
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroupIds:
+        - Ref: EC2SecurityGroup
+      SubnetId:
+        Ref: Subnet
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-i-ec2
+
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-WebSecurityGroup
+      GroupDescription: Web server security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: HTTP inbound rule 2
+          IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg-web
+
+  WebInstance:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT4M
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /etc/systemd/system/myapp.service:
+              content: |
+                [Unit]
+                Description=MyApp Service
+                After=network.target
+
+                [Service]
+                Type=simple
+                User=ec2-user
+                WorkingDirectory=/home/ec2-user/myapp
+                ExecStart=python -m uvicorn main:app --host 0.0.0.0 --port 8000
+                Restart=always
+                RestartSec=3
+
+                [Install]
+                WantedBy=multi-user.target
+            /home/ec2-user/myapp/main.py:
+              content: |
+                from datetime import datetime
+                from urllib.request import Request, urlopen
+
+                from fastapi import FastAPI
+
+                app = FastAPI()
+
+
+                @app.get("/")
+                async def root() -> dict[str, str]:
+                    req = Request(
+                        "http://169.254.169.254/latest/api/token",
+                        headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
+                        method="PUT",
+                    )
+                    token: str = urlopen(req).read().decode("utf8")
+
+                    req = Request(
+                        "http://169.254.169.254/latest/meta-data/instance-id",
+                        headers={"X-aws-ec2-metadata-token": token},
+                    )
+                    instance_id: str = urlopen(req).read().decode("utf8")
+
+                    req = Request("https://ifconfig.me")
+                    global_ip: str = urlopen(req).read().decode("utf8")
+
+                    response = {
+                        "instance_id": instance_id,
+                        "global_ip": global_ip,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                    return response
+            /home/ec2-user/myapp/requirements.txt:
+              content: |
+                fastapi
+                uvicorn[standard]
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+          - RegionProfile2AMI
+          - Ref: AWS::Region
+          - AL2023
+      InstanceType:
+        Fn::FindInMap:
+          - RegionProfile2Type
+          - Ref: AWS::Region
+          - AL2023
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroupIds:
+        - Ref: WebSecurityGroup
+      SubnetId:
+        Ref: PrivateSubnet2
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource WebInstance --region ${AWS::Region}
+            chown -R ec2-user:ec2-user /home/ec2-user/myapp
+            dnf install -y python python3-pip
+            su -l ec2-user -c "pip install -r ~/myapp/requirements.txt"
+            systemctl enable myapp.service
+            systemctl start myapp.service
+
+            MAX_RETRY=20
+            RETRY_INTERVAL=5
+            HEALTH_CHECK_URL="http://localhost:8000"
+            for TRIED_COUNT in `seq $MAX_RETRY`; do
+                curl $HEALTH_CHECK_URL
+                if [ $? -eq "0" ]; then
+                    /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --region ${AWS::Region} --resource WebInstance
+                    break
+                else
+                    sleep $RETRY_INTERVAL
+                fi
+            done
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-i-web
+
+Outputs:
+  NatGatewayEIPAddress:
+    Description: Public IP address of NatGatewayEIP
+    Value:
+      Fn::GetAtt: NatGatewayEIP.PublicIp
+
+  NatGatewayEIP2Address:
+    Description: Public IP address of NatGatewayEIP2
+    Value:
+      Fn::GetAtt: NatGatewayEIP2.PublicIp

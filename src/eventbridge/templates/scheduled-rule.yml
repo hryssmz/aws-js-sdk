@@ -1,0 +1,35 @@
+# eventbridge/templates/scheduled-rule.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: My first scheduled rule
+
+Resources:
+  JobFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-JobFunction
+      Description: Serverless function with EventBridge rule configured
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Events:
+        ScheduledRule:
+          Type: Schedule
+          Properties:
+            Name:
+              Fn::Sub: ${AWS::StackName}-JobFunctionScheduledRule
+            Description: JobFunction schedule rule
+            Schedule: rate(1 minute)
+            Enabled: true
+      InlineCode: |
+        exports.handler = async event => {
+          console.log(JSON.stringify(event, null, 2));
+        };
+
+  JobFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${JobFunction}

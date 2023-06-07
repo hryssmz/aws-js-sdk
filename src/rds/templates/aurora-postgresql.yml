@@ -1,0 +1,287 @@
+# rds/templates/postgresql-tutorial.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Aurora PostgreSQL tutorial
+
+Mappings:
+  RegionProfile2AMI:
+    ap-northeast-1:
+      AL2023: ami-067871d950411e643
+
+  RegionProfile2Type:
+    ap-northeast-1:
+      AL2023: t2.micro
+
+  Region2DefaultVPC:
+    ap-northeast-1:
+      VPC: vpc-01d5cfd2cad5314f1
+      Subnet: subnet-00ee516fa04d610fe
+      Subnet2: subnet-0c99e2001f0ae6c0a
+      Subnet3: subnet-0deeda0e1c6cd4ffa
+      PrivateSubnetCidr: 172.31.128.0/20
+      PrivateSubnet2Cidr: 172.31.144.0/20
+
+Resources:
+  # VPC
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - PrivateSubnetCidr
+      VpcId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-pvsn
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - PrivateSubnet2Cidr
+      VpcId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-pvsn
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-pvrtb
+
+  PrivateSubnetPrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  PrivateSubnet2PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet2
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  # EC2
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 security group
+      VpcId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg-ec2
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName:
+        Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
+      VersionDescription: Launch template for EC2 instances
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - Key: Name
+              Value:
+                Fn::Sub: ${AWS::StackName}-lt
+      LaunchTemplateData:
+        ImageId:
+          Fn::FindInMap:
+            - RegionProfile2AMI
+            - Ref: AWS::Region
+            - AL2023
+        InstanceType:
+          Fn::FindInMap:
+            - RegionProfile2Type
+            - Ref: AWS::Region
+            - AL2023
+        IamInstanceProfile:
+          Name:
+            Ref: EC2InstanceProfile
+        SecurityGroupIds:
+          - Ref: EC2SecurityGroup
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value:
+                  Fn::Sub: ${AWS::StackName}-i
+        UserData:
+          Fn::Base64:
+            Fn::Sub: |
+              #!/bin/sh
+              dnf update -y
+              dnf install -y postgresql15
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: EC2LaunchTemplate
+        Version:
+          Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
+
+  # RDS
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-DBSecurityGroup
+      GroupDescription: DB security group
+      VpcId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      SecurityGroupIngress:
+        - Description: DB inbound rule
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId:
+            Ref: EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg-db
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName:
+        Fn::Sub: ${AWS::StackName}-DBSubnetGroup
+      DBSubnetGroupDescription: DB subnet group
+      SubnetIds:
+        - Ref: PrivateSubnet
+        - Ref: PrivateSubnet2
+
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBClusterIdentifier:
+        Fn::Sub: ${AWS::StackName}-AuroraCluster
+      Engine: aurora-postgresql
+      EngineVersion: 15.2
+      MasterUsername: postgres
+      MasterUserPassword: postgres
+      Port: 5432
+      DatabaseName: postgres
+      StorageType: aurora
+      StorageEncrypted: true
+      NetworkType: IPV4
+      DBSubnetGroupName:
+        Ref: DBSubnetGroup
+      VpcSecurityGroupIds:
+        - Ref: DBSecurityGroup
+
+  AuroraInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBClusterIdentifier:
+        Ref: AuroraCluster
+      DBInstanceIdentifier:
+        Fn::Sub: ${AWS::StackName}-AuroraInstance
+      Engine: aurora-postgresql
+      DBInstanceClass: db.t3.medium
+
+  AuroraInstance2:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBClusterIdentifier:
+        Ref: AuroraCluster
+      DBInstanceIdentifier:
+        Fn::Sub: ${AWS::StackName}-AuroraInstance2
+      Engine: aurora-postgresql
+      DBInstanceClass: db.t3.medium
+
+Outputs:
+  ClusterHost:
+    Description: Cluster host
+    Value:
+      Fn::GetAtt: AuroraCluster.Endpoint.Address
+
+  RoClusterHost:
+    Description: Read-only cluster host
+    Value:
+      Fn::GetAtt: AuroraCluster.ReadEndpoint.Address
+
+  ClusterPort:
+    Description: Cluster port
+    Value:
+      Fn::GetAtt: AuroraCluster.Endpoint.Port

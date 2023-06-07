@@ -1,0 +1,87 @@
+# sqs/templates/first-queue.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: My first queue
+
+Globals:
+  Function:
+    Handler: index.handler
+    Runtime: nodejs18.x
+    Timeout: 10
+    Architectures:
+      - arm64
+
+Resources:
+  Queue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-Queue
+
+  ProducerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ProducerFunction
+      Description: Push messages into Queue
+      Environment:
+        Variables:
+          QUEUE_URL:
+            Ref: Queue
+      InlineCode: |
+        const { SendMessageCommand, SQSClient } = require("@aws-sdk/client-sqs");
+
+        exports.handler = async () => {
+          const client = new SQSClient();
+          const message = new Date().toISOString();
+          const command = new SendMessageCommand({
+            MessageBody: message,
+            QueueUrl: process.env.QUEUE_URL,
+          });
+          const { MessageId, SequenceNumber } = await client.send(command);
+          const result = { MessageId, SequenceNumber };
+          console.log(JSON.stringify(result, null, 2));
+          return result;
+        };
+
+  ProducerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${ProducerFunction}
+
+  ProducerFunctionQueueConnector:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: ProducerFunction
+      Destination:
+        Id: Queue
+      Permissions:
+        - Write
+
+  ConsumerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ConsumerFunction
+      Description: Consumer function for Queue
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt: Queue.Arn
+      InlineCode: |
+        exports.handler = async event => {
+          const { Records } = event;
+          const messages = Records.map(({ body }) => body);
+          console.log(JSON.stringify(messages, null, 2));
+          return messages;
+        };
+
+  ConsumerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${ConsumerFunction}

@@ -1,0 +1,222 @@
+# s3/templates/custom-domain.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Configuring a static website using a custom domain registered with Route 53
+
+Parameters:
+  RootDomain:
+    Type: String
+    Description: Route 53 route domain
+    Default: hryssmz.click
+
+Mappings:
+  Region2S3DNS:
+    ap-northeast-1:
+      DNSName: s3-website-ap-northeast-1.amazonaws.com
+      HostedZoneId: Z2M4EHUR26P7ZW
+    us-east-1:
+      CertificateArn: arn:aws:acm:us-east-1:512667299293:certificate/49eb3c1e-e627-4a14-b5c5-5825e8b30028
+
+Resources:
+  RootBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Ref: RootDomain
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      LoggingConfiguration:
+        DestinationBucketName:
+          Ref: LogsBucket
+        LogFilePrefix: logs/
+
+  RootBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: RootBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: ${RootBucket.Arn}/*
+            Condition:
+              StringEquals:
+                aws:SourceArn:
+                  Fn::Sub: arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}
+
+  WwwBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: www.${RootDomain}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      WebsiteConfiguration:
+        RedirectAllRequestsTo:
+          HostName:
+            Ref: RootDomain
+          Protocol: https
+
+  LogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: logs.${RootDomain}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      AccessControl: LogDeliveryWrite
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+
+  LogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: LogsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${LogsBucket.Arn}/*
+            Condition:
+              ArnLike:
+                aws:SourceArn:
+                  Fn::GetAtt: RootBucket.Arn
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+
+  Route53RecordSetGroup:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      Comment: RecordSet group for Route 53 hosted zone
+      HostedZoneName:
+        Fn::Sub: ${RootDomain}.
+      RecordSets:
+        - Name:
+            Ref: RootDomain
+          Type: A
+          AliasTarget:
+            DNSName:
+              Fn::GetAtt: Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2  # CloudFront HostedZoneId
+            EvaluateTargetHealth: false
+        - Name:
+            Fn::Sub: www.${RootDomain}
+          Type: A
+          AliasTarget:
+            DNSName:
+              Fn::GetAtt: Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2  # CloudFront HostedZoneId
+            EvaluateTargetHealth: false
+
+  CachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-CachePolicy
+        Comment: CloudFront cache policy
+        DefaultTTL: 86400
+        MinTTL: 1
+        MaxTTL: 31536000
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingBrotli: true
+          EnableAcceptEncodingGzip: true
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-OriginAccessControl
+        Description: Origin access control for S3
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: CloudFront distribution
+        Enabled: true
+        Aliases:
+          - Ref: RootDomain
+          - Fn::Sub: www.${RootDomain}
+        Origins:
+          - Id:
+              Fn::GetAtt: RootBucket.RegionalDomainName
+            DomainName:
+              Fn::GetAtt: RootBucket.RegionalDomainName
+            OriginAccessControlId:
+              Ref: OriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          CachePolicyId:
+            Ref: CachePolicy
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          TargetOriginId:
+            Fn::GetAtt: RootBucket.RegionalDomainName
+          ViewerProtocolPolicy: redirect-to-https
+        DefaultRootObject: index.html
+        Logging:
+          Bucket:
+            Fn::GetAtt: LogsBucket.DomainName
+          Prefix: cdn/
+        ViewerCertificate:
+          AcmCertificateArn:
+            Fn::FindInMap:
+              - Region2S3DNS
+              - us-east-1
+              - CertificateArn
+          MinimumProtocolVersion: TLSv1
+          SslSupportMethod: sni-only
+
+Outputs:
+  S3WebsiteUrl:
+    Value:
+      Fn::GetAtt: RootBucket.WebsiteURL
+
+  DistributionDomain:
+    Value:
+      Fn::GetAtt: Distribution.DomainName
+
+  RootDomain:
+    Value:
+      Ref: RootDomain

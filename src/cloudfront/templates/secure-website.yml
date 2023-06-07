@@ -1,0 +1,186 @@
+# cloudfront/templates/secure-website.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Getting started with a secure static website
+
+Parameters:
+  RootDomain:
+    Type: String
+    Description: The part of a website address after your SubDomain - e.g. example.com
+    Default: hryssmz.click
+
+Mappings:
+  Region2ACM:
+    us-east-1:
+      Arn: arn:aws:acm:us-east-1:512667299293:certificate/49eb3c1e-e627-4a14-b5c5-5825e8b30028
+    ap-northeast-1:
+      Arn: arn:aws:acm:ap-northeast-1:512667299293:certificate/22ce6d09-fbd5-40d9-b4c6-4072c5f75413
+
+Resources:
+  RootBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Ref: RootDomain
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      LoggingConfiguration:
+        DestinationBucketName:
+          Ref: LogsBucket
+        LogFilePrefix: origin/
+
+  RootBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: RootBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: ${RootBucket.Arn}/*
+            Condition:
+              StringEquals:
+                aws:SourceArn:
+                  Fn::Sub: arn:aws:cloudfront::${AWS::AccountId}:distribution/${RootDistribution}
+
+  LogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: logs.${RootDomain}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  LogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: LogsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${LogsBucket.Arn}/*
+            Condition:
+              ArnLike:
+                aws:SourceArn:
+                  Fn::GetAtt: RootBucket.Arn
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-OriginAccessControl
+        Description: Origin access control for S3
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-CachePolicy
+        Comment:
+          Fn::Sub: ${AWS::StackName} cache policy
+        DefaultTTL: 86400
+        MinTTL: 1
+        MaxTTL: 31536000
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingBrotli: true
+          EnableAcceptEncodingGzip: true
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  RootDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment:
+          Fn::Sub: ${AWS::StackName} CloudFront distribution
+        Enabled: true
+        Aliases:
+          - Ref: RootDomain
+        Origins:
+          - Id:
+              Fn::GetAtt: RootBucket.RegionalDomainName
+            DomainName:
+              Fn::GetAtt: RootBucket.RegionalDomainName
+            OriginAccessControlId:
+              Ref: OriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          CachePolicyId:
+            Ref: CachePolicy
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          TargetOriginId:
+            Fn::GetAtt: RootBucket.RegionalDomainName
+          ViewerProtocolPolicy: redirect-to-https
+        DefaultRootObject: index.html
+        ViewerCertificate:
+          AcmCertificateArn:
+            Fn::FindInMap:
+              - Region2ACM
+              - us-east-1
+              - Arn
+          MinimumProtocolVersion: TLSv1
+          SslSupportMethod: sni-only
+
+  RecordSetGroup:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      Comment: RecordSet group for Route 53 hosted zone
+      HostedZoneName:
+        Fn::Sub: ${RootDomain}.
+      RecordSets:
+        - Name:
+            Ref: RootDomain
+          Type: A
+          AliasTarget:
+            DNSName:
+              Fn::GetAtt: RootDistribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2 # CloudFront HostedZoneId
+            EvaluateTargetHealth: false
+
+Outputs:
+  RootDistributionDomain:
+    Value:
+      Fn::GetAtt: RootDistribution.DomainName
+
+  RootDomain:
+    Value:
+      Ref: RootDomain

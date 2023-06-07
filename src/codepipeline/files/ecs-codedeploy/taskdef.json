@@ -1,0 +1,22 @@
+{
+  "family": "ecs-codedeploy-TaskDefinition",
+  "cpu": "256",
+  "memory": "512",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "executionRoleArn": "arn:aws:iam::512667299293:role/ecs-codedeploy-ECSExecutionRole-ap-northeast-1",
+  "containerDefinitions": [
+    {
+      "name": "sample-website",
+      "image": "<IMAGE1_NAME>",
+      "essential": true,
+      "portMappings": [
+        {
+          "hostPort": 80,
+          "protocol": "tcp",
+          "containerPort": 80
+        }
+      ]
+    }
+  ]
+}

@@ -3,35 +3,11 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: Sample VPC
 
 Parameters:
-  OperatingSystem:
+  MyIP:
     Type: String
-    Description: Operating system name
-    Default: AL2013
-    AllowedValues:
-      - AL2
-      - AL2013
-    ConstraintDescription: must be either 'AL2' or 'AL2013'
-
-  InstanceType:
-    Type: String
-    Description: EC2 instance type
-    Default: t2.micro
-    AllowedValues:
-      - t2.micro
-    ConstraintDescription: must be 't2.micro' only
-
-  PublicKeyBody:
-    Type: String
-    Description: EC2 public key
-    AllowedPattern: ssh-rsa .*
-    ConstraintDescription: must be a valid RSA public key
-
-  IngressCidr:
-    Type: String
-    Description: IP address for ingress
-    Default: 0.0.0.0/0
-    AllowedPattern: \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}
-    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x
+    Description: My IPv4 address
+    AllowedPattern: \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}
+    ConstraintDescription: must be a valid IP address of the form x.x.x.x
 
   UseEIP:
     Type: String
@@ -49,10 +25,10 @@ Conditions:
       - true
 
 Mappings:
-  RegionOS2AMI:
+  Region2Instance:
     ap-northeast-1:
-      AL2: ami-030cf0a1edb8636ab
-      AL2013: ami-067871d950411e643
+      ImageId: ami-067871d950411e643 # AL2013
+      InstanceType: t2.micro
 
 Resources:
   VPC:
@@ -61,7 +37,8 @@ Resources:
       CidrBlock: 172.20.0.0/16
       Tags:
         - Key: Name
-          Value: CustomVPC
+          Value:
+            Fn::Sub: ${AWS::StackName}-vpc
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -87,7 +64,8 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: CustomSubnet
+          Value:
+            Fn::Sub: ${AWS::StackName}-sn
 
   RouteTable:
     Type: AWS::EC2::RouteTable
@@ -96,7 +74,8 @@ Resources:
         Ref: VPC
       Tags:
         - Key: Name
-          Value: CustomRouteTable
+          Value:
+            Fn::Sub: ${AWS::StackName}-rtb
 
   SubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -116,17 +95,11 @@ Resources:
       GatewayId:
         Ref: InternetGateway
 
-  SSHKeyPair:
-    Type: AWS::EC2::KeyPair
-    Properties:
-      KeyName:
-        Fn::Sub: ${AWS::StackName}-keypair
-      PublicKeyMaterial:
-        Ref: PublicKeyBody
-
   WebSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-WebSecurityGroup
       GroupDescription: Web security group
       VpcId:
         Ref: VPC
@@ -135,24 +108,20 @@ Resources:
           FromPort: 80
           ToPort: 80
           CidrIp:
-            Ref: IngressCidr
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp:
-            Ref: IngressCidr
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp:
-            Ref: IngressCidr
+            Fn::Sub: ${MyIP}/32
       Tags:
         - Key: Name
-          Value: CustomSecurityGroup
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg
 
   EC2InstanceRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole
+      Description: Service role for EC2 instance
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -161,9 +130,6 @@ Resources:
               Service: ec2.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Service role for EC2 instance
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -176,22 +142,24 @@ Resources:
     Properties:
       ImageId:
         Fn::FindInMap:
-          - RegionOS2AMI
+          - Region2Instance
           - Ref: AWS::Region
-          - Ref: OperatingSystem
+          - ImageId
       InstanceType:
-        Ref: InstanceType
-      KeyName:
-        Ref: SSHKeyPair
+        Fn::FindInMap:
+          - Region2Instance
+          - Ref: AWS::Region
+          - InstanceType
       SecurityGroupIds:
-        - Fn::GetAtt: WebSecurityGroup.GroupId
+        - Ref: WebSecurityGroup
       SubnetId:
         Ref: Subnet
-      Tags:
-        - Key: Name
-          Value: CustomVPCInstance
       IamInstanceProfile:
         Ref: EC2InstanceProfile
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-i
 
   EIP:
     Type: AWS::EC2::EIP
@@ -202,4 +170,5 @@ Resources:
         Ref: Instance
       Tags:
         - Key: Name
-          Value: CustomEIP
+          Value:
+            Fn::Sub: ${AWS::StackName}-eip

@@ -1,0 +1,9 @@
+{
+  "ALBWorkloads": "api",
+  "AppDNSDelegationRole": "demo",
+  "CreateHTTPSListener": "false",
+  "CreateInternalHTTPSListener": "false",
+  "EnvironmentName": "test",
+  "ServiceDiscoveryEndpoint": "test.demo.local",
+  "ToolsAccountPrincipalARN": "arn:aws:iam::512667299293:root"
+}

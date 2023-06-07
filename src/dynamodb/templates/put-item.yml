@@ -1,0 +1,195 @@
+# dynamodb/templates/put-item.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: PutItem test
+
+Parameters:
+  EnvironmentType:
+    Type: String
+    Description: API Gateway deployment stage
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    ConstraintDescription: must be either 'dev' or 'prod'
+
+  Architecture:
+    Type: String
+    Description: Lambda CPU architecture
+    Default: arm64
+    AllowedValues:
+      - arm64
+      - x86_64
+    ConstraintDescription: must be either 'arm64' or 'x86_64'
+
+Globals:
+  Function:
+    Handler: index.handler
+    Runtime: python3.9
+    Timeout: 60
+    Architectures:
+      - Ref: Architecture
+
+Resources:
+  DateTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName:
+        Fn::Sub: ${AWS::StackName}-DateTable
+      PrimaryKey:
+        Name: Id
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Ref: AWS::StackName
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      StageName:
+        Ref: EnvironmentType
+      Cors:
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: My REST API
+          version: "1.0"
+        paths:
+          /dates:
+            post:
+              operationId: PostDate
+              responses:
+                "201":
+                  description: 201 Created
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/PostDateResponse"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: "#/components/headers/Access-Control-Allow-Origin"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PostDateFunction.Arn}/invocations
+                httpMethod: POST
+        components:
+          schemas:
+            PostDateResponse:
+              description: Response body for POST /dates
+              type: object
+              required:
+                - id
+                - date
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                date:
+                  type: string
+                  format: date-time
+              example:
+                id: 3e4666bf-d5e5-4aa7-b8ce-cefe41c7568a
+                date: "2023-01-10T13:00:00Z"
+          headers:
+            Access-Control-Allow-Origin:
+              description: Response header for CORS support
+              schema:
+                type: string
+                example: "*"
+
+  PostDateFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-PostDateFunctionPolicy-${AWS::Region}
+      Description: Execution policy for PostDateFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:PutItem
+            Resource:
+              - Fn::GetAtt: DateTable.Arn
+              - Fn::Sub: arn:aws:dynamodb:us-west-1:${AWS::AccountId}:table/${DateTable}
+
+  PostDateFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-PostDateFunctionRole-${AWS::Region}
+      Description: Service role for PostDateFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: PostDateFunctionPolicy
+
+  PostDateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-PostDateFunction
+      Description: Create todo function
+      Role:
+        Fn::GetAtt: PostDateFunctionRole.Arn
+      Environment:
+        Variables:
+          DATE_TABLE:
+            Ref: DateTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: POST
+            Path: /dates
+            RestApiId:
+              Ref: RestApi
+      InlineCode: |
+        from datetime import datetime
+        import json
+        import os
+        from typing import Any
+        import uuid
+
+        import boto3
+
+
+        def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+            table_name = os.environ["DATE_TABLE"]
+            dynamodb = boto3.resource("dynamodb", region_name="us-west-1")
+            table = dynamodb.Table(table_name)
+            id = str(uuid.uuid4())
+            item = {
+                "Id": id,
+                "Date": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+            table.put_item(Item=item)
+
+            res_body = {"id": item["Id"], "date": item["Date"]}
+            return {
+                "statusCode": 201,
+                "headers": {"Access-Control-Allow-Origin": "*"},
+                "body": json.dumps(res_body),
+            }
+
+  PostDateFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${PostDateFunction}

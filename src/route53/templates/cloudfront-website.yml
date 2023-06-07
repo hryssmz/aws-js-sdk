@@ -1,0 +1,235 @@
+# route53/templates/cloudfront-website.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CloudFront website with Route 53
+
+Parameters:
+  RootDomain:
+    Type: String
+    Description: Route 53 route domain
+    Default: hryssmz.click
+
+Mappings:
+  Region2S3DNS:
+    ap-northeast-1:
+      DNSName: s3-website-ap-northeast-1.amazonaws.com
+      HostedZoneId: Z2M4EHUR26P7ZW
+
+  Region2Certificate:
+    us-east-1:
+      CertificateArn: arn:aws:acm:us-east-1:512667299293:certificate/49eb3c1e-e627-4a14-b5c5-5825e8b30028
+
+Resources:
+  RootBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Ref: RootDomain
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      WebsiteConfiguration:
+        RedirectAllRequestsTo:
+          HostName:
+            Fn::Sub: www.${RootDomain}
+          Protocol: https
+
+  WwwBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: www.${RootDomain}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      WebsiteConfiguration:
+        IndexDocument: index.html
+
+  CachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-CachePolicy
+        Comment: CloudFront cache policy
+        DefaultTTL: 86400
+        MinTTL: 1
+        MaxTTL: 31536000
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingBrotli: true
+          EnableAcceptEncodingGzip: true
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  NoCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-NoCachePolicy
+        Comment: CloudFront no-cache policy
+        DefaultTTL: 0
+        MinTTL: 0
+        MaxTTL: 0
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingBrotli: false
+          EnableAcceptEncodingGzip: false
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-OriginAccessControl
+        Description: Origin access control for S3
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  WwwDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: CloudFront www distribution
+        Enabled: true
+        Aliases:
+          - Fn::Sub: www.${RootDomain}
+        Origins:
+          - Id:
+              Fn::GetAtt: WwwBucket.RegionalDomainName
+            DomainName:
+              Fn::GetAtt: WwwBucket.RegionalDomainName
+            OriginAccessControlId:
+              Ref: OriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          CachePolicyId:
+            Ref: CachePolicy
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          TargetOriginId:
+            Fn::GetAtt: WwwBucket.RegionalDomainName
+          ViewerProtocolPolicy: redirect-to-https
+        ViewerCertificate:
+          AcmCertificateArn:
+            Fn::FindInMap:
+              - Region2Certificate
+              - us-east-1
+              - CertificateArn
+          MinimumProtocolVersion: TLSv1
+          SslSupportMethod: sni-only
+
+  WwwBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: WwwBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: ${WwwBucket.Arn}/*
+            Condition:
+              StringEquals:
+                aws:SourceArn:
+                  Fn::Sub: arn:aws:cloudfront::${AWS::AccountId}:distribution/${WwwDistribution}
+
+  RootDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: CloudFront root distribution
+        Enabled: true
+        Aliases:
+          - Ref: RootBucket
+        Origins:
+          - Id:
+              Fn::GetAtt: RootBucket.RegionalDomainName
+            DomainName:
+              Fn::Sub:
+                - ${RootDomain}.${S3DNSName}
+                - S3DNSName:
+                    Fn::FindInMap:
+                      - Region2S3DNS
+                      - Ref: AWS::Region
+                      - DNSName
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only
+        DefaultCacheBehavior:
+          CachePolicyId:
+            Ref: NoCachePolicy
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          TargetOriginId:
+            Fn::GetAtt: RootBucket.RegionalDomainName
+          ViewerProtocolPolicy: redirect-to-https
+        ViewerCertificate:
+          AcmCertificateArn:
+            Fn::FindInMap:
+              - Region2Certificate
+              - us-east-1
+              - CertificateArn
+          MinimumProtocolVersion: TLSv1
+          SslSupportMethod: sni-only
+
+  Route53RecordSetGroup:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      Comment: RecordSet group for Route 53 hosted zone
+      HostedZoneName:
+        Fn::Sub: ${RootDomain}.
+      RecordSets:
+        - Name:
+            Ref: RootDomain
+          Type: A
+          AliasTarget:
+            DNSName:
+              Fn::GetAtt: RootDistribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2 # CloudFront HostedZoneId
+            EvaluateTargetHealth: false
+        - Name:
+            Fn::Sub: www.${RootDomain}
+          Type: A
+          AliasTarget:
+            DNSName:
+              Fn::GetAtt: WwwDistribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2 # CloudFront HostedZoneId
+            EvaluateTargetHealth: false
+
+Outputs:
+  RootDomainName:
+    Value:
+      Fn::GetAtt: RootDistribution.DomainName
+
+  WwwDomainName:
+    Value:
+      Fn::GetAtt: WwwDistribution.DomainName

@@ -1,0 +1,166 @@
+# cloudtrail/templates/lambda-subscription.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Subscription filters with AWS Lambda
+
+Resources:
+  # CloudWatch Logs
+  TrailLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/cloudtrail/${AWS::StackName}-TrailLogGroup
+
+  SubscriptionFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SubscriptionFunctionRole-${AWS::Region}
+      Description: Service role for SubscriptionFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SubscriptionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SubscriptionFunction
+      Description: CloudWatch Logs subscription function
+      Role:
+        Fn::GetAtt: SubscriptionFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Events:
+        CloudWatchLogsEvent:
+          Type: CloudWatchLogs
+          Properties:
+            LogGroupName:
+              Ref: TrailLogGroup
+            FilterPattern: "{ $.eventName = DescribeStacks }"
+      InlineCode: |
+        const zlib = require("zlib");
+
+        exports.handler = async event => {
+          const payload = Buffer.from(event.awslogs.data, "base64");
+          const data = JSON.parse(zlib.gunzipSync(payload).toString());
+          console.log(JSON.stringify(data, null, 2));
+          return data;
+        };
+
+  SubscriptionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SubscriptionFunction}
+
+  # CloudTrail
+  TrailPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-TrailPolicy-${AWS::Region}
+      Description: Policy for Trail
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${TrailLogGroup}:log-stream:${AWS::AccountId}_CloudTrail_${AWS::Region}*
+
+  TrailRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-TrailRole-${AWS::Region}
+      Description: Service role Trail
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: TrailPolicy
+
+  Trail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: TrailBucketPolicy
+    Properties:
+      TrailName:
+        Fn::Sub: ${AWS::StackName}-Trail
+      IsLogging: true
+      S3BucketName:
+        Ref: TrailBucket
+      IncludeGlobalServiceEvents: true
+      EnableLogFileValidation: true
+      EventSelectors:
+        - IncludeManagementEvents: true
+          ReadWriteType: All
+          ExcludeManagementEventSources:
+            - kms.amazonaws.com
+            - rdsdata.amazonaws.com
+      CloudWatchLogsLogGroupArn:
+        Fn::GetAtt: TrailLogGroup.Arn
+      CloudWatchLogsRoleArn:
+        Fn::GetAtt: TrailRole.Arn
+
+  TrailBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-trailbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  TrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: TrailBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+            Resource:
+              - Fn::GetAtt: TrailBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${AWS::StackName}-Trail
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${TrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+              - Fn::Sub: ${TrailBucket.Arn}/*/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${AWS::StackName}-Trail

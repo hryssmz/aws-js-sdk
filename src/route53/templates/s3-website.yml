@@ -1,0 +1,112 @@
+# route53/templates/s3-website.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: S3 website with Route 53
+
+Parameters:
+  RootDomain:
+    Type: String
+    Description: Route 53 route domain
+    Default: hryssmz.click
+
+Mappings:
+  Region2S3DNS:
+    ap-northeast-1:
+      DNSName: s3-website-ap-northeast-1.amazonaws.com
+      HostedZoneId: Z2M4EHUR26P7ZW
+
+Resources:
+  RootBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Ref: RootDomain
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      WebsiteConfiguration:
+        IndexDocument: index.html
+
+  WwwBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: www.${RootDomain}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      WebsiteConfiguration:
+        RedirectAllRequestsTo:
+          HostName:
+            Ref: RootDomain
+          Protocol: http
+
+  RootBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: RootBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: ${RootBucket.Arn}/*
+
+  Route53RecordSetGroup:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      Comment: RecordSet group for Route 53 hosted zone
+      HostedZoneName:
+        Fn::Sub: ${RootDomain}.
+      RecordSets:
+        - Name:
+            Ref: RootDomain
+          Type: A
+          AliasTarget:
+            DNSName:
+              Fn::FindInMap:
+                - Region2S3DNS
+                - Ref: AWS::Region
+                - DNSName
+            HostedZoneId:
+              Fn::FindInMap:
+                - Region2S3DNS
+                - Ref: AWS::Region
+                - HostedZoneId
+            EvaluateTargetHealth: false
+        - Name:
+            Fn::Sub: www.${RootDomain}
+          Type: A
+          AliasTarget:
+            DNSName:
+              Fn::FindInMap:
+                - Region2S3DNS
+                - Ref: AWS::Region
+                - DNSName
+            HostedZoneId:
+              Fn::FindInMap:
+                - Region2S3DNS
+                - Ref: AWS::Region
+                - HostedZoneId
+            EvaluateTargetHealth: false
+
+Outputs:
+  RootBucketUrl:
+    Value:
+      Fn::GetAtt: RootBucket.WebsiteURL
+
+  WwwBucketUrl:
+    Value:
+      Fn::GetAtt: WwwBucket.WebsiteURL

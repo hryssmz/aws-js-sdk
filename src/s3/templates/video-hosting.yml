@@ -1,0 +1,90 @@
+# s3/templates/video-hosting.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Hosting video
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: S3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${CloudFrontOAI}
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+
+  CloudFrontOAI:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment:
+          Fn::Sub: ${AWS::StackName} CloudFront origin access identity
+
+  CachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-CachePolicy
+        Comment:
+          Fn::Sub: ${AWS::StackName} cache policy
+        DefaultTTL: 86400
+        MinTTL: 1
+        MaxTTL: 31536000
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingBrotli: true
+          EnableAcceptEncodingGzip: true
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment:
+          Fn::Sub: ${AWS::StackName} CloudFront distribution
+        Enabled: true
+        Origins:
+          - Id:
+              Fn::GetAtt: S3Bucket.RegionalDomainName
+            DomainName:
+              Fn::GetAtt: S3Bucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity:
+                Fn::Sub: origin-access-identity/cloudfront/${CloudFrontOAI.Id}
+        DefaultCacheBehavior:
+          CachePolicyId:
+            Ref: CachePolicy
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          TargetOriginId:
+            Fn::GetAtt: S3Bucket.RegionalDomainName
+          ViewerProtocolPolicy: redirect-to-https
+        DefaultRootObject: index.html

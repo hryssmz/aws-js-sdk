@@ -1,0 +1,17 @@
+# s3/templates/bucket-versioning.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Bucket versioning
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled

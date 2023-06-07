@@ -6,7 +6,7 @@ import { region } from "../utils";
 import type { Action } from "../utils";
 
 const funcName = "my-function";
-const restApiName = "sam-helloworld-python-HelloWorldApi";
+const restApiName = "aws-sam-python";
 const resourceParent = "/";
 const pathPart = "my-endpoint";
 const resourcePath = `${resourceParent.replace(/\/$/, "")}/${pathPart}`;
@@ -14,7 +14,7 @@ const restMethod = "GET";
 const restAuth = "NONE";
 const stageName = "dev";
 const lambdaPolicyStmtId = "MyAPIGatewayInvokeFunction";
-const openApiPath = "openapi.yaml";
+const openApiPath = "openapi.yml";
 
 async function createRestApi() {
   const apigateway = new APIGatewayWrapper();

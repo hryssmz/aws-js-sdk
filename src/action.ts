@@ -6,10 +6,12 @@ import cloudformationActions from "./cloudformation/actions";
 import dynamodbActions from "./dynamodb/actions";
 import ec2Actions from "./ec2/actions";
 import iamActions from "./iam/actions";
+import kinesisActions from "./kinesis/actions";
 import lambdaActions from "./lambda/actions";
 import s3Actions from "./s3/actions";
 import secretsManagerActions from "./secretsmanager/actions";
 import snsActions from "./sns/actions";
+import sqsActions from "./sqs/actions";
 import { camelize } from "./utils";
 import type { Action } from "./utils";
 
@@ -21,10 +23,12 @@ const actions: Record<string, Action> = {
   ...dynamodbActions,
   ...ec2Actions,
   ...iamActions,
+  ...kinesisActions,
   ...lambdaActions,
   ...s3Actions,
   ...secretsManagerActions,
   ...snsActions,
+  ...sqsActions,
 };
 
 async function main() {

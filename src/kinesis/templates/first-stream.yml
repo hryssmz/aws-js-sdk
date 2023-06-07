@@ -1,0 +1,324 @@
+# kinesis/templates/first-stream.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: My first stream
+
+Resources:
+  KiensisStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-KiensisStream
+      ShardCount: 1
+      StreamModeDetails:
+        StreamMode: PROVISIONED
+
+  ShardTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName:
+        Fn::Sub: ${AWS::StackName}-ShardTable
+      PrimaryKey:
+        Name: ShardId
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+
+  PutRecordsFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-PutRecordsFunctionPolicy-${AWS::Region}
+      Description: Policy for PutRecordsFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - kinesis:PutRecords
+            Resource:
+              - Fn::GetAtt: KiensisStream.Arn
+
+  PutRecordsFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-PutRecordsFunctionRole-${AWS::Region}
+      Description: Service role for PutRecordsFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: PutRecordsFunctionPolicy
+
+  PutRecordsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-PutRecordsFunction
+      Description: Put some records into stream
+      Role:
+        Fn::GetAtt: PutRecordsFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          STREAM_NAME:
+            Ref: KiensisStream
+      InlineCode: |
+        const { KinesisClient, PutRecordsCommand } = require("@aws-sdk/client-kinesis");
+
+        exports.handler = async () => {
+          const client = new KinesisClient();
+          const records = Array(5)
+            .fill(0)
+            .map((_, i) => i + Math.floor(Number(new Date()) / 1000))
+            .map(i => ({ partitionKey: `${i % 2}`, data: `${i}` }));
+
+          const command = new PutRecordsCommand({
+            StreamName: process.env.STREAM_NAME,
+            Records: records.map(({ partitionKey, data }) => ({
+              PartitionKey: partitionKey,
+              Data: Buffer.from(data, "utf8"),
+            })),
+          });
+          const { Records = [] } = await client.send(command);
+          const result = Records.map(({ ShardId, SequenceNumber }) => ({
+            ShardId,
+            SequenceNumber,
+          }));
+          console.log(JSON.stringify(result, null, 2));
+          return result;
+        };
+
+  PutRecordsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${PutRecordsFunction}
+
+  ResetShardIteratorFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-ResetShardIteratorFunctionPolicy-${AWS::Region}
+      Description: Policy for ResetShardIteratorFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - kinesis:GetShardIterator
+            Resource:
+              - Fn::GetAtt: KiensisStream.Arn
+          - Effect: Allow
+            Action:
+              - dynamodb:PutItem
+            Resource:
+              - Fn::GetAtt: ShardTable.Arn
+
+  ResetShardIteratorFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ResetShardIteratorFunctionRole-${AWS::Region}
+      Description: Service role for ResetShardIteratorFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: ResetShardIteratorFunctionPolicy
+
+  ResetShardIteratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ResetShardIteratorFunction
+      Description: Reset shard iterator
+      Role:
+        Fn::GetAtt: ResetShardIteratorFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          STREAM_NAME:
+            Ref: KiensisStream
+          SHARD_TABLE:
+            Ref: ShardTable
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - kinesis:GetShardIterator
+              Resource:
+                - Fn::GetAtt: KiensisStream.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource:
+                - Fn::GetAtt: ShardTable.Arn
+      InlineCode: |
+        const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+        const { DynamoDBDocumentClient, PutCommand } = require("@aws-sdk/lib-dynamodb");
+        const {
+          KinesisClient,
+          GetShardIteratorCommand,
+        } = require("@aws-sdk/client-kinesis");
+
+        exports.handler = async () => {
+          const kinesisClient = new KinesisClient();
+          const ShardId = "ShardId-000000000000";
+          const getShardIteratorCommand = new GetShardIteratorCommand({
+            StreamName: process.env.STREAM_NAME,
+            ShardId,
+            ShardIteratorType: "TRIM_HORIZON",
+          });
+          const { ShardIterator = "" } = await kinesisClient.send(
+            getShardIteratorCommand
+          );
+          const Item = { ShardId, ShardIterator };
+
+          const ddbDocClient = DynamoDBDocumentClient.from(new DynamoDBClient());
+          const putCommand = new PutCommand({
+            TableName: process.env.SHARD_TABLE,
+            Item,
+          });
+          await ddbDocClient.send(putCommand);
+          console.log(JSON.stringify(Item, null, 2));
+          return Item;
+        };
+
+  ResetShardIteratorFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${ResetShardIteratorFunction}
+
+  GetRecordsFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-GetRecordsFunctionPolicy-${AWS::Region}
+      Description: Policy for GetRecordsFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - kinesis:GetRecords
+            Resource:
+              - Fn::GetAtt: KiensisStream.Arn
+          - Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:UpdateItem
+            Resource:
+              - Fn::GetAtt: ShardTable.Arn
+
+  GetRecordsFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-GetRecordsFunctionRole-${AWS::Region}
+      Description: Service role for GetRecordsFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: GetRecordsFunctionPolicy
+
+  GetRecordsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-GetRecordsFunction
+      Description: Get records and update shard iterator
+      Role:
+        Fn::GetAtt: GetRecordsFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          STREAM_NAME:
+            Ref: KiensisStream
+          SHARD_TABLE:
+            Ref: ShardTable
+      InlineCode: |
+        const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+        const {
+          DynamoDBDocumentClient,
+          GetCommand,
+          UpdateCommand,
+        } = require("@aws-sdk/lib-dynamodb");
+        const { KinesisClient, GetRecordsCommand } = require("@aws-sdk/client-kinesis");
+
+        exports.handler = async () => {
+          const TableName = process.env.SHARD_TABLE;
+          const Key = { ShardId: "ShardId-000000000000" };
+          const ddbDocClient = DynamoDBDocumentClient.from(new DynamoDBClient());
+          const getCommand = new GetCommand({ TableName, Key });
+          const { Item } = await ddbDocClient.send(getCommand);
+          if (Item === undefined) {
+            console.log(JSON.stringify([], null, 2));
+            return [];
+          }
+          const { ShardIterator } = Item;
+
+          const kinesisClient = new KinesisClient();
+          const getRecordsCommand = new GetRecordsCommand({ ShardIterator, Limit: 3 });
+          const { Records = [], NextShardIterator = "" } = await kinesisClient.send(
+            getRecordsCommand
+          );
+
+          const updateCommand = new UpdateCommand({
+            TableName,
+            Key,
+            UpdateExpression: "SET #it = :nit",
+            ExpressionAttributeNames: { "#it": "ShardIterator" },
+            ExpressionAttributeValues: {
+              ":nit": NextShardIterator,
+              ":it": ShardIterator,
+            },
+            ConditionExpression: "#it = :it",
+          });
+          await ddbDocClient.send(updateCommand);
+
+          const records = Records.map(({ PartitionKey = "", Data }) => ({
+            PartitionKey,
+            Data: Buffer.from(Data ?? []).toString(),
+          }));
+          console.log(JSON.stringify(records, null, 2));
+          return records;
+        };
+
+  GetRecordsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${GetRecordsFunction}

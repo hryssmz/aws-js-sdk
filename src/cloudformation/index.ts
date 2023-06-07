@@ -2,18 +2,24 @@
 import {
   CloudFormationClient,
   CreateStackCommand,
+  CreateStackSetCommand,
   DeleteStackCommand,
+  DeleteStackSetCommand,
   DescribeStacksCommand,
   UpdateStackCommand,
+  UpdateStackSetCommand,
   ValidateTemplateCommand,
 } from "@aws-sdk/client-cloudformation";
 import { defaultClientConfig } from "../utils";
 import type {
   CloudFormationClientConfig,
   CreateStackCommandInput,
+  CreateStackSetCommandInput,
   DeleteStackCommandInput,
+  DeleteStackSetCommandInput,
   DescribeStacksCommandInput,
   UpdateStackCommandInput,
+  UpdateStackSetCommandInput,
   ValidateTemplateCommandInput,
 } from "@aws-sdk/client-cloudformation";
 
@@ -37,8 +43,20 @@ export class CloudFormationWrapper {
     return result;
   }
 
+  async createStackSet(params: CreateStackSetCommandInput) {
+    const command = new CreateStackSetCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
   async deleteStack(params: DeleteStackCommandInput) {
     const command = new DeleteStackCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async deleteStackSet(params: DeleteStackSetCommandInput) {
+    const command = new DeleteStackSetCommand(params);
     const result = await this.client.send(command);
     return result;
   }
@@ -51,6 +69,12 @@ export class CloudFormationWrapper {
 
   async updateStack(params: UpdateStackCommandInput) {
     const command = new UpdateStackCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async updateStackSet(params: UpdateStackSetCommandInput) {
+    const command = new UpdateStackSetCommand(params);
     const result = await this.client.send(command);
     return result;
   }

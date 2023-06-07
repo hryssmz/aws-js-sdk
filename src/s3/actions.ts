@@ -1,10 +1,9 @@
 // s3/actions.ts
 import { createReadStream } from "node:fs";
 import { S3Wrapper } from ".";
-import { accountAlias } from "../utils";
 import type { Action } from "../utils";
 
-const bucket = `my-bucket-${accountAlias}`;
+const bucket = `dynamic-partition-destinationbucket-ap-northeast-1`;
 const objectKey = "my-object.txt";
 const objectBody = "My Body";
 const binaryKey = "s3-logo.png";
@@ -27,6 +26,12 @@ async function deleteObject() {
   const s3 = new S3Wrapper();
   await s3.deleteObject({ Bucket: bucket, Key: objectKey });
   return JSON.stringify(objectKey, null, 2);
+}
+
+async function emptyBucket() {
+  const s3 = new S3Wrapper();
+  await s3.deleteAllObjects(bucket);
+  return JSON.stringify(bucket, null, 2);
 }
 
 async function getObject() {
@@ -56,6 +61,7 @@ const actions: Record<string, Action> = {
   createBucket,
   deleteBucket,
   deleteObject,
+  emptyBucket,
   getObject,
   uploadBinary,
   uploadPlain,

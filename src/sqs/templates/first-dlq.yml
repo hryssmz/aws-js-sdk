@@ -1,0 +1,124 @@
+# sqs/templates/first-DeadLetterQueue.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: My first dead-letter queue
+
+Globals:
+  Function:
+    Handler: index.handler
+    Runtime: nodejs18.x
+    Timeout: 10
+    Architectures:
+      - arm64
+
+Resources:
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-DeadLetterQueue
+
+  SourceQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-SourceQueue
+      ReceiveMessageWaitTimeSeconds: 1
+      VisibilityTimeout: 5
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt: DeadLetterQueue.Arn
+        maxReceiveCount: 2
+
+  ProducerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ProducerFunction
+      Description: Push messages into Queue
+      Environment:
+        Variables:
+          QUEUE_URL:
+            Ref: SourceQueue
+      InlineCode: |
+        const { SendMessageCommand, SQSClient } = require("@aws-sdk/client-sqs");
+
+        exports.handler = async () => {
+          const client = new SQSClient();
+          const message = new Date().toISOString();
+          const command = new SendMessageCommand({
+            MessageBody: message,
+            QueueUrl: process.env.QUEUE_URL,
+          });
+          const { MessageId, SequenceNumber } = await client.send(command);
+          const result = { MessageId, SequenceNumber };
+          console.log(JSON.stringify(result, null, 2));
+          return result;
+        };
+
+  ProducerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${ProducerFunction}
+
+  ProducerFunctionSourceQueueConnector:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: ProducerFunction
+      Destination:
+        Id: SourceQueue
+      Permissions:
+        - Write
+
+  ConsumerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ConsumerFunction
+      Description: Consumer function for Queue
+      Environment:
+        Variables:
+          QUEUE_URL:
+            Ref: SourceQueue
+      InlineCode: |
+        const {
+          DeleteMessageCommand,
+          ReceiveMessageCommand,
+          SQSClient,
+        } = require("@aws-sdk/client-sqs");
+
+        exports.handler = async () => {
+          const QueueUrl = process.env.QUEUE_URL;
+          const client = new SQSClient();
+          const command = new ReceiveMessageCommand({ QueueUrl });
+          const { Messages = [] } = await client.send(command);
+          const randInt = new Date().getUTCMilliseconds();
+          if (randInt % 3 === 0) {
+            const promises = Messages.map(async ({ Body, ReceiptHandle }) => {
+              console.log(Body);
+              const command = new DeleteMessageCommand({ QueueUrl, ReceiptHandle });
+              await client.send(command);
+            });
+            await Promise.all(promises);
+          }
+          return Messages;
+        };
+
+  ConsumerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${ConsumerFunction}
+
+  ConsumerFunctionSourceQueueConnector:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: ConsumerFunction
+      Destination:
+        Id: SourceQueue
+      Permissions:
+        - Read
+        - Write

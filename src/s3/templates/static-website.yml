@@ -1,0 +1,37 @@
+# s3/templates/static-website.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Configuring a static website on Amazon S3
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      WebsiteConfiguration:
+        IndexDocument: index.html
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: S3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+
+Outputs:
+  WebsiteUrl:
+    Value:
+      Fn::GetAtt: S3Bucket.WebsiteURL

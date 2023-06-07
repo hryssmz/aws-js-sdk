@@ -1,0 +1,323 @@
+# apigateway/templates/load-test.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Load test API
+
+Parameters:
+  EnvironmentType:
+    Type: String
+    Description: API Gateway deployment stage
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    ConstraintDescription: must be either 'dev' or 'prod'
+
+  Architecture:
+    Type: String
+    Description: Lambda CPU architecture
+    Default: arm64
+    AllowedValues:
+      - arm64
+      - x86_64
+    ConstraintDescription: must be either 'arm64' or 'x86_64'
+
+Globals:
+  Function:
+    Handler: index.handler
+    Runtime: python3.9
+    Timeout: 60
+    Architectures:
+      - Ref: Architecture
+
+Resources:
+  # REST API
+  ApiGatewayCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ApiGatewayCloudWatchRole-${AWS::Region}
+      Description: Global service role for API Gateway to write logs
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/apigateway/${AWS::StackName}-ApiAccessLogGroup
+
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn:
+        Fn::GetAtt: ApiGatewayCloudWatchRole.Arn
+
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Ref: AWS::StackName
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      StageName:
+        Ref: EnvironmentType
+      Cors:
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      AccessLogSetting:
+        DestinationArn:
+          Fn::GetAtt: ApiAccessLogGroup.Arn
+        Format:
+          Fn::Join:
+            - ""
+            - Fn::Split:
+                - "\n"
+                - |
+                  {
+                    "requestId": "$context.requestId",
+                    "extendedRequestId": "$context.extendedRequestId",
+                    "ip": "$context.identity.sourceIp",
+                    "caller": "$context.identity.caller",
+                    "user": "$context.identity.user",
+                    "requestTime": "$context.requestTime",
+                    "httpMethod": "$context.httpMethod",
+                    "resourcePath": "$context.resourcePath",
+                    "status": "$context.status",
+                    "protocol": "$context.protocol",
+                    "responseLength": "$context.responseLength"
+                  }
+      # MethodSettings:
+      #   - ResourcePath: /*
+      #     HttpMethod: "*"
+      #     LoggingLevel: INFO
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: My REST API
+          version: "1.0"
+        paths:
+          /helloworld:
+            get:
+              operationId: HelloWorld
+              tags:
+                - HelloWorld
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/HelloWorldResponse"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: "#/components/headers/Access-Control-Allow-Origin"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${HelloWorldFunction.Arn}/invocations
+                httpMethod: POST
+        components:
+          schemas:
+            HelloWorldResponse:
+              description: Response body for GET /helloworld
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+              example:
+                message: Hello World!
+          headers:
+            Access-Control-Allow-Origin:
+              description: Response header for CORS support
+              schema:
+                type: string
+                example: "*"
+
+  # Lambda functions
+  LambdaBasicRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-LambdaBasicRole-${AWS::Region}
+      Description: Service role for basic Lambda functions
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  HelloWorldFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-HelloWorldFunction
+      Description: HelloWorld function
+      Role:
+        Fn::GetAtt: LambdaBasicRole.Arn
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /helloworld
+            RestApiId:
+              Ref: RestApi
+      InlineCode: |
+        import json
+        import time
+
+        def handler(event, context):
+            # time.sleep(1)
+            return {
+                "statusCode": 200,
+                "headers": {"Access-Control-Allow-Origin": "*"},
+                "body": json.dumps({"message": "Hello World"}),
+            }
+
+  HelloWorldFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${HelloWorldFunction}
+
+  LoadTestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-LoadTestFunction
+      Description: LoadTest function
+      Runtime: nodejs18.x
+      Environment:
+        Variables:
+          LOAD_TEST_URL:
+            Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}/helloworld
+      Role:
+        Fn::GetAtt: LambdaBasicRole.Arn
+      InlineCode: |
+        const https = require("https");
+
+        exports.handler = async (event) => {
+          const url = process.env.LOAD_TEST_URL;
+          const promises = Array(event.count)
+            .fill(0)
+            .map((_, i) => {
+              return new Promise(resolve => {
+                console.log(`Request ${i} started`);
+                const request = https.get(url, response => {
+                  response.on("data", data => {
+                    console.log(
+                      `Request ${i} returned ${response.statusCode}:`,
+                      data.toString()
+                    );
+                    resolve(response.statusCode < 400);
+                  });
+                });
+
+                request.on("error", error => {
+                  console.error(`Request ${i} failed:`, error);
+                  resolve(false);
+                });
+
+                request.end();
+              });
+            });
+
+          const results = await Promise.all(promises);
+          const response = {
+            nSuccess: results.filter(b => b).length,
+            nFailed: results.filter(b => !b).length,
+          };
+          console.log("Process finished:", response);
+          return response;
+        };
+
+  LoadTestFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${LoadTestFunction}
+
+  # LoadTest2Function:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     FunctionName:
+  #       Fn::Sub: ${AWS::StackName}-LoadTest2Function
+  #     Description: LoadTest2 function
+  #     Environment:
+  #       Variables:
+  #         LOAD_TEST_URL:
+  #           Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}/helloworld
+  #     Role:
+  #       Fn::GetAtt: LambdaBasicRole.Arn
+  #     InlineCode: |
+  #       import logging
+  #       import os
+  #       from threading import Thread
+  #       from typing import Any
+  #       from urllib.error import HTTPError
+  #       from urllib.request import urlopen
+
+  #       def send_request(
+  #           url: str, i: int, results: list[bool], logger: logging.Logger
+  #       ) -> None:
+  #           logger.info(f"Request {i} started")
+  #           try:
+  #               res = urlopen(url)
+  #           except HTTPError as err:
+  #               res = err
+
+  #           content = res.fp.read().decode("utf8")
+  #           logger.info(f"Request {i} returned ${res.code}: {content}")
+  #           results[i] = res.code < 400
+
+  #       def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+  #           logger = logging.getLogger("context.function_name")
+  #           logger.setLevel(logging.INFO)
+  #           n = int(event["count"])
+  #           url = os.environ["LOAD_TEST_URL"]
+  #           threads: list[Thread] = []
+  #           results: list[bool] = [False for _ in range(n)]
+
+  #           for i in range(n):
+  #               thread = Thread(target=send_request, args=(url, i, results, logger))
+  #               threads.append(thread)
+  #               thread.start()
+
+  #           for i in range(n):
+  #               threads[i].join()
+
+  #           response = {
+  #               "nSuccess": len([b for b in results if b]),
+  #               "nFailed": len([b for b in results if not b]),
+  #           }
+  #           logger.info(f"Process finished: {response}")
+  #           return response
+
+  # LoadTest2FunctionLogGroup:
+  #   Type: AWS::Logs::LogGroup
+  #   Properties:
+  #     LogGroupName:
+  #       Fn::Sub: /aws/lambda/${LoadTest2Function}
+
+Outputs:
+  RestApiUrl:
+    Value:
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}

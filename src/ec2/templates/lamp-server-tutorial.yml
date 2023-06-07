@@ -115,3 +115,18 @@ Resources:
             Ref: EC2InstanceName
       IamInstanceProfile:
         Ref: EC2InstanceProfile
+      UserData:
+        Fn::Sub: |
+              #!/bin/sh
+              dnf update -y
+              dnf install -y httpd wget php-fpm php-mysqli php-json php php-devel
+              dnf install -y mariadb105-server
+              echo "<?php phpinfo(); ?>" > /var/www/html/phpinfo.php
+              echo "<h1>Hello World</h1>" > /var/www/html/index.html
+              systemctl start httpd
+              systemctl enable httpd
+              usermod -a -G apache ec2-user
+              chown -R ec2-user:apache /var/www
+              chmod 2775 /var/www
+              find /var/www -type d -exec chmod 2775 {} \;
+              find /var/www -type f -exec chmod 0664 {} \;

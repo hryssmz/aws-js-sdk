@@ -10,29 +10,25 @@ Parameters:
     AllowedPattern: \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}
     ConstraintDescription: must be a valid IP address of the form x.x.x.x
 
+  DesiredCount:
+    Type: Number
+    Description: Desired task count for ECS service
+    Default: 1
+    MinValue: 0
+    MaxValue: 5
+    ConstraintDescription: Must be an integer between 0 and 5
+
 Resources:
   VPC:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 172.20.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
       Tags:
         - Key: Name
-          Value: CustomVPC
-
-  InternetGateway:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: Name
-          Value: CustomInternetGateway
-
-  InternetGatewayAttachment:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId:
-        Ref: VPC
-      InternetGatewayId:
-        Ref: InternetGateway
+          Value:
+            Fn::Sub: ${AWS::StackName}-vpc
 
   Subnet:
     Type: AWS::EC2::Subnet
@@ -43,7 +39,24 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: CustomSubnet
+          Value:
+            Fn::Sub: ${AWS::StackName}-sn
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-igw
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
 
   RouteTable:
     Type: AWS::EC2::RouteTable
@@ -52,9 +65,10 @@ Resources:
         Ref: VPC
       Tags:
         - Key: Name
-          Value: CustomRouteTable
+          Value:
+            Fn::Sub: ${AWS::StackName}-rtb
 
-  SubnetRouteTableTableAssociation:
+  SubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
@@ -81,27 +95,23 @@ Resources:
       VpcId:
         Ref: VPC
       SecurityGroupIngress:
-        - IpProtocol: tcp
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           CidrIp:
             Fn::Sub: ${MyIP}/32
       Tags:
         - Key: Name
-          Value: CustomSecurityGroup
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg-web
 
   ECSNamespace:
     Type: AWS::ServiceDiscovery::HttpNamespace
     Properties:
       Name:
         Fn::Sub: ${AWS::StackName}-ECSNamespace
-      Description: Custom ECS namespace
-
-  ECSLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/ecs/${AWS::StackName}-ECSLogGroup
+      Description: ECS namespace
 
   ECSCluster:
     Type: AWS::ECS::Cluster
@@ -126,14 +136,12 @@ Resources:
         Namespace:
           Fn::GetAtt: ECSNamespace.Arn
 
-  ECSTasksServiceRole:
+  ECSExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName:
-        Fn::Sub: ${AWS::StackName}-ECSTasksServiceRole
-      Description: Service role for ECS tasks
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        Fn::Sub: ${AWS::StackName}-ECSExecutionRole-${AWS::Region}
+      Description: Service role for ECS container agents
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -142,6 +150,14 @@ Resources:
               Service: ecs-tasks.amazonaws.com
             Action:
               - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/ecs/${AWS::StackName}-ECSLogGroup
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -156,15 +172,47 @@ Resources:
       RuntimePlatform:
         OperatingSystemFamily: LINUX
       ExecutionRoleArn:
-        Fn::GetAtt: ECSTasksServiceRole.Arn
+        Fn::GetAtt: ECSExecutionRole.Arn
       ContainerDefinitions:
         - Name:
-            Fn::Sub: ${AWS::StackName}-httpd
+            Fn::Sub: httpd
           Image: httpd:latest
           Command:
             - /bin/sh
             - -c
-            - "echo '<html> <head> <title>Amazon ECS Sample App</title> <style>body {margin-top: 40px; background-color: #333;} </style> </head><body> <div style=color:white;text-align:center> <h1>Amazon ECS Sample App</h1> <h2>Congratulations!</h2> <p>Your application is now running on a container in Amazon ECS.</p> </div></body></html>' > /usr/local/apache2/htdocs/index.html && httpd-foreground"
+            - |
+              cat <<EOF > /usr/local/apache2/htdocs/index.html
+              <html>
+                <head>
+                  <title>Amazon ECS Sample App</title>
+                  <style>
+                    body {
+                      margin-top: 40px;
+                      background-color: #333;
+                    }
+                    .container {
+                      color: white;
+                      text-align: center;
+                    }
+                  </style>
+                </head>
+                <body>
+                  <div class="container">
+                    <h1>Amazon ECS Sample App</h1>
+                    <h2>Congratulations!</h2>
+                    <p>
+                      Your application is now running on a container in Amazon ECS.
+                    </p>
+                    <p>
+                      Your container hostname is `hostname`
+                    </p>
+                  </div>
+                </body>
+              </html>
+              EOF
+
+              apt update -y && apt install -y curl
+              httpd-foreground
           Essential: true
           PortMappings:
             - ContainerPort: 80
@@ -177,8 +225,12 @@ Resources:
                 Ref: AWS::Region
               awslogs-group:
                 Ref: ECSLogGroup
-              awslogs-stream-prefix:
-                Fn::Sub: ${AWS::StackName}-TaskDefinition
+              awslogs-stream-prefix: TaskDefinition
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost || exit 1
+            StartPeriod: 30
 
   ECSService:
     Type: AWS::ECS::Service
@@ -189,7 +241,9 @@ Resources:
         Ref: ECSCluster
       TaskDefinition:
         Ref: TaskDefinition
-      DesiredCount: 0
+      LaunchType: FARGATE
+      DesiredCount:
+        Ref: DesiredCount
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED

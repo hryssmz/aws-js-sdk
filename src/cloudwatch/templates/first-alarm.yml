@@ -1,0 +1,187 @@
+# cloudwatch/templates/first-alarm.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: My first CloudWatch alarm
+
+Mappings:
+  RegionProfile2AMI:
+    ap-northeast-1:
+      AL2013: ami-067871d950411e643
+
+  RegionProfile2Type:
+    ap-northeast-1:
+      AL2013: t2.micro
+
+Resources:
+  # SNS
+  AlarmReceivedTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-AlarmReceivedTopic
+      FifoTopic: false
+
+  # Lambda
+  AlarmActionFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-AlarmActionFunctionRole
+      Description: Service role for AlarmActionFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  AlarmActionFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-AlarmActionFunction
+      Description: Alarm action function
+      Role:
+        Fn::GetAtt: AlarmActionFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            console.log("Alarm received!");
+            console.log("Event: " + JSON.stringify(event, null, 2));
+          };
+
+  AlarmActionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AlarmActionFunction}
+
+  AlarmActionSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: lambda
+      Endpoint:
+        Fn::GetAtt: AlarmActionFunction.Arn
+      TopicArn:
+        Ref: AlarmReceivedTopic
+
+  AlarmActionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: AlarmActionFunction
+      Principal: sns.amazonaws.com
+      SourceArn:
+        Ref: AlarmReceivedTopic
+
+  # EC2
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: EC2InstanceRole
+
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-WebSecurityGroup
+      GroupDescription: Web security group
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg-web
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+          - RegionProfile2AMI
+          - Ref: AWS::Region
+          - AL2013
+      InstanceType:
+        Fn::FindInMap:
+          - RegionProfile2Type
+          - Ref: AWS::Region
+          - AL2013
+      SecurityGroups:
+        - Ref: WebSecurityGroup
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            dnf update -y
+            dnf install -y httpd
+            echo "<h1>Hello World</h1>" > /var/www/html/index.html
+            TOKEN=`curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
+            INSTANCE_ID=`curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id`
+            echo "<p>Instance ID: $INSTANCE_ID</p>" >> /var/www/html/index.html
+            systemctl start httpd
+            systemctl enable httpd
+            usermod -a -G apache ec2-user
+            chown -R ec2-user:apache /var/www
+            chmod 2775 /var/www
+            find /var/www -type d -exec chmod 2775 {} \;
+            find /var/www -type f -exec chmod 0664 {} \;
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-i-al2013
+
+  # CloudWatch Alarm
+  CPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:
+        Fn::Sub: ${AWS::StackName}-CPUAlarmHigh
+      AlarmDescription:
+        Fn::Sub: Alarm for high CPU utilization
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Statistic: Average
+      Threshold: 90
+      Unit: Percent
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Period: 300
+      TreatMissingData: breaching
+      Dimensions:
+        - Name: InstanceId
+          Value:
+            Ref: EC2Instance
+      AlarmActions:
+        - Ref: AlarmReceivedTopic

@@ -1,0 +1,89 @@
+# sns/templates/first-topic.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: My first topic
+
+Globals:
+  Function:
+    Handler: index.handler
+    Runtime: nodejs18.x
+    Timeout: 10
+    Architectures:
+      - arm64
+
+Resources:
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-Topic
+
+  SenderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SenderFunction
+      Description: Sender function for the topic
+      Environment:
+        Variables:
+          TOPIC_ARN:
+            Ref: Topic
+      InlineCode: |
+        const { PublishCommand, SNSClient } = require("@aws-sdk/client-sns");
+
+        exports.handler = async () => {
+          const client = new SNSClient();
+          const subject = "Datetime";
+          const message = new Date().toISOString();
+          const command = new PublishCommand({
+            Message: message,
+            Subject: subject,
+            TopicArn: process.env.TOPIC_ARN,
+          });
+          const { MessageId, SequenceNumber } = await client.send(command);
+          const result = { MessageId, SequenceNumber };
+          console.log(JSON.stringify(result, null, 2));
+          return result;
+        };
+
+  SenderFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SenderFunction}
+
+  SenderFunctionTopicConnector:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: SenderFunction
+      Destination:
+        Id: Topic
+      Permissions:
+        - Write
+
+  ReceiverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ReceiverFunction
+      Description: Receiver function for the topic
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: Topic
+      InlineCode: |
+        exports.handler = async event => {
+          const { Records } = event;
+          const messages = Records.map(({ Sns }) => Sns).map(({ Message }) => Message);
+          console.log(JSON.stringify(messages, null, 2));
+          return messages;
+        };
+
+  ReceiverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${ReceiverFunction}

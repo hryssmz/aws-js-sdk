@@ -1,0 +1,158 @@
+# ec2/templates/fastapi-server.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: FastAPI server
+
+Mappings:
+  RegionProfile2AMI:
+    ap-northeast-1:
+      AL2023: ami-067871d950411e643
+
+  RegionProfile2Type:
+    ap-northeast-1:
+      AL2023: t2.micro
+
+Resources:
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: EC2InstanceRole
+
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-WebSecurityGroup
+      GroupDescription: Web security group
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: Application server inbound rule
+          IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg-web
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /etc/systemd/system/myapp.service:
+              content: |
+                [Unit]
+                Description=MyApp Service
+                After=network.target
+
+                [Service]
+                Type=simple
+                User=ec2-user
+                WorkingDirectory=/home/ec2-user/myapp
+                ExecStart=python -m uvicorn main:app --host 0.0.0.0 --port 8000
+                Restart=always
+                RestartSec=3
+
+                [Install]
+                WantedBy=multi-user.target
+            /home/ec2-user/myapp/main.py:
+              content: |
+                from datetime import datetime
+                from urllib.request import Request, urlopen
+
+                from fastapi import FastAPI
+
+                app = FastAPI()
+
+
+                @app.get("/")
+                async def root() -> dict[str, str]:
+                    req = Request(
+                        "http://169.254.169.254/latest/api/token",
+                        headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
+                        method="PUT",
+                    )
+                    token: str = urlopen(req).read().decode("utf8")
+                    req = Request(
+                        "http://169.254.169.254/latest/meta-data/instance-id",
+                        headers={"X-aws-ec2-metadata-token": token},
+                    )
+                    instance_id: str = urlopen(req).read().decode("utf8")
+                    response = {
+                        "instance_id": instance_id,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                    return response
+            /home/ec2-user/myapp/requirements.txt:
+              content: |
+                fastapi
+                uvicorn[standard]
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT4M
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+          - RegionProfile2AMI
+          - Ref: AWS::Region
+          - AL2023
+      InstanceType:
+        Fn::FindInMap:
+          - RegionProfile2Type
+          - Ref: AWS::Region
+          - AL2023
+      SecurityGroups:
+        - Ref: WebSecurityGroup
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance2 --region ${AWS::Region}
+            chown -R ec2-user:ec2-user /home/ec2-user/myapp
+            dnf install -y python python3-pip
+            su -l ec2-user -c "pip install -r ~/myapp/requirements.txt"
+            systemctl enable myapp.service
+            systemctl start myapp.service
+
+            MAX_RETRY=20
+            RETRY_INTERVAL=5
+            HEALTH_CHECK_URL="http://localhost:8000"
+            for TRIED_COUNT in `seq $MAX_RETRY`; do
+                curl $HEALTH_CHECK_URL
+                if [ $? -eq "0" ]; then
+                    /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --region ${AWS::Region} --resource EC2Instance2
+                    break
+                else
+                    sleep $RETRY_INTERVAL
+                fi
+            done
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-i-al2023

@@ -1,0 +1,221 @@
+# eventbridge/templates/first-event-rule.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: My first event rule
+
+Mappings:
+  RegionProfile2AMI:
+    ap-northeast-1:
+      AL2023: ami-067871d950411e643
+
+  RegionProfile2Type:
+    ap-northeast-1:
+      AL2023: t2.micro
+
+  Region2DefaultVPC:
+    ap-northeast-1:
+      VPC: vpc-01d5cfd2cad5314f1
+      Subnet: subnet-00ee516fa04d610fe
+      Subnet2: subnet-0c99e2001f0ae6c0a
+      Subnet3: subnet-0deeda0e1c6cd4ffa
+      PrivateSubnetCidr: 172.31.128.0/20
+      PrivateSubnet2Cidr: 172.31.144.0/20
+
+Resources:
+  # EC2
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 security group
+      VpcId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName:
+        Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
+      VersionDescription: Launch template for EC2 instances
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - Key: Name
+              Value:
+                Fn::Sub: ${AWS::StackName}-lt
+      LaunchTemplateData:
+        ImageId:
+          Fn::FindInMap:
+            - RegionProfile2AMI
+            - Ref: AWS::Region
+            - AL2023
+        InstanceType:
+          Fn::FindInMap:
+            - RegionProfile2Type
+            - Ref: AWS::Region
+            - AL2023
+        IamInstanceProfile:
+          Name:
+            Ref: EC2InstanceProfile
+        SecurityGroupIds:
+          - Ref: EC2SecurityGroup
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value:
+                  Fn::Sub: ${AWS::StackName}-i
+        UserData:
+          Fn::Base64:
+            Fn::Sub: |
+              #!/bin/sh
+              dnf update -y
+              dnf install -y httpd
+              echo "<h1>Hello World</h1>" > /var/www/html/index.html
+              TOKEN=`curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
+              INSTANCE_ID=`curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id`
+              echo "<p>Instance ID: $INSTANCE_ID</p>" >> /var/www/html/index.html
+              systemctl start httpd
+              systemctl enable httpd
+              usermod -a -G apache ec2-user
+              chown -R ec2-user:apache /var/www
+              chmod 2775 /var/www
+              find /var/www -type d -exec chmod 2775 {} \;
+              find /var/www -type f -exec chmod 0664 {} \;
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: EC2LaunchTemplate
+        Version:
+          Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
+
+  # EventBridge
+  EC2RunningTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-EC2RunningTopic
+      FifoTopic: false
+
+  EC2RunningRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-EC2RunningRule
+      Description: Event rule for running EC2 instances
+      EventPattern:
+        source:
+          - aws.ec2
+        detail-type:
+          - EC2 Instance State-change Notification
+        detail:
+          instance-id:
+            - Ref: EC2Instance
+          state:
+            - running
+      Targets:
+        - Id:
+            Fn::GetAtt: EC2RunningTopic.TopicName
+
+  EC2RunningTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - Ref: EC2RunningTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sns:Publish
+            Principal:
+              Service: events.amazonaws.com
+            Resource:
+              - Ref: EC2RunningTopic
+            Condition:
+              ArnEquals:
+                aws:SourceArn:
+                  Fn::GetAtt: EC2RunningRule.Arn
+
+  EC2MonitorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-EC2MonitorFunction
+      Description: Serverless function with EventBridge rule configured
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: EC2RunningTopic
+        EC2StoppedRule:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.ec2
+              detail-type:
+                - EC2 Instance State-change Notification
+              detail:
+                instance-id:
+                  - Ref: EC2Instance
+                state:
+                  - stopped
+      InlineCode: |
+        exports.handler = async event => {
+          const { Records } = event;
+          const messages = Records.map(({ Sns }) => Sns).map(({ Message }) => Message);
+          console.log(JSON.stringify(messages, null, 2));
+          return messages;
+        };
+
+  EC2MonitorFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${EC2MonitorFunction}

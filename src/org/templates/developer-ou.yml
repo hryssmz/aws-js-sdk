@@ -1,0 +1,33 @@
+# org/templates/developer-ou.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Developer OU
+
+Parameters:
+  RootOuId:
+    Type: String
+    Description: Root OU ID
+    Default: r-q5hn
+
+Resources:
+  DeveloperOu:
+    Type: AWS::Organizations::OrganizationalUnit
+    Properties:
+      Name: Developer
+      ParentId:
+        Ref: RootOuId
+
+  DenyIAMSCP:
+    Type: AWS::Organizations::Policy
+    Properties:
+      Name: DenyIAMSCP
+      Type: SERVICE_CONTROL_POLICY
+      Content:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Deny
+            Action:
+              - iam:*
+            Resource: "*"
+      TargetIds:
+        - Ref: DeveloperOu

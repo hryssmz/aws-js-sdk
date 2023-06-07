@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS Elastic Beanstalk sample app
+
+Parameters:
+  InstanceTypeFamily:
+    Type: String
+    Description: WebServer EC2 instance type family
+
+  LogPublicationControl:
+    Type: String
+    Description: If true customer service logs will be published to S3
+    AllowedValues:
+      - true
+      - false
+    ConstraintDescription: Must be boolean
+    Default: false
+
+  InstancePort:
+    Type: String
+    Description: Listen port
+    Default: 80
+
+  XRayEnabled:
+    Type: String
+    Description: Enables AWS X-Ray for your environment
+    Default: false
+
+  AWSEBEnvironmentId:
+    Type: String
+
+  HooksPkgUrl:
+    Type: String
+    Description: Hooks package URL
+    Default: https://elasticbeanstalk-platform-assets-ap-northeast-1.s3.ap-northeast-1.amazonaws.com/stalks/eb_nodejs16_amazon_linux_2_1.0.1927.0_20230302191537/lib/hooks.tar.gz
+
+  AWSEBEnvironmentName:
+    Type: String
+
+  AWSEBRefererId:
+    Type: String
+    Default: ""
+
+  AppSource:
+    Type: String
+    Description: The URL of the application source
+    Default: https://elasticbeanstalk-platform-assets-ap-northeast-1.s3.ap-northeast-1.amazonaws.com/stalks/eb_nodejs16_amazon_linux_2_1.0.1927.0_20230302191537/sampleapp/EBSampleApp-Nodejs.zip
+
+  ProxyServer:
+    Type: String
+    Description: Application Proxy Server
+    Default: nginx
+
+  EnvironmentVariables:
+    Type: CommaDelimitedList
+    Description: Program environment variables
+    Default: ""
+
+  AWSEBAgentId:
+    Type: String
+    Default: ""
+
+  InstanceType:
+    Type: String
+    Description: WebServer EC2 instance type
+    ConstraintDescription: Must be a valid EC2 instance type
+
+  AWSEBEnvironmentBucket:
+    Type: String
+
+  ProxyStaticFiles:
+    Type: CommaDelimitedList
+    Description: A mapping from virtual path to physical path
+    Default: ""
+
+Mappings:
+  ContainerMetaARM:
+    AMIMeta:
+      RepoReleaseVersion: 2.0
+      Owner: amazon
+      AMIVersion: 2.0.20230221
+      AMIName: amzn2-ami-hvm-2.0.20230221.0-arm64-gp2
+
+  AWSEBAWSRegionArch2AMIBase:
+    ap-northeast-1:
+      pv: ""
+      graphics: ""
+      gpu: ""
+      hvm: ami-09d8ed8255877048d

@@ -1,0 +1,963 @@
+# codepipeline/templates/ecs-codedeploy.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: ECS CodeDeploy example
+
+Parameters:
+  ContainerName:
+    Type: String
+    Description: Container name
+    Default: sample-website
+
+  DesiredCount:
+    Type: Number
+    Description: Desired ECS task count
+    Default: 1
+    MinValue: 0
+    MaxValue: 5
+    ConstraintDescription: Must be an integer between 0 and 5
+
+  DeploymentBranch:
+    Type: String
+    Description: CodeCommit branch to deploy
+    Default: main
+
+Mappings:
+  RegionProfile2AMI:
+    ap-northeast-1:
+      AL2023: ami-067871d950411e643
+
+  RegionProfile2Type:
+    ap-northeast-1:
+      AL2023: t2.micro
+
+  Region2DefaultVPC:
+    ap-northeast-1:
+      VPC: vpc-01d5cfd2cad5314f1
+      Subnet: subnet-00ee516fa04d610fe
+      Subnet2: subnet-0c99e2001f0ae6c0a
+      Subnet3: subnet-0deeda0e1c6cd4ffa
+
+Resources:
+  # ECR
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:
+        Ref: AWS::StackName
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  # CodeCommit
+  CodeCommitRepository:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName:
+        Ref: AWS::StackName
+      RepositoryDescription:
+        Fn::Sub: ${AWS::StackName} repository
+      Triggers:
+        - Name: DeploymentBranchUpdateTrigger
+          DestinationArn:
+            Ref: CodeCommitUpdateTopic
+          Branches:
+            - Ref: DeploymentBranch
+          Events:
+            - createReference
+            - updateReference
+
+  CodeCommitUpdateTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-CodeCommitUpdateTopic
+      FifoTopic: false
+
+  # S3
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-artifacts-${AWS::Region}
+
+  # CodeDeploy
+  CodeDeployServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CodeDeployServiceRole-${AWS::Region}
+      Description: Service role for AWS CodeDeploy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codedeploy.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
+
+  CodeDeployApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName:
+        Ref: AWS::StackName
+      ComputePlatform: ECS
+
+  DeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      ApplicationName:
+        Ref: CodeDeployApplication
+      DeploymentGroupName:
+        Fn::Sub: ${AWS::StackName}-DeploymentGroup
+      DeploymentStyle:
+        DeploymentOption: WITH_TRAFFIC_CONTROL
+        DeploymentType: BLUE_GREEN
+      AutoRollbackConfiguration:
+        Enabled: true
+        Events:
+          - DEPLOYMENT_FAILURE
+      BlueGreenDeploymentConfiguration:
+        DeploymentReadyOption:
+          ActionOnTimeout: CONTINUE_DEPLOYMENT
+        TerminateBlueInstancesOnDeploymentSuccess:
+          Action: TERMINATE
+          TerminationWaitTimeInMinutes: 1
+      LoadBalancerInfo:
+        TargetGroupPairInfoList:
+          - TargetGroups:
+              - Name:
+                  Fn::GetAtt: ALBTargetGroup.TargetGroupName
+              - Name:
+                  Fn::GetAtt: ALBTargetGroup2.TargetGroupName
+            ProdTrafficRoute:
+              ListenerArns:
+                - Ref: ALBListener
+            TestTrafficRoute:
+              ListenerArns:
+                - Ref: ALBListener2
+      ECSServices:
+        - ServiceName:
+            Fn::GetAtt: ECSService.Name
+          ClusterName:
+            Ref: ECSCluster
+      ServiceRoleArn:
+        Fn::GetAtt: CodeDeployServiceRole.Arn
+
+  AfterAllowTestTrafficFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-AfterAllowTestTrafficFunctionPolicy-${AWS::Region}
+      Description: Policy for AfterAllowTestTrafficFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - codedeploy:PutLifecycleEventHookExecutionStatus
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentgroup:${CodeDeployApplication}/${DeploymentGroup}
+
+  AfterAllowTestTrafficFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-AfterAllowTestTrafficFunctionRole-${AWS::Region}
+      Description: Service role for AfterAllowTestTrafficFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: AfterAllowTestTrafficFunctionPolicy
+
+  AfterAllowTestTrafficFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-AfterAllowTestTrafficFunction
+      Description: AfterAllowTestTraffic function
+      Role:
+        Fn::GetAtt: AfterAllowTestTrafficFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs18.x
+      Handler: index.handler
+      InlineCode: |
+        const {
+          CodeDeployClient,
+          PutLifecycleEventHookExecutionStatusCommand,
+        } = require("@aws-sdk/client-codedeploy");
+
+        exports.handler = async event => {
+          console.log("Entering AfterAllowTestTraffic hook.");
+          console.log(JSON.stringify(event, null, 2));
+
+          // Read the DeploymentId and LifecycleEventHookExecutionId from the event payload
+          const {
+            DeploymentId: deploymentId,
+            LifecycleEventHookExecutionId: lifecycleEventHookExecutionId,
+          } = event;
+
+          // Perform AfterAllowTestTraffic validation tests here. Set the test result
+          // to "Succeeded" for this tutorial.
+          console.log("This is where AfterAllowTestTraffic validation tests happen.");
+          const status = "Succeeded";
+
+          const params = { deploymentId, lifecycleEventHookExecutionId, status };
+          const client = new CodeDeployClient();
+          const command = new PutLifecycleEventHookExecutionStatusCommand(params);
+          const result = await client
+            .send(command)
+            .then(() => {
+              const message = "AfterAllowTestTraffic validation tests succeeded";
+              console.log(message);
+              return message;
+            })
+            .catch(err => {
+              console.log("AfterAllowTestTraffic validation tests failed");
+              console.error(err, err.stack);
+              throw "CodeDeploy Status update failed";
+            });
+          return result;
+        };
+
+  AfterAllowTestTrafficFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AfterAllowTestTrafficFunction}
+
+  # CodePipeline
+  CodePipelineExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-CodePipelineExecutionPolicy-${AWS::Region}
+      Description: Execution policy for CodePipeline
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ArtifactsBucketAccess
+            Effect: Allow
+            Action:
+              - s3:GetBucketAcl
+              - s3:GetBucketLocation
+            Resource:
+              - Fn::GetAtt: ArtifactsBucket.Arn
+          - Sid: ArtifactsBucketObjectsAccess
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${ArtifactsBucket.Arn}/*
+          - Sid: CodeCommitAccess
+            Effect: Allow
+            Action:
+              - codecommit:CancelUploadArchive
+              - codecommit:GetBranch
+              - codecommit:GetCommit
+              - codecommit:GetUploadArchiveStatus
+              - codecommit:UploadArchive
+            Resource:
+              - Fn::GetAtt: CodeCommitRepository.Arn
+          - Sid: ECRAuthorizationAccess
+            Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+            Resource: "*"
+          - Sid: ECRRepositoryAccess
+            Effect: Allow
+            Action:
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchDeleteImage
+              - ecr:BatchGetImage
+              - ecr:BatchCheckLayerAvailability
+              - ecr:PutImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+            Resource:
+              - Fn::GetAtt: ECRRepository.Arn
+          - Sid: CloudFormationAccess
+            Effect: Allow
+            Action:
+              - cloudformation:CreateStack
+              - cloudformation:DeleteStack
+              - cloudformation:DescribeStacks
+              - cloudformation:UpdateStack
+              - cloudformation:CreateChangeSet
+              - cloudformation:DeleteChangeSet
+              - cloudformation:DescribeChangeSet
+              - cloudformation:ExecuteChangeSet
+              - cloudformation:SetStackPolicy
+              - cloudformation:ValidateTemplate
+            Resource: "*"
+          - Sid: IAMPassRolePermission
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: "*"
+            Condition:
+              StringEqualsIfExists:
+                iam:PassedToService:
+                  - cloudformation.amazonaws.com
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CodePipelineServiceRole-${AWS::Region}
+      Description: Service role for CodePipeline
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: CodePipelineExecutionPolicy
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name:
+        Ref: AWS::StackName
+      RoleArn:
+        Fn::GetAtt: CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Location:
+          Ref: ArtifactsBucket
+        Type: S3
+      RestartExecutionOnUpdate: true
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: 1
+              Configuration:
+                BranchName:
+                  Ref: DeploymentBranch
+                RepositoryName:
+                  Fn::GetAtt: CodeCommitRepository.Name
+                PollForSourceChanges: false
+              OutputArtifacts:
+                - Name: SourceArtifact
+              RunOrder: 1
+
+            - Name: ImageSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: ECR
+                Version: 1
+              Configuration:
+                RepositoryName:
+                  Ref: ECRRepository
+                ImageTag: latest
+              OutputArtifacts:
+                - Name: ImageArtifact
+              RunOrder: 2
+
+        - Name: Deploy
+          Actions:
+            - Name: Deploy
+              Namespace: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CodeDeployToECS
+                Version: 1
+              Configuration:
+                ApplicationName:
+                  Ref: CodeDeployApplication
+                DeploymentGroupName:
+                  Ref: DeploymentGroup
+                AppSpecTemplateArtifact: SourceArtifact
+                AppSpecTemplatePath: appspec.yml
+                TaskDefinitionTemplateArtifact: SourceArtifact
+                TaskDefinitionTemplatePath: taskdef.json
+                Image1ArtifactName: ImageArtifact
+                Image1ContainerName: IMAGE1_NAME
+              InputArtifacts:
+                - Name: SourceArtifact
+                - Name: ImageArtifact
+              RunOrder: 1
+
+  StartPipelineFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-StartPipelineFunctionPolicy-${AWS::Region}
+      Description: Policy for StartPipelineFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: StartPipelinePermission
+            Effect: Allow
+            Action:
+              - codepipeline:StartPipelineExecution
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}
+
+  StartPipelineFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-StartPipelineFunctionRole-${AWS::Region}
+      Description: Service role for StartPipelineFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: StartPipelineFunctionPolicy
+
+  StartPipelineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-StartPipelineFunction
+      Description: Start pipeline function
+      Role:
+        Fn::GetAtt: StartPipelineFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Environment:
+        Variables:
+          PIPELINE_NAME:
+            Ref: Pipeline
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: CodeCommitUpdateTopic
+      InlineCode: |
+        const {
+          CodePipelineClient,
+          StartPipelineExecutionCommand,
+        } = require("@aws-sdk/client-codepipeline");
+
+        exports.handler = async () => {
+          const client = new CodePipelineClient({});
+          const command = new StartPipelineExecutionCommand({
+            name: process.env.PIPELINE_NAME,
+          });
+          const response = await client.send(command);
+          console.log(`Pipeline started: (${response.pipelineExecutionId})`);
+        };
+
+  StartPipelineFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${StartPipelineFunction}
+
+  # Elastic Load Balancing
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-ALBSecurityGroup
+      GroupDescription: ALB security group
+      VpcId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: HTTP inbound rule 2
+          IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg-alb
+
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ALB
+      Type: application
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      SecurityGroups:
+        - Ref: ALBSecurityGroup
+      Subnets:
+        - Fn::FindInMap:
+            - Region2DefaultVPC
+            - Ref: AWS::Region
+            - Subnet
+        - Fn::FindInMap:
+            - Region2DefaultVPC
+            - Ref: AWS::Region
+            - Subnet2
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ALBTargetGroup
+      TargetType: ip
+      IpAddressType: ipv4
+      Protocol: HTTP
+      Port: 80
+      VpcId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 10
+
+  ALBTargetGroup2:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ALBTargetGroup2
+      TargetType: ip
+      IpAddressType: ipv4
+      Protocol: HTTP
+      Port: 80
+      VpcId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 10
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn: ALBTargetGroup2
+    Properties:
+      LoadBalancerArn:
+        Ref: ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: ALBTargetGroup
+
+  ALBListener2:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn: ALBTargetGroup
+    Properties:
+      LoadBalancerArn:
+        Ref: ALB
+      Port: 8080
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: ALBTargetGroup2
+
+  TargetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-TargetSecurityGroup
+      GroupDescription: Target security group
+      VpcId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      # SecurityGroupIngress:
+      #   - Description: HTTP inbound rule for debug
+      #     IpProtocol: tcp
+      #     FromPort: 80
+      #     ToPort: 80
+      #     CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg-tgt
+
+  ALBSecurityGroupEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      Description: HTTP outbound rule
+      GroupId:
+        Ref: ALBSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      DestinationSecurityGroupId:
+        Ref: TargetSecurityGroup
+
+  TargetSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: HTTP inbound rule
+      GroupId:
+        Ref: TargetSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId:
+        Ref: ALBSecurityGroup
+
+  # ECS
+  ECSNamespace:
+    Type: AWS::ServiceDiscovery::HttpNamespace
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ECSNamespace
+      Description: ECS namespace
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName:
+        Fn::Sub: ${AWS::StackName}-ECSCluster
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 1
+      Configuration:
+        ExecuteCommandConfiguration:
+          Logging: DEFAULT
+      ClusterSettings:
+        - Name: containerInsights
+          Value: disabled
+      ServiceConnectDefaults:
+        Namespace:
+          Fn::GetAtt: ECSNamespace.Arn
+
+  ECSExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ECSExecutionRole-${AWS::Region}
+      Description: Service role for ECS container agents
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/ecs/${AWS::StackName}-ECSLogGroup
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family:
+        Fn::Sub: ${AWS::StackName}-TaskDefinition
+      Cpu: 256
+      Memory: 512
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn:
+        Fn::GetAtt: ECSExecutionRole.Arn
+      ContainerDefinitions:
+        - Name:
+            Ref: ContainerName
+          Image: httpd:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+              HostPort: 80
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region:
+                Ref: AWS::Region
+              awslogs-group:
+                Ref: ECSLogGroup
+              awslogs-stream-prefix: TaskDefinition
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost || exit 1
+          Command:
+            - /bin/sh
+            - -c
+            - |
+              cat <<EOF > /usr/local/apache2/htdocs/index.html
+              <html>
+                <head>
+                  <title>Amazon ECS Sample App</title>
+                  <style>
+                    body {
+                      margin-top: 40px;
+                      background-color: #333;
+                    }
+                    .container {
+                      color: white;
+                      text-align: center;
+                    }
+                  </style>
+                </head>
+                <body>
+                  <div class="container">
+                    <h1>Amazon ECS Sample App</h1>
+                    <h2>Congratulations!</h2>
+                    <p>
+                      Your application is now running on a container in Amazon ECS.
+                    </p>
+                    <p>
+                      Your container hostname is `hostname`
+                    </p>
+                  </div>
+                </body>
+              </html>
+              EOF
+
+              apt update -y && apt install -y curl
+              httpd-foreground
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: ALBListener
+    Properties:
+      ServiceName:
+        Fn::Sub: ${AWS::StackName}-ECSService
+      Cluster:
+        Ref: ECSCluster
+      TaskDefinition:
+        Ref: TaskDefinition
+      DesiredCount:
+        Ref: DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - Ref: TargetSecurityGroup
+          Subnets:
+            - Fn::FindInMap:
+                - Region2DefaultVPC
+                - Ref: AWS::Region
+                - Subnet
+            - Fn::FindInMap:
+                - Region2DefaultVPC
+                - Ref: AWS::Region
+                - Subnet2
+      DeploymentController:
+        Type: CODE_DEPLOY
+      LoadBalancers:
+        - ContainerName:
+            Ref: ContainerName
+          ContainerPort: 80
+          TargetGroupArn:
+            Ref: ALBTargetGroup
+      HealthCheckGracePeriodSeconds: 60
+      EnableECSManagedTags: true
+      PropagateTags: SERVICE
+      SchedulingStrategy: REPLICA
+
+  # EC2
+  EC2InstancePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-EC2InstancePolicy-${AWS::Region}
+      Description: Execution policy for EC2 instances
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
+              - ecr:BatchCheckLayerAvailability
+              - ecr:PutImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+            Resource:
+              - Fn::GetAtt: ECRRepository.Arn
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - Ref: EC2InstancePolicy
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-WebSecurityGroup
+      GroupDescription: Web security group
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg-web
+
+  EC2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /usr/local/bin/ecrurl:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  echo ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+              mode: "000755"
+    Properties:
+      LaunchTemplateName:
+        Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
+      VersionDescription: Launch template for EC2 instances
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - Key: Name
+              Value:
+                Fn::Sub: ${AWS::StackName}-lt
+      LaunchTemplateData:
+        ImageId:
+          Fn::FindInMap:
+            - RegionProfile2AMI
+            - Ref: AWS::Region
+            - AL2023
+        InstanceType:
+          Fn::FindInMap:
+            - RegionProfile2Type
+            - Ref: AWS::Region
+            - AL2023
+        IamInstanceProfile:
+          Name:
+            Ref: EC2InstanceProfile
+        SecurityGroups:
+          - Ref: WebSecurityGroup
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value:
+                  Fn::Sub: ${AWS::StackName}-i
+        UserData:
+          Fn::Base64:
+            Fn::Sub: |
+              #!/bin/sh
+              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
+              dnf install -y docker
+              systemctl enable docker.service
+              systemctl start docker.service
+              usermod -a -G docker ec2-user
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: EC2LaunchTemplate
+        Version:
+          Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
+
+Outputs:
+  ALBDNSName:
+    Description: ALB domain name
+    Value:
+      Fn::GetAtt: ALB.DNSName
+
+  CodeCommitRepositoryCloneUrlHttp:
+    Description: CodeCommit repository HTTP clone URL
+    Value:
+      Fn::GetAtt: CodeCommitRepository.CloneUrlHttp
+
+  ECSExecutionRoleArn:
+    Description: ECS Execution role ARN
+    Value:
+      Fn::GetAtt: ECSExecutionRole.Arn
+
+  TaskDefinitionName:
+    Description: Name of the task definition
+    Value:
+      Fn::Sub: ${AWS::StackName}-TaskDefinition
+
+  ContainerName:
+    Description: Container name
+    Value:
+      Ref: ContainerName
+
+  AfterAllowTestTrafficFunction:
+    Description: AfterAllowTestTrafficFunction name
+    Value:
+      Ref: AfterAllowTestTrafficFunction

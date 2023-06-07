@@ -1,0 +1,409 @@
+# cloudfront/templates/alb-origin.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Application load balancer as an origin
+
+Parameters:
+  DesiredCapacity:
+    Type: Number
+    Description: DesiredCapacity for auto scaling group
+    Default: 2
+    MinValue: 0
+    MaxValue: 5
+    ConstraintDescription: must be an integer between 0 and 5
+
+Mappings:
+  RegionProfile2AMI:
+    ap-northeast-1:
+      AL2013: ami-067871d950411e643
+
+  RegionProfile2Type:
+    ap-northeast-1:
+      AL2013: t2.micro
+
+Resources:
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 172.20.0.0/16
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-vpc
+
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 172.20.16.0/20
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sn
+
+  Subnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 172.20.32.0/20
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sn2
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-rtb
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet
+      RouteTableId:
+        Ref: RouteTable
+
+  Subnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet2
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-igw
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  # EC2
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-WebSecurityGroup
+      GroupDescription: Web security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: Application server inbound rule
+          IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg-web
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole
+      Description: Service role for EC2 instance
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile
+      Roles:
+        - Ref: EC2InstanceRole
+
+  # EC2 Auto Scaling
+  AsgLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName:
+        Fn::Sub: ${AWS::StackName}-AsgLaunchTemplate
+      VersionDescription: Launch template for auto scaling group
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - Key: Name
+              Value:
+                Fn::Sub: ${AWS::StackName}-lt-asg
+      LaunchTemplateData:
+        ImageId:
+          Fn::FindInMap:
+            - RegionProfile2AMI
+            - Ref: AWS::Region
+            - AL2013
+        InstanceType:
+          Fn::FindInMap:
+            - RegionProfile2Type
+            - Ref: AWS::Region
+            - AL2013
+        IamInstanceProfile:
+          Name:
+            Ref: EC2InstanceProfile
+        SecurityGroupIds:
+          - Ref: WebSecurityGroup
+        Monitoring:
+          Enabled: true
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value:
+                  Fn::Sub: ${AWS::StackName}-i-al2013
+        UserData:
+          Fn::Base64:
+            Fn::Sub: |
+              #!/bin/sh
+              dnf update -y
+              dnf install -y python python3-pip
+              TOKEN=`curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
+              INSTANCE_ID=`curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id`
+
+              su -l ec2-user <<EOF
+              # Run script for ec2-user
+              pip install fastapi
+              pip install uvicorn[standard]
+              mkdir -p app
+              cd app
+
+              # Create main.py
+              cat <<\EOF2 > main.py
+              from datetime import datetime
+              from fastapi import FastAPI
+
+              app = FastAPI()
+
+
+              @app.get("/")
+              async def root():
+                  return {
+                      "instance_id": "$INSTANCE_ID",
+                      "timestamp": datetime.utcnow().isoformat(),
+                  }
+              EOF2
+
+              # Run uvicorn server
+              uvicorn main:app --host 0.0.0.0 --port 8000 --reload >uvicorn.log 2>&1 &
+              EOF
+
+              MAX_RETRY=20
+              RETRY_INTERVAL=5
+              HEALTH_CHECK_URL="http://localhost:8000"
+              for TRIED_COUNT in `seq $MAX_RETRY`; do
+                  curl $HEALTH_CHECK_URL
+                  if [ $? -eq "0" ]; then
+                      /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --region ${AWS::Region} --resource AutoScalingGroup
+                      break
+                  else
+                      sleep $RETRY_INTERVAL
+                  fi
+              done
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: InternetGatewayAttachment
+    CreationPolicy:
+      ResourceSignal:
+        Count:
+          Ref: DesiredCapacity
+        Timeout: PT4M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: 2
+        MinInstancesInService: 0
+        MinSuccessfulInstancesPercent: 100
+        SuspendProcesses:
+          - HealthCheck
+          - ReplaceUnhealthy
+          - AZRebalance
+          - AlarmNotification
+          - ScheduledActions
+        PauseTime: PT4M
+        WaitOnResourceSignals: true
+    Properties:
+      AutoScalingGroupName:
+        Fn::Sub: ${AWS::StackName}-AutoScalingGroup
+      MinSize: 1
+      MaxSize: 5
+      DesiredCapacity:
+        Ref: DesiredCapacity
+      DesiredCapacityType: units
+      DefaultInstanceWarmup: 120
+      HealthCheckGracePeriod: 120
+      HealthCheckType: EC2
+      VPCZoneIdentifier:
+        - Ref: Subnet
+        - Ref: Subnet2
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: AsgLaunchTemplate
+        Version:
+          Fn::GetAtt: AsgLaunchTemplate.LatestVersionNumber
+      TargetGroupARNs:
+        - Ref: ALBTargetGroup
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-asg
+          PropagateAtLaunch: false
+
+  # Elastic Load Balancing
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ALB
+      Type: application
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      SecurityGroups:
+        - Ref: WebSecurityGroup
+      Subnets:
+        - Ref: Subnet
+        - Ref: Subnet2
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ALBTargetGroup
+      TargetType: instance
+      IpAddressType: ipv4
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Port: 8000
+      VpcId:
+        Ref: VPC
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      Matcher:
+        HttpCode: 200
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 10
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn:
+        Ref: ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: ALBTargetGroup
+
+  # CloudFront
+  CachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-CachePolicy
+        Comment: CloudFront cache policy
+        DefaultTTL: 86400
+        MinTTL: 1
+        MaxTTL: 31536000
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingBrotli: true
+          EnableAcceptEncodingGzip: true
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: CloudFront distribution
+        Enabled: true
+        Origins:
+          - Id:
+              Fn::GetAtt: ALB.DNSName
+            DomainName:
+              Fn::GetAtt: ALB.DNSName
+            CustomOriginConfig:
+              HTTPPort: 80
+              OriginProtocolPolicy: http-only
+        DefaultCacheBehavior:
+          CachePolicyId:
+            Ref: CachePolicy
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          TargetOriginId:
+            Fn::GetAtt: ALB.DNSName
+          ViewerProtocolPolicy: allow-all
+
+Outputs:
+  ALBDNSName:
+    Value:
+      Fn::GetAtt: ALB.DNSName
+
+  DistributionDomain:
+    Value:
+      Fn::GetAtt: Distribution.DomainName

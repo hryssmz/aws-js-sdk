@@ -1,0 +1,11 @@
+version: 0.0
+Resources:
+  - TargetService:
+      Type: AWS::ECS::Service
+      Properties:
+        TaskDefinition: arn:aws:ecs:ap-northeast-1:512667299293:task-definition/ecs-sample2-TaskDefinition:2
+        LoadBalancerInfo:
+          ContainerName: app
+          ContainerPort: 80
+Hooks:
+  - AfterAllowTestTraffic: arn:aws:lambda:ap-northeast-1:512667299293:function:ecs-sample2-AfterAllowTestTrafficFunction

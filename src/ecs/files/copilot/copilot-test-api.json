@@ -1,0 +1,17 @@
+{
+  "AppName": "demo",
+  "ContainerImage": "512667299293.dkr.ecr.ap-northeast-1.amazonaws.com/demo/api@sha256:ce51b4981e09ed6d38c3d3fe60ca6be51c4053cf9021ebedd9f31cdbc29c51fb",
+  "ContainerPort": "80",
+  "DNSDelegated": "false",
+  "EnvName": "test",
+  "HTTPSEnabled": "false",
+  "LogRetention": "30",
+  "RulePath": "/",
+  "Stickiness": "false",
+  "TargetContainer": "api",
+  "TargetPort": "80",
+  "TaskCount": "1",
+  "TaskCPU": "256",
+  "TaskMemory": "512",
+  "WorkloadName": "api"
+}

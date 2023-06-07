@@ -1,0 +1,393 @@
+# cloudformation/templates/blue-green.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform:
+  - AWS::CodeDeployBlueGreen
+Description: ECS blue/green deployment
+
+Parameters:
+  ContainerName:
+    Type: String
+    Description: Container name
+    Default: app
+
+  DesiredCount:
+    Type: Number
+    Description: Desired ECS task count
+    Default: 1
+    MinValue: 0
+    MaxValue: 5
+    ConstraintDescription: Must be an integer between 0 and 5
+
+  VPC:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+    Default: vpc-01d5cfd2cad5314f1
+
+  Subnet:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet ID
+    Default: subnet-00ee516fa04d610fe
+
+  Subnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet2 ID
+    Default: subnet-0c99e2001f0ae6c0a
+
+Resources:
+  # Elastic Load Balancing
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-ALBSecurityGroup
+      GroupDescription: ALB security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: HTTP inbound rule 2
+          IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg-alb
+
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ALB
+      Type: application
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      SecurityGroups:
+        - Ref: ALBSecurityGroup
+      Subnets:
+        - Ref: Subnet
+        - Ref: Subnet2
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ALBTargetGroup
+      TargetType: ip
+      IpAddressType: ipv4
+      Protocol: HTTP
+      Port: 80
+      VpcId:
+        Ref: VPC
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 10
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: /
+      HealthCheckPort: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 4
+      Matcher:
+        HttpCode: 200
+
+  ALBTargetGroup2:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ALBTargetGroup2
+      TargetType: ip
+      IpAddressType: ipv4
+      Protocol: HTTP
+      Port: 80
+      VpcId:
+        Ref: VPC
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 10
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: /
+      HealthCheckPort: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 4
+      Matcher:
+        HttpCode: 200
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn: ALBTargetGroup2
+    Properties:
+      LoadBalancerArn:
+        Ref: ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: ALBTargetGroup
+
+  ALBListener2:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn: ALBTargetGroup
+    Properties:
+      LoadBalancerArn:
+        Ref: ALB
+      Port: 8080
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: ALBTargetGroup2
+
+  TargetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-TargetSecurityGroup
+      GroupDescription: Target security group
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg-tgt
+
+  ALBSecurityGroupEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      Description: HTTP outbound rule
+      GroupId:
+        Ref: ALBSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      DestinationSecurityGroupId:
+        Ref: TargetSecurityGroup
+
+  TargetSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: HTTP inbound rule
+      GroupId:
+        Ref: TargetSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId:
+        Ref: ALBSecurityGroup
+
+  # ECS
+  ECSNamespace:
+    Type: AWS::ServiceDiscovery::HttpNamespace
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ECSNamespace
+      Description: ECS namespace
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName:
+        Fn::Sub: ${AWS::StackName}-ECSCluster
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 1
+      Configuration:
+        ExecuteCommandConfiguration:
+          Logging: DEFAULT
+      ClusterSettings:
+        - Name: containerInsights
+          Value: disabled
+      ServiceConnectDefaults:
+        Namespace:
+          Fn::GetAtt: ECSNamespace.Arn
+
+  ECSExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ECSExecutionRole-${AWS::Region}
+      Description: Service role for ECS container agents
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/ecs/${AWS::StackName}-ECSLogGroup
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family:
+        Fn::Sub: ${AWS::StackName}-TaskDefinition
+      Cpu: 256
+      Memory: 512
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn:
+        Fn::GetAtt: ECSExecutionRole.Arn
+      ContainerDefinitions:
+        - Name:
+            Ref: ContainerName
+          Image: httpd:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+              HostPort: 80
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region:
+                Ref: AWS::Region
+              awslogs-group:
+                Ref: ECSLogGroup
+              awslogs-stream-prefix: TaskDefinition
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost || exit 1
+          Command:
+            - /bin/sh
+            - -c
+            - |
+              cat <<EOF > /usr/local/apache2/htdocs/index.html
+              <html>
+                <head>
+                  <title>Amazon ECS Sample App</title>
+                  <style>
+                    body {
+                      margin-top: 40px;
+                      background-color: #333;
+                    }
+                    .container {
+                      color: white;
+                      text-align: center;
+                    }
+                  </style>
+                </head>
+                <body>
+                  <div class="container">
+                    <h1>Amazon ECS Sample App</h1>
+                    <h2>Congratulations!</h2>
+                    <p>
+                      Your application is now running on a container in Amazon ECS.
+                    </p>
+                    <p>
+                      Your container hostname is `hostname`
+                    </p>
+                  </div>
+                </body>
+              </html>
+              EOF
+
+              apt update -y && apt install -y curl
+              httpd-foreground
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: ALBListener
+    Properties:
+      ServiceName:
+        Fn::Sub: ${AWS::StackName}-ECSService
+      Cluster:
+        Ref: ECSCluster
+      DesiredCount:
+        Ref: DesiredCount
+      DeploymentController:
+        Type: EXTERNAL
+
+  TaskSet:
+    Type: AWS::ECS::TaskSet
+    Properties:
+      Cluster:
+        Ref: ECSCluster
+      Service:
+        Ref: ECSService
+      TaskDefinition:
+        Ref: TaskDefinition
+      LaunchType: FARGATE
+      Scale:
+        Unit: PERCENT
+        Value: 100
+      NetworkConfiguration:
+        AwsVpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - Ref: TargetSecurityGroup
+          Subnets:
+            - Ref: Subnet
+            - Ref: Subnet
+      LoadBalancers:
+        - ContainerName:
+            Ref: ContainerName
+          ContainerPort: 80
+          TargetGroupArn:
+            Ref: ALBTargetGroup
+
+  PrimaryTaskSet:
+    Type: AWS::ECS::PrimaryTaskSet
+    Properties:
+      Cluster:
+        Ref: ECSCluster
+      Service:
+        Ref: ECSService
+      TaskSetId:
+        Fn::GetAtt: TaskSet.Id
+
+Hooks:
+  CodeDeployBlueGreenHook:
+    Type: AWS::CodeDeploy::BlueGreen
+    Properties:
+      TrafficRoutingConfig:
+        Type: TimeBasedCanary
+        TimeBasedCanary:
+          StepPercentage: 50
+          BakeTimeMins: 2
+      Applications:
+        - Target:
+            Type: AWS::ECS::Service
+            LogicalID: ECSService
+          ECSAttributes:
+            TaskDefinitions:
+              - TaskDefinition
+              - TaskDefinition2
+            TaskSets:
+              - TaskSet
+              - TaskSet2
+            TrafficRouting:
+              ProdTrafficRoute:
+                Type: AWS::ElasticLoadBalancingV2::Listener
+                LogicalID: ALBListener
+              # TestTrafficRoute:
+              #   Type: AWS::ElasticLoadBalancingV2::Listener
+              #   LogicalID: ALBListener2
+              TargetGroups:
+                - ALBTargetGroup
+                - ALBTargetGroup2

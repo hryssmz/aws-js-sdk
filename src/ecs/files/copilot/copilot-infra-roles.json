@@ -1,0 +1,7 @@
+{
+  "AdminRoleName": "demo-adminrole",
+  "AppDNSDelegatedAccounts": "512667299293",
+  "AppName": "demo",
+  "DNSDelegationRoleName": "demo-DNSDelegationRole",
+  "ExecutionRoleName": "demo-executionrole"
+}

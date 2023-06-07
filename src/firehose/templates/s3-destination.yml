@@ -1,0 +1,187 @@
+# firehose/templates/s3-destination.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: S3 destination delivery stream
+
+Resources:
+  DestinationBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: DestinationBucketPermission
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-destinationbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function:
+              Fn::GetAtt: DestinationBucketFunction.Arn
+
+  DestinationBucketFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-DestinationBucketFunctionPolicy-${AWS::Region}
+      Description: Policy for DestinationBucketFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}/*
+
+  DestinationBucketFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DestinationBucketFunctionRole-${AWS::Region}
+      Description: Service role for DestinationBucketFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: DestinationBucketFunctionPolicy
+
+  DestinationBucketFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-DestinationBucketFunction
+      Description: Monitor function for DestinationBucket
+      Role:
+        Fn::GetAtt: DestinationBucketFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Timeout: 10
+      Architectures:
+        - arm64
+      InlineCode: |
+        const { GetObjectCommand, S3Client } = require("@aws-sdk/client-s3");
+
+        exports.handler = async event => {
+          const client = new S3Client();
+          const promises = event.Records.map(async ({ s3 }) => {
+            const command = new GetObjectCommand({
+              Bucket: s3.bucket.name,
+              Key: s3.object.key,
+            });
+            const { Body } = await client.send(command);
+            const content = await Body.transformToString();
+            console.log(content);
+          });
+          await Promise.all(promises);
+          return "Finished";
+        };
+
+  DestinationBucketPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: DestinationBucketFunction
+      Principal: s3.amazonaws.com
+      SourceArn:
+        Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}
+      SourceAccount:
+        Ref: AWS::AccountId
+
+  DestinationBucketFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${DestinationBucketFunction}
+
+  FirehoseLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/firehose/${AWS::StackName}-FirehoseLogGroup
+
+  DeliveryStreamLogStream:
+    Type: AWS::Logs::LogStream
+    Properties:
+      LogStreamName:
+        Fn::Sub: DeliveryStream
+      LogGroupName:
+        Ref: FirehoseLogGroup
+
+  DeliveryStreamS3Policy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-DeliveryStreamS3Policy-${AWS::Region}
+      Description: Execution policy for Kinesis Firehose Delivery Stream
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:AbortMultipartUpload
+              - s3:GetBucketLocation
+              - s3:GetObject
+              - s3:ListBucket
+              - s3:ListBucketMultipartUploads
+              - s3:PutObject
+            Resource:
+              - Fn::GetAtt: DestinationBucket.Arn
+              - Fn::Sub: ${DestinationBucket.Arn}/*
+          - Effect: Allow
+            Action:
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${FirehoseLogGroup}:log-stream:${DeliveryStreamLogStream}
+
+  DeliveryStreamS3Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DeliveryStreamS3Role-${AWS::Region}
+      Description: Service role for Kinesis Firehose Delivery Stream
+      ManagedPolicyArns:
+        - Ref: DeliveryStreamS3Policy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  DeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName:
+        Fn::Sub: ${AWS::StackName}-DeliveryStream
+      DeliveryStreamType: DirectPut
+      S3DestinationConfiguration:
+        BucketARN:
+          Fn::GetAtt: DestinationBucket.Arn
+        Prefix: DeliveryStream/
+        ErrorOutputPrefix: DeliveryStream-Error/
+        RoleARN:
+          Fn::GetAtt: DeliveryStreamS3Role.Arn
+        BufferingHints:
+          IntervalInSeconds: 60
+          SizeInMBs: 1
+        CompressionFormat: UNCOMPRESSED
+        EncryptionConfiguration:
+          NoEncryptionConfig: NoEncryption
+        CloudWatchLoggingOptions:
+          Enabled: true
+          LogGroupName:
+            Ref: FirehoseLogGroup
+          LogStreamName:
+            Ref: DeliveryStreamLogStream

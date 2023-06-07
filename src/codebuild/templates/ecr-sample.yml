@@ -1,0 +1,127 @@
+# codebuild/templates/ecr-sample.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: ECR sample for CodeBuild
+
+Parameters:
+  ArtifactKey:
+    Type: String
+    Description: S3 key for artifact archive
+    Default: DockerSample.zip
+
+Resources:
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-artifact-bucket
+
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:
+        Ref: AWS::StackName
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  CodeBuildExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-CodeBuildExecutionPolicy
+      Description: Execution policy for CodeBuild
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudWatchLogsAccess
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${AWS::StackName}*:log-stream:*
+          - Sid: ECRAuthorizationAccess
+            Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+            Resource: "*"
+          - Sid: ECRRepositoryAccess
+            Effect: Allow
+            Action:
+              - ecr:BatchCheckLayerAvailability
+              - ecr:CompleteLayerUpload
+              - ecr:InitiateLayerUpload
+              - ecr:PutImage
+              - ecr:UploadLayerPart
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${AWS::StackName}*
+          - Sid: ArtifactsBucketAccess
+            Effect: Allow
+            Action:
+              - s3:GetBucketAcl
+              - s3:GetBucketLocation
+            Resource:
+              - Fn::GetAtt: ArtifactsBucket.Arn
+          - Sid: ArtifactsBucketObjectsAccess
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${ArtifactsBucket.Arn}/*
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CodeBuildServiceRole
+      Description: Service role for CodeBuild
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: CodeBuildExecutionPolicy
+
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-BuildProject
+      Description: Build project
+      Source:
+        Type: S3
+        Location:
+          Fn::Sub: ${ArtifactsBucket}/${ArtifactKey}
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value:
+              Ref: AWS::Region
+          - Name: AWS_ACCOUNT_ID
+            Value:
+              Ref: AWS::AccountId
+          - Name: IMAGE_REPO_NAME
+            Value:
+              Ref: ECRRepository
+          - Name: IMAGE_TAG
+            Value: latest
+        PrivilegedMode: true
+      ServiceRole:
+        Fn::GetAtt: CodeBuildServiceRole.Arn
+      TimeoutInMinutes: 5
+
+  BuildProjectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/codebuild/${BuildProject}

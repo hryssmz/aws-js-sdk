@@ -1,0 +1,364 @@
+# firehose/templates/cwl-source.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Delivery stream with CloudWatch Logs as source
+
+Mappings:
+  RegionProfile2AMI:
+    ap-northeast-1:
+      AL2023: ami-067871d950411e643
+
+  RegionProfile2Type:
+    ap-northeast-1:
+      AL2023: t2.micro
+
+  Region2DefaultVPC:
+    ap-northeast-1:
+      VPC: vpc-01d5cfd2cad5314f1
+      Subnet: subnet-00ee516fa04d610fe
+      Subnet2: subnet-0c99e2001f0ae6c0a
+      Subnet3: subnet-0deeda0e1c6cd4ffa
+      PrivateSubnetCidr: 172.31.128.0/20
+      PrivateSubnet2Cidr: 172.31.144.0/20
+
+Resources:
+  # S3
+  DestinationBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: DestinationBucketPermission
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-destinationbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function:
+              Fn::GetAtt: DestinationBucketFunction.Arn
+
+  DestinationBucketFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-DestinationBucketFunctionPolicy-${AWS::Region}
+      Description: Policy for DestinationBucketFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}/*
+
+  DestinationBucketFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DestinationBucketFunctionRole-${AWS::Region}
+      Description: Service role for DestinationBucketFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: DestinationBucketFunctionPolicy
+
+  DestinationBucketFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-DestinationBucketFunction
+      Description: Monitor function for DestinationBucket
+      Role:
+        Fn::GetAtt: DestinationBucketFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Timeout: 10
+      Architectures:
+        - arm64
+      InlineCode: |
+        const { GetObjectCommand, S3Client } = require("@aws-sdk/client-s3");
+
+        exports.handler = async event => {
+          const client = new S3Client();
+          const promises = event.Records.map(async ({ s3 }) => {
+            const command = new GetObjectCommand({
+              Bucket: s3.bucket.name,
+              Key: s3.object.key,
+            });
+            const { Body } = await client.send(command);
+            const content = await Body.transformToString();
+            console.log(content);
+          });
+          await Promise.all(promises);
+          return "Finished";
+        };
+
+  DestinationBucketPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: DestinationBucketFunction
+      Principal: s3.amazonaws.com
+      SourceArn:
+        Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}
+      SourceAccount:
+        Ref: AWS::AccountId
+
+  DestinationBucketFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${DestinationBucketFunction}
+
+  # VPC
+  FlowLogsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/vpc/${AWS::StackName}-FlowLogsLogGroup
+
+  FlowLogsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-FlowLogsPolicy-${AWS::Region}
+      Description: Policy for FlowLogs
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+            Resource: "*"
+
+  FlowLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-FlowLogsRole-${AWS::Region}
+      Description: Service role for VPC flow log
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc-flow-log/*
+      ManagedPolicyArns:
+        - Ref: FlowLogsPolicy
+
+  FlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      ResourceType: VPC
+      ResourceId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      TrafficType: ALL
+      LogFormat: ${protocol} ${srcaddr} ${srcport} ${dstaddr} ${dstport} ${start} ${end} ${action} ${log-status}
+      LogDestinationType: cloud-watch-logs
+      LogGroupName:
+        Ref: FlowLogsLogGroup
+      DeliverLogsPermissionArn:
+        Fn::GetAtt: FlowLogsRole.Arn
+      MaxAggregationInterval: 60
+
+  # EC2
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 security group
+      VpcId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-sg-ec2
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+          - RegionProfile2AMI
+          - Ref: AWS::Region
+          - AL2023
+      InstanceType:
+        Fn::FindInMap:
+          - RegionProfile2Type
+          - Ref: AWS::Region
+          - AL2023
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroupIds:
+        - Ref: EC2SecurityGroup
+      SubnetId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - Subnet
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            dnf update -y
+            dnf install -y httpd
+            echo "<h1>Hello World</h1>" > /var/www/html/index.html
+            TOKEN=`curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
+            INSTANCE_ID=`curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id`
+            echo "<p>Instance ID: $INSTANCE_ID</p>" >> /var/www/html/index.html
+            systemctl start httpd
+            systemctl enable httpd
+            usermod -a -G apache ec2-user
+            chown -R ec2-user:apache /var/www
+            chmod 2775 /var/www
+            find /var/www -type d -exec chmod 2775 {} \;
+            find /var/www -type f -exec chmod 0664 {} \;
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${AWS::StackName}-i-ec2
+
+  # Kinesis Data Firehose
+  FirehoseLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/firehose/${AWS::StackName}-FirehoseLogGroup
+
+  DeliveryStreamLogStream:
+    Type: AWS::Logs::LogStream
+    Properties:
+      LogStreamName:
+        Fn::Sub: DeliveryStream
+      LogGroupName:
+        Ref: FirehoseLogGroup
+
+  DeliveryStreamS3Policy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-DeliveryStreamS3Policy-${AWS::Region}
+      Description: Execution policy for Kinesis Firehose Delivery Stream S3 destination
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:AbortMultipartUpload
+              - s3:GetBucketLocation
+              - s3:GetObject
+              - s3:ListBucket
+              - s3:ListBucketMultipartUploads
+              - s3:PutObject
+            Resource:
+              - Fn::GetAtt: DestinationBucket.Arn
+              - Fn::Sub: ${DestinationBucket.Arn}/*
+          - Effect: Allow
+            Action:
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${FirehoseLogGroup}:log-stream:${DeliveryStreamLogStream}
+
+  DeliveryStreamS3Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DeliveryStreamS3Role-${AWS::Region}
+      Description: Service role for Kinesis Firehose Delivery Stream S3 destination
+      ManagedPolicyArns:
+        - Ref: DeliveryStreamS3Policy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  DeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName:
+        Fn::Sub: ${AWS::StackName}-DeliveryStream
+      DeliveryStreamType: DirectPut
+      S3DestinationConfiguration:
+        BucketARN:
+          Fn::GetAtt: DestinationBucket.Arn
+        Prefix: DeliveryStream/
+        ErrorOutputPrefix: DeliveryStream-Error/
+        RoleARN:
+          Fn::GetAtt: DeliveryStreamS3Role.Arn
+        BufferingHints:
+          IntervalInSeconds: 60
+          SizeInMBs: 1
+        CompressionFormat: UNCOMPRESSED
+        EncryptionConfiguration:
+          NoEncryptionConfig: NoEncryption
+        CloudWatchLoggingOptions:
+          Enabled: true
+          LogGroupName:
+            Ref: FirehoseLogGroup
+          LogStreamName:
+            Ref: DeliveryStreamLogStream
