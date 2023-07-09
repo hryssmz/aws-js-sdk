@@ -27,8 +27,6 @@ Resources:
       RoleName:
         Fn::Sub: ${AWS::StackName}-BatchExecutionRole-${AWS::Region}
       Description: Service role for ECS container agents
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -37,6 +35,8 @@ Resources:
               Service: ecs-tasks.amazonaws.com
             Action:
               - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
   BatchJobPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -58,8 +58,6 @@ Resources:
       RoleName:
         Fn::Sub: ${AWS::StackName}-BatchJobRole-${AWS::Region}
       Description: Service role for batch job
-      ManagedPolicyArns:
-        - Ref: BatchJobPolicy
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -68,6 +66,8 @@ Resources:
               Service: ecs-tasks.amazonaws.com
             Action:
               - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: BatchJobPolicy
 
   BatchLogGroup:
     Type: AWS::Logs::LogGroup
@@ -171,8 +171,6 @@ Resources:
       RoleName:
         Fn::Sub: ${AWS::StackName}-BatchScheduledRuleRole-${AWS::Region}
       Description: Service role for batch scheduled rule
-      ManagedPolicyArns:
-        - Ref: BatchScheduledRulePolicy
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -181,6 +179,8 @@ Resources:
               Service: events.amazonaws.com
             Action:
               - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: BatchScheduledRulePolicy
 
   BatchScheduledRule:
     Type: AWS::Events::Rule

@@ -18,8 +18,7 @@ Resources:
       EnableDnsSupport: true
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-vpc
+          Value: VPC
 
   Subnet:
     Type: AWS::EC2::Subnet
@@ -34,8 +33,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sn
+          Value: Subnet
 
   Subnet2:
     Type: AWS::EC2::Subnet
@@ -50,16 +48,14 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sn2
+          Value: Subnet2
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-igw
+          Value: InternetGateway
 
   InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -76,8 +72,7 @@ Resources:
         Ref: VPC
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-rtb
+          Value: RouteTable
 
   SubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -169,8 +164,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-alb
+          Value: ALBSecurityGroup
 
   TargetSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -188,8 +182,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-tgt
+          Value: TargetSecurityGroup
 
   ALBSecurityGroupEgress:
     Type: AWS::EC2::SecurityGroupEgress
@@ -252,8 +245,6 @@ Resources:
       RoleName:
         Fn::Sub: ${AWS::StackName}-ECSExecutionRole-${AWS::Region}
       Description: Service role for ECS container agents
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -262,6 +253,8 @@ Resources:
               Service: ecs-tasks.amazonaws.com
             Action:
               - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
   ECSTaskPolicy:
     Type: AWS::IAM::ManagedPolicy

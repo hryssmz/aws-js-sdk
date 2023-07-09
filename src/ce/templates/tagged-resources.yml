@@ -1,0 +1,29 @@
+# ce/templates/tagged-resources.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Tagged resources
+
+Resources:
+  KinesisStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-KinesisStream
+      ShardCount: 1
+      StreamModeDetails:
+        StreamMode: PROVISIONED
+      Tags:
+        - Key: Stack
+          Value: Development
+
+  KinesisStream2:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-KinesisStream2
+      ShardCount: 1
+      StreamModeDetails:
+        StreamMode: PROVISIONED
+      Tags:
+        - Key: Stack
+          Value: Testing

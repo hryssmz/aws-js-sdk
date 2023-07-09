@@ -61,10 +61,20 @@ Mappings:
 Resources:
   ArtifactBucket:
     Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-artifactbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
 
   ExecutePipelineFunctionPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-ExecutePipelineFunctionPolicy-${AWS::Region}
       Description: Lambda Function policy to execute pipeline
       PolicyDocument:
         Version: "2012-10-17"
@@ -78,6 +88,9 @@ Resources:
   ExecutePipelineFunctionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ExecutePipelineFunctionRole-${AWS::Region}
+      Description: Lambda Function role to execute pipeline
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -86,7 +99,6 @@ Resources:
               Service: lambda.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Lambda Function role to execute pipeline
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: ExecutePipelineFunctionPolicy
@@ -158,6 +170,9 @@ Resources:
   CodeDeployRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CodeDeployRole-${AWS::Region}
+      Description: Service role for AWS CodeDeploy
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -166,7 +181,6 @@ Resources:
               Service: codedeploy.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Service role for AWS CodeDeploy
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
 
@@ -215,6 +229,8 @@ Resources:
   CodePipelinePolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-CodePipelinePolicy-${AWS::Region}
       Description: Execution policy for CodePipeline
       PolicyDocument:
         Version: "2012-10-17"
@@ -257,6 +273,9 @@ Resources:
   CodePipelineRole:
     Type: AWS::IAM::Role
     Properties:
+      Description: Service role for CodePipeline
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CodePipelineRole-${AWS::Region}
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -265,7 +284,6 @@ Resources:
               Service: codepipeline.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Service role for CodePipeline
       ManagedPolicyArns:
         - Ref: CodePipelinePolicy
 
@@ -345,6 +363,9 @@ Resources:
   EC2InstanceRole:
     Type: AWS::IAM::Role
     Properties:
+      Description: Service role for EC2 instance
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -353,7 +374,6 @@ Resources:
               Service: ec2.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Service role for EC2 instance
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforAWSCodeDeploy
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
@@ -361,6 +381,8 @@ Resources:
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
       Roles:
         - Ref: EC2InstanceRole
 

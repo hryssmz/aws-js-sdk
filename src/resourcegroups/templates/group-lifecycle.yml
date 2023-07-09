@@ -1,0 +1,141 @@
+# resourcegroups/templates/group-lifecycle.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Creating an EventBridge rule to capture group lifecycle events and publish notifications
+
+Resources:
+  # Some resources
+  DevelopmentBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-developmentbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Environment
+          Value: Development
+
+  ProductionBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-productionbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Environment
+          Value: Production
+
+  DevelopmentTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName:
+        Fn::Sub: ${AWS::StackName}-DevelopmentTable
+      PrimaryKey:
+        Name: Id
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      Tags:
+        Environment: Development
+
+  # Resource group
+  ResourceGroup:
+    Type: AWS::ResourceGroups::Group
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ResourceGroup
+      Description: Tag-based resource group
+      ResourceQuery:
+        Type: TAG_FILTERS_1_0
+        Query:
+          ResourceTypeFilters:
+            - AWS::S3::Bucket
+          TagFilters:
+            - Key: Environment
+              Values:
+                - Development
+
+  ResourceGroupTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-ResourceGroupTopic
+      FifoTopic: false
+
+  ResourceGroupRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-EC2RunningRule
+      Description: Event rule for resource group
+      EventPattern:
+        source:
+          - aws.resource-groups
+        detail:
+          group:
+            arn:
+              - Fn::GetAtt: ResourceGroup.Arn
+      Targets:
+        - Id:
+            Fn::GetAtt: ResourceGroupTopic.TopicName
+          Arn:
+            Ref: ResourceGroupTopic
+
+  ResourceGroupTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - Ref: ResourceGroupTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sns:Publish
+            Principal:
+              Service: events.amazonaws.com
+            Resource:
+              - Ref: ResourceGroupTopic
+            Condition:
+              ArnEquals:
+                aws:SourceArn:
+                  Fn::GetAtt: ResourceGroupRule.Arn
+
+  ResourceGroupTopicFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ResourceGroupTopicFunction
+      Description: Serverless function with EventBridge rule configured
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: ResourceGroupTopic
+      InlineCode: |
+        exports.handler = async event => {
+          const { Records } = event;
+          const messages = Records.map(({ Sns }) => Sns).map(({ Message }) => Message);
+          console.log(JSON.stringify(messages, null, 2));
+          return messages;
+        };
+
+  ResourceGroupTopicFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${ResourceGroupTopicFunction}

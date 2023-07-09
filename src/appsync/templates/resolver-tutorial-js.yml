@@ -6,6 +6,8 @@ Resources:
   DynamoDBDataSourcePolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-DynamoDBDataSourcePolicy-${AWS::Region}
       Description: CRUD policy for DynamoDB data source
       PolicyDocument:
         Version: "2012-10-17"
@@ -24,6 +26,9 @@ Resources:
   DynamoDBDataSourceRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DynamoDBDataSourceRole-${AWS::Region}
+      Description: CRUD role for DynamoDB data source
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -32,7 +37,6 @@ Resources:
               Service: appsync.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: CRUD role for DynamoDB data source
       ManagedPolicyArns:
         - Ref: DynamoDBDataSourcePolicy
 
@@ -64,6 +68,9 @@ Resources:
   GraphQLApiLoggingRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-GraphQLApiLoggingRole-${AWS::Region}
+      Description: Logging role for GraphQl API
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -72,7 +79,6 @@ Resources:
               Service: appsync.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Logging role for GraphQl API
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
 

@@ -6,7 +6,7 @@ Description: S3 destination delivery stream
 Resources:
   DestinationBucket:
     Type: AWS::S3::Bucket
-    DependsOn: DestinationBucketPermission
+    DependsOn: DestinationFunctionPermission
     Properties:
       BucketName:
         Fn::Sub: ${AWS::StackName}-destinationbucket-${AWS::Region}
@@ -19,14 +19,14 @@ Resources:
         LambdaConfigurations:
           - Event: s3:ObjectCreated:*
             Function:
-              Fn::GetAtt: DestinationBucketFunction.Arn
+              Fn::GetAtt: DestinationFunction.Arn
 
-  DestinationBucketFunctionPolicy:
+  DestinationFunctionPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
       ManagedPolicyName:
-        Fn::Sub: ${AWS::StackName}-DestinationBucketFunctionPolicy-${AWS::Region}
-      Description: Policy for DestinationBucketFunction
+        Fn::Sub: ${AWS::StackName}-DestinationFunctionPolicy-${AWS::Region}
+      Description: Policy for DestinationFunction
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -36,12 +36,12 @@ Resources:
             Resource:
               - Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}/*
 
-  DestinationBucketFunctionRole:
+  DestinationFunctionRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName:
-        Fn::Sub: ${AWS::StackName}-DestinationBucketFunctionRole-${AWS::Region}
-      Description: Service role for DestinationBucketFunction
+        Fn::Sub: ${AWS::StackName}-DestinationFunctionRole-${AWS::Region}
+      Description: Service role for DestinationFunction
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -52,16 +52,16 @@ Resources:
               - sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - Ref: DestinationBucketFunctionPolicy
+        - Ref: DestinationFunctionPolicy
 
-  DestinationBucketFunction:
+  DestinationFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName:
-        Fn::Sub: ${AWS::StackName}-DestinationBucketFunction
+        Fn::Sub: ${AWS::StackName}-DestinationFunction
       Description: Monitor function for DestinationBucket
       Role:
-        Fn::GetAtt: DestinationBucketFunctionRole.Arn
+        Fn::GetAtt: DestinationFunctionRole.Arn
       Handler: index.handler
       Runtime: nodejs18.x
       Timeout: 10
@@ -85,23 +85,23 @@ Resources:
           return "Finished";
         };
 
-  DestinationBucketPermission:
+  DestinationFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
       FunctionName:
-        Ref: DestinationBucketFunction
+        Ref: DestinationFunction
       Principal: s3.amazonaws.com
       SourceArn:
         Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}
       SourceAccount:
         Ref: AWS::AccountId
 
-  DestinationBucketFunctionLogGroup:
+  DestinationFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName:
-        Fn::Sub: /aws/lambda/${DestinationBucketFunction}
+        Fn::Sub: /aws/lambda/${DestinationFunction}
 
   FirehoseLogGroup:
     Type: AWS::Logs::LogGroup

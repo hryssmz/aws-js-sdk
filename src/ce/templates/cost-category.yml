@@ -1,0 +1,35 @@
+# ce/templates/cost-category.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Cost category
+
+Resources:
+  CostCategory:
+    Type: AWS::CE::CostCategory
+    Properties:
+      Name: Service
+      DefaultValue: Others
+      RuleVersion: CostCategoryExpression.v1
+      Rules:
+        Fn::Sub: |
+          [
+            {
+              "Value": "Route 53",
+              "Rule": {
+                "Dimensions": {
+                  "Key": "SERVICE_CODE",
+                  "MatchOptions": ["EQUALS"],
+                  "Values": ["AmazonRoute53"]
+                }
+              }
+            },
+            {
+              "Value": "Kinesis",
+              "Rule": {
+                "Dimensions": {
+                  "Key": "SERVICE_CODE",
+                  "MatchOptions": ["EQUALS"],
+                  "Values": ["AmazonKinesis"]
+                }
+              }
+            }
+          ]

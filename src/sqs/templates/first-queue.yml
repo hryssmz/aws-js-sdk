@@ -3,14 +3,6 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: My first queue
 
-Globals:
-  Function:
-    Handler: index.handler
-    Runtime: nodejs18.x
-    Timeout: 10
-    Architectures:
-      - arm64
-
 Resources:
   Queue:
     Type: AWS::SQS::Queue
@@ -24,6 +16,10 @@ Resources:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-ProducerFunction
       Description: Push messages into Queue
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
       Environment:
         Variables:
           QUEUE_URL:
@@ -66,6 +62,10 @@ Resources:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-ConsumerFunction
       Description: Consumer function for Queue
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
       Events:
         SQSEvent:
           Type: SQS

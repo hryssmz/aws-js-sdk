@@ -16,6 +16,8 @@ Resources:
   APIGatewayExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-APIGatewayExecutionPolicy-${AWS::Region}
       Description: Execution policy for API Gateway
       PolicyDocument:
         Version: "2012-10-17"
@@ -29,6 +31,9 @@ Resources:
   APIGatewayExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-APIGatewayExecutionRole-${AWS::Region}
+      Description: Execution role for API Gateway
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -37,7 +42,6 @@ Resources:
               Service: apigateway.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Execution role for API Gateway
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
         - Ref: APIGatewayExecutionPolicy

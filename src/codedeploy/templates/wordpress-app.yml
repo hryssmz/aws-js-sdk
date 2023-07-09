@@ -65,6 +65,14 @@ Mappings:
 Resources:
   DemoBucket:
     Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-demobucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
 
   DemoBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -87,6 +95,9 @@ Resources:
   CodeDeployRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CodeDeployRole-${AWS::Region}
+      Description: Execution role for AWS CodeDeploy
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -95,7 +106,6 @@ Resources:
               Service: codedeploy.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Execution role for AWS CodeDeploy
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
 
@@ -166,6 +176,9 @@ Resources:
   EC2InstanceRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Execution role for EC2 instance
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -174,7 +187,6 @@ Resources:
               Service: ec2.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Execution role for EC2 instance
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforAWSCodeDeploy
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
@@ -182,6 +194,8 @@ Resources:
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
       Roles:
         - Ref: EC2InstanceRole
 

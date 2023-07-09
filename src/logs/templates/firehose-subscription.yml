@@ -1,0 +1,431 @@
+# cloudtrail/templates/firehose-subscription.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Subscription filters with Amazon Kinesis Data Firehose
+
+Resources:
+  # S3 destination
+  DestinationBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: DestinationFunctionPermission
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-destinationbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function:
+              Fn::GetAtt: DestinationFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: DeliveryStream/
+
+  DestinationFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-DestinationFunctionPolicy-${AWS::Region}
+      Description: Policy for DestinationFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}/*
+
+  DestinationFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DestinationFunctionRole-${AWS::Region}
+      Description: Service role for DestinationFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: DestinationFunctionPolicy
+
+  DestinationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-DestinationFunction
+      Description: Monitor function for DestinationBucket
+      Role:
+        Fn::GetAtt: DestinationFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Timeout: 10
+      Architectures:
+        - arm64
+      InlineCode: |
+        const { GetObjectCommand, S3Client } = require("@aws-sdk/client-s3");
+
+        exports.handler = async event => {
+          const client = new S3Client();
+          const promises = event.Records.map(async ({ s3 }) => {
+            const command = new GetObjectCommand({
+              Bucket: s3.bucket.name,
+              Key: s3.object.key,
+            });
+            const { Body } = await client.send(command);
+            const content = await Body.transformToString();
+            content
+              .trim()
+              .split("\n")
+              .forEach(line => {
+                console.log(JSON.stringify(JSON.parse(line), null, 2));
+              });
+          });
+          await Promise.all(promises);
+          return "Finished";
+        };
+
+  DestinationFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: DestinationFunction
+      Principal: s3.amazonaws.com
+      SourceArn:
+        Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}
+      SourceAccount:
+        Ref: AWS::AccountId
+
+  DestinationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${DestinationFunction}
+
+  PartitionFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-PartitionFunction-${AWS::Region}
+      Description: Service role for PartitionFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  PartitionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-PartitionFunction
+      Description: Partition function
+      Role:
+        Fn::GetAtt: PartitionFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Timeout: 180
+      Architectures:
+        - arm64
+      InlineCode: |
+        const zlib = require("zlib");
+
+        exports.handler = async event => {
+          const records = event.records.map(record => {
+            const { recordId } = record;
+            const obj = JSON.parse(zlib.gunzipSync(Buffer.from(record.data, "base64")));
+            const { messageType, logEvents } = obj;
+
+            if (messageType === "CONTROL_MESSAGE") {
+              return { result: "Dropped", recordId };
+            } else if (messageType === "DATA_MESSAGE") {
+              const joinedData = logEvents
+                .map(({ message }) => `${message}\n`)
+                .join("");
+              const data = Buffer.from(joinedData, "utf-8").toString("base64");
+              return { result: "Ok", recordId, data };
+            } else {
+              return { result: "ProcessingFailed", recordId };
+            }
+          });
+
+          return { records };
+        };
+
+  PartitionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${PartitionFunction}
+
+  # Kinesis Data Firehose
+  FirehoseLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/firehose/${AWS::StackName}-FirehoseLogGroup
+
+  DeliveryStreamLogStream:
+    Type: AWS::Logs::LogStream
+    Properties:
+      LogStreamName: DeliveryStream
+      LogGroupName:
+        Ref: FirehoseLogGroup
+
+  DeliveryStreamS3Policy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-DeliveryStreamS3Policy-${AWS::Region}
+      Description: Execution policy for Kinesis Firehose Delivery Stream
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:AbortMultipartUpload
+              - s3:GetBucketLocation
+              - s3:GetObject
+              - s3:ListBucket
+              - s3:ListBucketMultipartUploads
+              - s3:PutObject
+            Resource:
+              - Fn::GetAtt: DestinationBucket.Arn
+              - Fn::Sub: ${DestinationBucket.Arn}/*
+          - Effect: Allow
+            Action:
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${FirehoseLogGroup}:log-stream:${DeliveryStreamLogStream}
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+              - lambda:GetFunctionConfiguration
+            Resource:
+              - Fn::GetAtt: PartitionFunction.Arn
+
+  DeliveryStreamS3Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DeliveryStreamS3Role-${AWS::Region}
+      Description: Service role for Kinesis Firehose Delivery Stream
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: DeliveryStreamS3Policy
+
+  DeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName:
+        Fn::Sub: ${AWS::StackName}-DeliveryStream
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        BucketARN:
+          Fn::GetAtt: DestinationBucket.Arn
+        Prefix: DeliveryStream/
+        ErrorOutputPrefix: DeliveryStream-Error/
+        RoleARN:
+          Fn::GetAtt: DeliveryStreamS3Role.Arn
+        BufferingHints:
+          IntervalInSeconds: 60
+          SizeInMBs: 64
+        CompressionFormat: UNCOMPRESSED
+        EncryptionConfiguration:
+          NoEncryptionConfig: NoEncryption
+        CloudWatchLoggingOptions:
+          Enabled: true
+          LogGroupName:
+            Ref: FirehoseLogGroup
+          LogStreamName:
+            Ref: DeliveryStreamLogStream
+        ProcessingConfiguration:
+          Enabled: true
+          Processors:
+            - Type: Lambda
+              Parameters:
+                - ParameterName: LambdaArn
+                  ParameterValue:
+                    Fn::GetAtt: PartitionFunction.Arn
+
+  # CloudWatch Logs
+  SubscriptionFilterPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-SubscriptionFilterPolicy-${AWS::Region}
+      Description: Policy for subscription filter
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - firehose:PutRecord
+            Resource:
+              - Fn::GetAtt: DeliveryStream.Arn
+
+  SubscriptionFilterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SubscriptionFilterRole-${AWS::Region}
+      Description: Service role for subscription filter
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: logs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringLike:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*
+      ManagedPolicyArns:
+        - Ref: SubscriptionFilterPolicy
+
+  SubscriptionFilter:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      FilterName:
+        Fn::Sub: ${AWS::StackName}-SubscriptionFilter
+      LogGroupName:
+        Ref: TrailLogGroup
+      DestinationArn:
+        Fn::GetAtt: DeliveryStream.Arn
+      RoleArn:
+        Fn::GetAtt: SubscriptionFilterRole.Arn
+      FilterPattern: "{ ($.eventName = DescribeStacks) || ($.eventName = ListBuckets) }"
+
+  # CloudTrail
+  TrailLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/cloudtrail/${AWS::StackName}-TrailLogGroup
+
+  TrailPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-TrailPolicy-${AWS::Region}
+      Description: Policy for Trail
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${TrailLogGroup}:log-stream:${AWS::AccountId}_CloudTrail_${AWS::Region}*
+
+  TrailRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-TrailRole-${AWS::Region}
+      Description: Service role Trail
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: TrailPolicy
+
+  Trail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: TrailBucketPolicy
+    Properties:
+      TrailName:
+        Fn::Sub: ${AWS::StackName}-Trail
+      IsLogging: true
+      S3BucketName:
+        Ref: TrailBucket
+      IncludeGlobalServiceEvents: true
+      EnableLogFileValidation: true
+      EventSelectors:
+        - IncludeManagementEvents: true
+          ReadWriteType: All
+          ExcludeManagementEventSources:
+            - kms.amazonaws.com
+            - rdsdata.amazonaws.com
+      CloudWatchLogsLogGroupArn:
+        Fn::GetAtt: TrailLogGroup.Arn
+      CloudWatchLogsRoleArn:
+        Fn::GetAtt: TrailRole.Arn
+
+  TrailBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-trailbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  TrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: TrailBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+            Resource:
+              - Fn::GetAtt: TrailBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${AWS::StackName}-Trail
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${TrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+              - Fn::Sub: ${TrailBucket.Arn}/*/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${AWS::StackName}-Trail

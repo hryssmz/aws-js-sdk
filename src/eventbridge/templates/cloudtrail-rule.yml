@@ -28,8 +28,7 @@ Resources:
           - AL2023
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-i-al2023
+          Value: EC2Instance
 
   LogEC2StopFunction:
     Type: AWS::Serverless::Function

@@ -1,0 +1,15 @@
+# cloud9/templates/first-environment.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: First EC2 environment
+
+Resources:
+  EnvironmentEC2:
+    Type: AWS::Cloud9::EnvironmentEC2
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-EnvironmentEC2
+      Description: EC2 environment
+      ImageId: amazonlinux-2-x86_64
+      InstanceType: t2.micro
+      AutomaticStopTimeMinutes: 5
+      ConnectionType: CONNECT_SSH

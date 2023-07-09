@@ -77,6 +77,9 @@ Resources:
   EC2InstanceRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -85,13 +88,14 @@ Resources:
               Service: ec2.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Service role for EC2 instance
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
       Roles:
         - Ref: EC2InstanceRole
 

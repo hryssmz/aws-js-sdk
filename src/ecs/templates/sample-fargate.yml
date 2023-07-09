@@ -27,8 +27,7 @@ Resources:
       EnableDnsSupport: true
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-vpc
+          Value: VPC
 
   Subnet:
     Type: AWS::EC2::Subnet
@@ -39,16 +38,14 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sn
+          Value: Subnet
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-igw
+          Value: InternetGateway
 
   InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -65,8 +62,7 @@ Resources:
         Ref: VPC
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-rtb
+          Value: RouteTable
 
   SubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -103,8 +99,7 @@ Resources:
             Fn::Sub: ${MyIP}/32
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-web
+          Value: WebSecurityGroup
 
   ECSNamespace:
     Type: AWS::ServiceDiscovery::HttpNamespace

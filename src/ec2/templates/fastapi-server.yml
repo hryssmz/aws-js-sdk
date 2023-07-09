@@ -16,7 +16,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName:
-        Fn::Sub: ${AWS::StackName}-EC2InstanceRole
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
       Description: Service role for EC2 instance
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -32,14 +32,16 @@ Resources:
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
       Roles:
         - Ref: EC2InstanceRole
 
-  WebSecurityGroup:
+  EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName:
-        Fn::Sub: ${AWS::StackName}-WebSecurityGroup
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
       GroupDescription: Web security group
       SecurityGroupIngress:
         - Description: HTTP inbound rule
@@ -54,8 +56,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-web
+          Value: EC2SecurityGroup
 
   EC2Instance:
     Type: AWS::EC2::Instance
@@ -71,15 +72,33 @@ Resources:
 
                 [Service]
                 Type=simple
-                User=ec2-user
-                WorkingDirectory=/home/ec2-user/myapp
+                User=root
+                WorkingDirectory=/myapp
                 ExecStart=python -m uvicorn main:app --host 0.0.0.0 --port 8000
                 Restart=always
                 RestartSec=3
+                StandardOutput=append:/var/log/myapp.log
+                StandardError=inherit
 
                 [Install]
                 WantedBy=multi-user.target
-            /home/ec2-user/myapp/main.py:
+            /etc/systemd/system/cfn-hup.service:
+              content:
+                Fn::Sub: |
+                  [Unit]
+                  Description=cfn-hup service
+                  After=network.target
+
+                  [Service]
+                  Type=simple
+                  User=root
+                  ExecStart=/opt/aws/bin/cfn-hup
+                  Restart=always
+                  RestartSec=3
+
+                  [Install]
+                  WantedBy=multi-user.target
+            /myapp/main.py:
               content: |
                 from datetime import datetime
                 from urllib.request import Request, urlopen
@@ -107,10 +126,25 @@ Resources:
                         "timestamp": datetime.utcnow().isoformat(),
                     }
                     return response
-            /home/ec2-user/myapp/requirements.txt:
+            /myapp/requirements.txt:
               content: |
                 fastapi
                 uvicorn[standard]
+            /etc/cfn/cfn-hup.conf:
+              content:
+                Fn::Sub: |
+                  [main]
+                  stack=${AWS::StackName}
+                  region=${AWS::Region}
+                  interval=1
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content:
+                Fn::Sub: |
+                  [cfn-auto-reloader-hook]
+                  triggers=post.update
+                  path=Resources.EC2Instance.Metadata.AWS::CloudFormation::Init
+                  action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
+                  runas=root
     CreationPolicy:
       ResourceSignal:
         Timeout: PT4M
@@ -126,33 +160,22 @@ Resources:
           - Ref: AWS::Region
           - AL2023
       SecurityGroups:
-        - Ref: WebSecurityGroup
+        - Ref: EC2SecurityGroup
       IamInstanceProfile:
         Ref: EC2InstanceProfile
       UserData:
         Fn::Base64:
           Fn::Sub: |
             #!/bin/sh
-            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance2 --region ${AWS::Region}
-            chown -R ec2-user:ec2-user /home/ec2-user/myapp
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
             dnf install -y python python3-pip
-            su -l ec2-user -c "pip install -r ~/myapp/requirements.txt"
+            pip install -r /myapp/requirements.txt
             systemctl enable myapp.service
             systemctl start myapp.service
+            systemctl enable cfn-hup.service
+            systemctl start cfn-hup.service
 
-            MAX_RETRY=20
-            RETRY_INTERVAL=5
-            HEALTH_CHECK_URL="http://localhost:8000"
-            for TRIED_COUNT in `seq $MAX_RETRY`; do
-                curl $HEALTH_CHECK_URL
-                if [ $? -eq "0" ]; then
-                    /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --region ${AWS::Region} --resource EC2Instance2
-                    break
-                else
-                    sleep $RETRY_INTERVAL
-                fi
-            done
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-i-al2023
+          Value: EC2Instance

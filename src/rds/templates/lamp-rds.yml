@@ -58,8 +58,7 @@ Resources:
           - Fn::GetAZs: ""
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-pvsn
+          Value: PrivateSubnet
 
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
@@ -80,8 +79,7 @@ Resources:
           - Fn::GetAZs: ""
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-pvsn
+          Value: PrivateSubnet2
 
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
@@ -93,8 +91,7 @@ Resources:
           - VPC
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-pvrtb
+          Value: PrivateRouteTable
 
   PrivateSubnetPrivateRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -132,14 +129,13 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-ec2
+          Value: EC2SecurityGroup
 
   EC2InstanceRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName:
-        Fn::Sub: ${AWS::StackName}-EC2InstanceRole
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
       Description: Service role for EC2 instance
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -155,6 +151,8 @@ Resources:
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
       Roles:
         - Ref: EC2InstanceRole
 
@@ -301,8 +299,7 @@ Resources:
         - ResourceType: launch-template
           Tags:
             - Key: Name
-              Value:
-                Fn::Sub: ${AWS::StackName}-lt
+              Value: EC2LaunchTemplate
       LaunchTemplateData:
         ImageId:
           Fn::FindInMap:
@@ -323,8 +320,7 @@ Resources:
           - ResourceType: instance
             Tags:
               - Key: Name
-                Value:
-                  Fn::Sub: ${AWS::StackName}-i
+                Value: EC2Instance
         UserData:
           Fn::Base64:
             Fn::Sub: |
@@ -370,8 +366,7 @@ Resources:
             Ref: EC2SecurityGroup
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-db
+          Value: DBSecurityGroup
 
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup

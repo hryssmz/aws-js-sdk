@@ -4,8 +4,8 @@ import { CloudFormationWrapper } from ".";
 import type { Parameter } from "@aws-sdk/client-cloudformation";
 import type { Action } from "../utils";
 
-const stackName = "process-stream";
-const templateDir = `${__dirname}/../../src/kinesis/templates`;
+const stackName = "metrics-filter";
+const templateDir = `${__dirname}/../../src/logs/templates`;
 const templatePath = `${templateDir}/${stackName}.yml`;
 const parameters: Parameter[] = [
   // {
@@ -13,7 +13,7 @@ const parameters: Parameter[] = [
   //   ParameterValue:
   //     "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCaHZxpACCnY3z7+0q03vK5Tai8+VPBorTMBqLptgNgKodmOnUayp7TizM9YBQWGdWQaiiRCKMWbj00loKdSupcBK6olYy/0W2dlo6ZS88s1hi22M1uDpv3wvQXAH7fVP0aHIP3H796s7XNWCbyGjGwSxhuvzSPB0x39q85JR1apHWcH4vnVNzIU3ubHR/nw69UZXASU1qnTl9+DfKC1yuQEJtg2TIiXAdoLStRfQ5T96sStWM5RYVmK0NJkAf9vQfEi03VLJPMZ0ztQOaKy2ebhD9ypZwzZVGuxLt/ilMq+/X4ohsJBjo2Bvnc+3dcBwah4l0FvsH/PpoBlIB6o7NM0dyjxAxH0ReJMEPw0EN4b/yCPR7vQtrl/ey2IeUPz2x364dhiDBIDn0sJJJ5tgqyTxaAS31KX1VwGkN1AQ66De9Mj3KZSNeTKnTedsnqOPLSxzHWb9aG05H6n4dPTSl6rbLcO9ZvDiPZlbo5/pZtsUpGIj2brHWZIZAiEeivPFk= hryssmz@tarte",
   // },
-  // { ParameterKey: "MyIP", ParameterValue: "116.64.133.211" },
+  // { ParameterKey: "SshCidrIp", ParameterValue: "86.48.13.208/32" },
 ];
 
 async function createStack() {

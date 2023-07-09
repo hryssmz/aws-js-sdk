@@ -1,4 +1,4 @@
-# ec2/templates/flow-logs-cwl.yml
+# vpc/templates/flow-logs-cwl.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Publish flow logs to CloudWatch Logs
 
@@ -109,6 +109,8 @@ Resources:
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
       Roles:
         - Ref: EC2InstanceRole
 
@@ -131,8 +133,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-ec2
+          Value: EC2SecurityGroup
 
   EC2Instance:
     Type: AWS::EC2::Instance
@@ -175,5 +176,4 @@ Resources:
             find /var/www -type f -exec chmod 0664 {} \;
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-i-ec2
+          Value: EC2Instance

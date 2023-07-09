@@ -15,16 +15,18 @@ Resources:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 172.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: CustomVPC
+          Value: VPC
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
-          Value: CustomInternetGateway
+          Value: InternetGateway
 
   InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -52,7 +54,7 @@ Resources:
         Ref: VPC
       Tags:
         - Key: Name
-          Value: CustomRouteTable
+          Value: RouteTable
 
   SubnetRouteTableTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -88,7 +90,7 @@ Resources:
             Fn::Sub: ${MyIP}/32
       Tags:
         - Key: Name
-          Value: CustomSecurityGroup
+          Value: WebSecurityGroup
 
   ECSTasksServiceRole:
     Type: AWS::IAM::Role
@@ -96,8 +98,6 @@ Resources:
       RoleName:
         Fn::Sub: ${AWS::StackName}-ECSTasksServiceRole
       Description: Service role for ECS tasks
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -106,6 +106,8 @@ Resources:
               Service: ecs-tasks.amazonaws.com
             Action:
               - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
   BatchJobExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -127,8 +129,6 @@ Resources:
       RoleName:
         Fn::Sub: ${AWS::StackName}-BatchJobRole
       Description: Service role for Batch jobs
-      ManagedPolicyArns:
-        - Ref: BatchJobExecutionPolicy
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -137,6 +137,8 @@ Resources:
               Service: ecs-tasks.amazonaws.com
             Action:
               - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: BatchJobExecutionPolicy
 
   BatchLogGroup:
     Type: AWS::Logs::LogGroup

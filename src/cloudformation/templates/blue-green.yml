@@ -56,8 +56,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-alb
+          Value: ALBSecurityGroup
 
   ALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -157,8 +156,7 @@ Resources:
         Ref: VPC
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-tgt
+          Value: TargetSecurityGroup
 
   ALBSecurityGroupEgress:
     Type: AWS::EC2::SecurityGroupEgress

@@ -1,0 +1,181 @@
+# waf/templates/first-webacl.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Getting started with AWS WAF
+
+Resources:
+  # REST API
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RestApi
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      StageName: dev
+      Cors:
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: My REST API
+          version: "1.0"
+        paths:
+          /:
+            get:
+              operationId: HelloWorld
+              tags:
+                - HelloWorld
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/HelloWorldResponse"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: "#/components/headers/Access-Control-Allow-Origin"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${HelloWorldFunction.Arn}/invocations
+                httpMethod: POST
+        components:
+          schemas:
+            HelloWorldResponse:
+              description: Response body for GET /
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+              example:
+                message: Hello World!
+          headers:
+            Access-Control-Allow-Origin:
+              description: Response header for CORS support
+              schema:
+                type: string
+                example: "*"
+
+  HelloWorldFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-HelloWorldFunctionRole-${AWS::Region}
+      Description: Service role for HelloWorldFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  HelloWorldFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-HelloWorldFunction
+      Description: HelloWorld function
+      Role:
+        Fn::GetAtt: HelloWorldFunctionRole.Arn
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /
+            RestApiId:
+              Ref: RestApi
+      InlineCode: |
+        exports.handler = async event => {
+          console.log(JSON.stringify(event, null, 2));
+          return {
+            statusCode: 200,
+            headers: { "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ message: "Hello World" }),
+          };
+        };
+
+  HelloWorldFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${HelloWorldFunction}
+
+  # WAF
+  WebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-WebACL
+      Description: My first Web ACL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName:
+          Fn::Sub: ${AWS::StackName}-WebACL
+      Scope: REGIONAL
+      Rules:
+        - Name:
+            Fn::Sub: ${AWS::StackName}-WebACL-Rule1
+          Priority: 0
+          Action:
+            Count: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName:
+              Fn::Sub: ${AWS::StackName}-WebACL-Rule1
+          Statement:
+            ByteMatchStatement:
+              FieldToMatch:
+                SingleHeader:
+                  Name: User-Agent
+              PositionalConstraint: EXACTLY
+              SearchString: MyAgent
+              TextTransformations:
+                - Priority: 0
+                  Type: NONE
+        - Name:
+            Fn::Sub: ${AWS::StackName}-WebACL-Rule2
+          Priority: 1
+          OverrideAction:
+            Count: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName:
+              Fn::Sub: ${AWS::StackName}-WebACL-Rule2
+          Statement:
+            ManagedRuleGroupStatement:
+              Name: AWSManagedRulesAnonymousIpList
+              VendorName: AWS
+
+  WebACLRestApiAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn:
+        Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis/${RestApi}/stages/${RestApi.Stage}
+      WebACLArn:
+        Fn::GetAtt: WebACL.Arn
+
+Outputs:
+  RestApiUrl:
+    Value:
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}

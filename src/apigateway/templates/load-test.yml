@@ -22,14 +22,6 @@ Parameters:
       - x86_64
     ConstraintDescription: must be either 'arm64' or 'x86_64'
 
-Globals:
-  Function:
-    Handler: index.handler
-    Runtime: python3.9
-    Timeout: 60
-    Architectures:
-      - Ref: Architecture
-
 Resources:
   # REST API
   ApiGatewayCloudWatchRole:
@@ -172,6 +164,10 @@ Resources:
       Description: HelloWorld function
       Role:
         Fn::GetAtt: LambdaBasicRole.Arn
+      Runtime: python3.9
+      Handler: index.handler
+      Architectures:
+        - Ref: Architecture
       Events:
         ApiEvent:
           Type: Api
@@ -205,6 +201,10 @@ Resources:
         Fn::Sub: ${AWS::StackName}-LoadTestFunction
       Description: LoadTest function
       Runtime: nodejs18.x
+      Handler: index.handler
+      Timeout: 60
+      Architectures:
+        - Ref: Architecture
       Environment:
         Variables:
           LOAD_TEST_URL:
@@ -255,67 +255,72 @@ Resources:
       LogGroupName:
         Fn::Sub: /aws/lambda/${LoadTestFunction}
 
-  # LoadTest2Function:
-  #   Type: AWS::Serverless::Function
-  #   Properties:
-  #     FunctionName:
-  #       Fn::Sub: ${AWS::StackName}-LoadTest2Function
-  #     Description: LoadTest2 function
-  #     Environment:
-  #       Variables:
-  #         LOAD_TEST_URL:
-  #           Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}/helloworld
-  #     Role:
-  #       Fn::GetAtt: LambdaBasicRole.Arn
-  #     InlineCode: |
-  #       import logging
-  #       import os
-  #       from threading import Thread
-  #       from typing import Any
-  #       from urllib.error import HTTPError
-  #       from urllib.request import urlopen
+  LoadTest2Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-LoadTest2Function
+      Description: LoadTest2 function
+      Role:
+        Fn::GetAtt: LambdaBasicRole.Arn
+      Runtime: python3.9
+      Handler: index.handler
+      Timeout: 60
+      Architectures:
+        - Ref: Architecture
+      Environment:
+        Variables:
+          LOAD_TEST_URL:
+            Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}/helloworld
+      InlineCode: |
+        import logging
+        import os
+        from threading import Thread
+        from typing import Any
+        from urllib.error import HTTPError
+        from urllib.request import urlopen
 
-  #       def send_request(
-  #           url: str, i: int, results: list[bool], logger: logging.Logger
-  #       ) -> None:
-  #           logger.info(f"Request {i} started")
-  #           try:
-  #               res = urlopen(url)
-  #           except HTTPError as err:
-  #               res = err
+        def send_request(
+            url: str, i: int, results: list[bool], logger: logging.Logger
+        ) -> None:
+            logger.info(f"Request {i} started")
+            try:
+                res = urlopen(url)
+            except HTTPError as err:
+                res = err
 
-  #           content = res.fp.read().decode("utf8")
-  #           logger.info(f"Request {i} returned ${res.code}: {content}")
-  #           results[i] = res.code < 400
+            content = res.fp.read().decode("utf8")
+            logger.info(f"Request {i} returned ${res.code}: {content}")
+            results[i] = res.code < 400
 
-  #       def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-  #           logger = logging.getLogger("context.function_name")
-  #           logger.setLevel(logging.INFO)
-  #           n = int(event["count"])
-  #           url = os.environ["LOAD_TEST_URL"]
-  #           threads: list[Thread] = []
-  #           results: list[bool] = [False for _ in range(n)]
+        def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+            logger = logging.getLogger("context.function_name")
+            logger.setLevel(logging.INFO)
+            n = int(event["count"])
+            url = os.environ["LOAD_TEST_URL"]
+            threads: list[Thread] = []
+            results: list[bool] = [False for _ in range(n)]
 
-  #           for i in range(n):
-  #               thread = Thread(target=send_request, args=(url, i, results, logger))
-  #               threads.append(thread)
-  #               thread.start()
+            for i in range(n):
+                thread = Thread(target=send_request, args=(url, i, results, logger))
+                threads.append(thread)
+                thread.start()
 
-  #           for i in range(n):
-  #               threads[i].join()
+            for i in range(n):
+                threads[i].join()
 
-  #           response = {
-  #               "nSuccess": len([b for b in results if b]),
-  #               "nFailed": len([b for b in results if not b]),
-  #           }
-  #           logger.info(f"Process finished: {response}")
-  #           return response
+            response = {
+                "nSuccess": len([b for b in results if b]),
+                "nFailed": len([b for b in results if not b]),
+            }
+            logger.info(f"Process finished: {response}")
+            return response
 
-  # LoadTest2FunctionLogGroup:
-  #   Type: AWS::Logs::LogGroup
-  #   Properties:
-  #     LogGroupName:
-  #       Fn::Sub: /aws/lambda/${LoadTest2Function}
+  LoadTest2FunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${LoadTest2Function}
 
 Outputs:
   RestApiUrl:

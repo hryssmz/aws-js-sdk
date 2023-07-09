@@ -13,6 +13,9 @@ Resources:
   LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-LambdaFunctionExecutionRole-${AWS::Region}
+      Description: Execution role for Lambda Function
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -21,7 +24,6 @@ Resources:
               Service: lambda.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Execution role for Lambda Function
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 

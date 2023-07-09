@@ -105,11 +105,11 @@ Resources:
         Fn::Sub: /aws/lambda/${DestinationBucketFunction}
 
   # Kinesis Stream source
-  Stream:
+  KinesisStream:
     Type: AWS::Kinesis::Stream
     Properties:
       Name:
-        Fn::Sub: ${AWS::StackName}-Stream
+        Fn::Sub: ${AWS::StackName}-KinesisStream
       ShardCount: 1
       StreamModeDetails:
         StreamMode: PROVISIONED
@@ -127,7 +127,7 @@ Resources:
             Action:
               - kinesis:PutRecords
             Resource:
-              - Fn::GetAtt: Stream.Arn
+              - Fn::GetAtt: KinesisStream.Arn
 
   ProducerFunctionRole:
     Type: AWS::IAM::Role
@@ -163,7 +163,7 @@ Resources:
       Environment:
         Variables:
           STREAM_NAME:
-            Ref: Stream
+            Ref: KinesisStream
       InlineCode: |
         const { KinesisClient, PutRecordsCommand } = require("@aws-sdk/client-kinesis");
 

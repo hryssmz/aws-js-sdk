@@ -6,6 +6,8 @@ Resources:
   StateMachineExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-StateMachineExecutionPolicy-${AWS::Region}
       Description: Execution policy for State Machine
       PolicyDocument:
         Version: "2012-10-17"
@@ -22,6 +24,9 @@ Resources:
   StateMachineExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-StateMachineExecutionRole-${AWS::Region}
+      Description: Execution role for State Machine
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -30,7 +35,6 @@ Resources:
               Service: states.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Execution role for State Machine
       ManagedPolicyArns:
         - Ref: StateMachineExecutionPolicy
 

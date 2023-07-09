@@ -1,0 +1,515 @@
+# vpc/templates/transit-gateway.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Getting started with transit gateways
+
+Parameters:
+  SshCidrIp:
+    Type: String
+    Description: SSH CIDR IP block
+    AllowedPattern: \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}
+    ConstraintDescription: must be a valid CIDR block of the form x.x.x.x/x
+
+  PublicKeyBody:
+    Type: String
+    Description: EC2 public key
+    AllowedPattern: ssh-rsa .*
+    ConstraintDescription: must be a valid RSA public key
+
+Mappings:
+  RegionProfile2AMI:
+    ap-northeast-1:
+      AL2023: ami-067871d950411e643
+
+  RegionProfile2Type:
+    ap-northeast-1:
+      AL2023: t2.micro
+
+  Region2Cidr:
+    ap-northeast-1:
+      VPC: 172.20.0.0/17
+      Subnet: 172.20.0.0/20
+      PrivateSubnet: 172.20.64.0/20
+      VPC2: 172.20.128.0/17
+      Subnet2: 172.20.128.0/20
+      PrivateSubnet2: 172.20.192.0/20
+      TransitGateway: 172.20.0.0/16
+
+Resources:
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Fn::FindInMap:
+          - Region2Cidr
+          - Ref: AWS::Region
+          - VPC
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::FindInMap:
+          - Region2Cidr
+          - Ref: AWS::Region
+          - Subnet
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: RouteTable
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::FindInMap:
+          - Region2Cidr
+          - Ref: AWS::Region
+          - PrivateSubnet
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable
+
+  PrivateSubnetPrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  # VPC2
+  VPC2:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Fn::FindInMap:
+          - Region2Cidr
+          - Ref: AWS::Region
+          - VPC2
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC2
+
+  Subnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::FindInMap:
+          - Region2Cidr
+          - Ref: AWS::Region
+          - Subnet2
+      VpcId:
+        Ref: VPC2
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet2
+
+  RouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC2
+      Tags:
+        - Key: Name
+          Value: RouteTable2
+
+  Subnet2RouteTable2Association:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet2
+      RouteTableId:
+        Ref: RouteTable2
+
+  InternetGateway2:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway2
+
+  InternetGateway2Attachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC2
+      InternetGatewayId:
+        Ref: InternetGateway2
+
+  InternetRoute2:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway2
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::FindInMap:
+          - Region2Cidr
+          - Ref: AWS::Region
+          - PrivateSubnet2
+      VpcId:
+        Ref: VPC2
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet2
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC2
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable2
+
+  PrivateSubnet2PrivateRouteTable2Association:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet2
+      RouteTableId:
+        Ref: PrivateRouteTable2
+
+  # Transit Gateway
+  TransitGateway:
+    Type: AWS::EC2::TransitGateway
+    Properties:
+      AmazonSideAsn: 64512
+      Description: Transit gateway
+      DnsSupport: enable
+      VpnEcmpSupport: enable
+      DefaultRouteTableAssociation: enable
+      DefaultRouteTablePropagation: enable
+      MulticastSupport: disable
+      AutoAcceptSharedAttachments: disable
+      Tags:
+        - Key: Name
+          Value: TransitGateway
+
+  PrivateSubnetTgwAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      TransitGatewayId:
+        Ref: TransitGateway
+      VpcId:
+        Ref: VPC
+      SubnetIds:
+        - Ref: PrivateSubnet
+      Options:
+        DnsSupport: enable
+        Ipv6Support: disable
+        ApplianceModeSupport: disable
+      Tags:
+        - Key: Name
+          Value: PrivateSubnetTgwAttachment
+
+  PrivateSubnet2TgwAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      TransitGatewayId:
+        Ref: TransitGateway
+      VpcId:
+        Ref: VPC2
+      SubnetIds:
+        - Ref: PrivateSubnet2
+      Options:
+        DnsSupport: enable
+        Ipv6Support: disable
+        ApplianceModeSupport: disable
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet2TgwAttachment
+
+  PrivateSubnetTgwRoute:
+    Type: AWS::EC2::Route
+    DependsOn: PrivateSubnetTgwAttachment
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable
+      DestinationCidrBlock:
+        Fn::FindInMap:
+          - Region2Cidr
+          - Ref: AWS::Region
+          - TransitGateway
+      TransitGatewayId:
+        Ref: TransitGateway
+
+  PrivateSubnet2TgwRoute:
+    Type: AWS::EC2::Route
+    DependsOn: PrivateSubnet2TgwAttachment
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable2
+      DestinationCidrBlock:
+        Fn::FindInMap:
+          - Region2Cidr
+          - Ref: AWS::Region
+          - TransitGateway
+      TransitGatewayId:
+        Ref: TransitGateway
+
+  # EC2
+  SSHKeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName:
+        Fn::Sub: ${AWS::StackName}-SSHKeyPair
+      PublicKeyMaterial:
+        Ref: PublicKeyBody
+
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-BastionSecurityGroup
+      GroupDescription: Bastion instances security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:
+            Ref: SshCidrIp
+      Tags:
+        - Key: Name
+          Value: BastionSecurityGroup
+
+  PrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-PrivateSecurityGroup
+      GroupDescription: Private instances security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:
+            Fn::FindInMap:
+              - Region2Cidr
+              - Ref: AWS::Region
+              - TransitGateway
+      Tags:
+        - Key: Name
+          Value: PrivateSecurityGroup
+
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+          - RegionProfile2AMI
+          - Ref: AWS::Region
+          - AL2023
+      InstanceType:
+        Fn::FindInMap:
+          - RegionProfile2Type
+          - Ref: AWS::Region
+          - AL2023
+      KeyName:
+        Ref: SSHKeyPair
+      SecurityGroupIds:
+        - Ref: BastionSecurityGroup
+      SubnetId:
+        Ref: Subnet
+      Tags:
+        - Key: Name
+          Value: BastionInstance
+
+  PrivateInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+          - RegionProfile2AMI
+          - Ref: AWS::Region
+          - AL2023
+      InstanceType:
+        Fn::FindInMap:
+          - RegionProfile2Type
+          - Ref: AWS::Region
+          - AL2023
+      KeyName:
+        Ref: SSHKeyPair
+      SecurityGroupIds:
+        - Ref: PrivateSecurityGroup
+      SubnetId:
+        Ref: PrivateSubnet
+      Tags:
+        - Key: Name
+          Value: PrivateInstance
+
+  BastionSecurityGroup2:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-BastionSecurityGroup2
+      GroupDescription: Bastion instances security group 2
+      VpcId:
+        Ref: VPC2
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:
+            Ref: SshCidrIp
+      Tags:
+        - Key: Name
+          Value: BastionSecurityGroup2
+
+  PrivateSecurityGroup2:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-PrivateSecurityGroup
+      GroupDescription: Private instances security group 2
+      VpcId:
+        Ref: VPC2
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:
+            Fn::FindInMap:
+              - Region2Cidr
+              - Ref: AWS::Region
+              - TransitGateway
+      Tags:
+        - Key: Name
+          Value: PrivateSecurityGroup2
+
+  BastionInstance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+          - RegionProfile2AMI
+          - Ref: AWS::Region
+          - AL2023
+      InstanceType:
+        Fn::FindInMap:
+          - RegionProfile2Type
+          - Ref: AWS::Region
+          - AL2023
+      KeyName:
+        Ref: SSHKeyPair
+      SecurityGroupIds:
+        - Ref: BastionSecurityGroup2
+      SubnetId:
+        Ref: Subnet2
+      Tags:
+        - Key: Name
+          Value: BastionInstance2
+
+  PrivateInstance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+          - RegionProfile2AMI
+          - Ref: AWS::Region
+          - AL2023
+      InstanceType:
+        Fn::FindInMap:
+          - RegionProfile2Type
+          - Ref: AWS::Region
+          - AL2023
+      KeyName:
+        Ref: SSHKeyPair
+      SecurityGroupIds:
+        - Ref: PrivateSecurityGroup2
+      SubnetId:
+        Ref: PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: PrivateInstance2

@@ -9,14 +9,6 @@ Parameters:
     Description: AWS Config name
     Default: config-topic
 
-Globals:
-  Function:
-    Handler: index.handler
-    Runtime: nodejs18.x
-    Timeout: 10
-    Architectures:
-      - arm64
-
 Resources:
   SubscriberFunction:
     Type: AWS::Serverless::Function
@@ -24,6 +16,10 @@ Resources:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-SubscriberFunction
       Description: Subscriber function for the topic
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
       Events:
         SNSEvent:
           Type: SNS

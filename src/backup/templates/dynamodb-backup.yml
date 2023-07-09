@@ -1,0 +1,91 @@
+# backup/templates/dynamodb-backup.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: DynamoDB backup
+
+Resources:
+  SimpleTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName:
+        Fn::Sub: ${AWS::StackName}-SimpleTable
+      PrimaryKey:
+        Name: Id
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  BackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName:
+        Fn::Sub: ${AWS::StackName}-BackupVault
+
+  BackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName:
+          Fn::Sub: ${AWS::StackName}-BackupPlan
+        BackupPlanRule:
+          - RuleName: Rule1
+            TargetBackupVault:
+              Ref: BackupVault
+            ScheduleExpression: cron(0 0 * * ? *)
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 120
+            Lifecycle:
+              MoveToColdStorageAfterDays: 30
+              DeleteAfterDays: 120
+
+  BackupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-BackupRole
+      Description: Service role for backup selection
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+
+  BackupSelection:
+    Type: AWS::Backup::BackupSelection
+    Properties:
+      BackupPlanId:
+        Ref: BackupPlan
+      BackupSelection:
+        SelectionName:
+          Fn::Sub: ${AWS::StackName}-BackupSelection
+        Resources:
+          - Fn::GetAtt: SimpleTable.Arn
+        IamRoleArn:
+          Fn::GetAtt: BackupRole.Arn
+
+# Outputs:
+#   SimpleTableArn:
+#     Description: SimpleTable ARN
+#     Value:
+#       Fn::GetAtt: SimpleTable.Arn
+#     Export:
+#       Name:
+#         Fn::Sub: ${AWS::StackName}-SimpleTableArn

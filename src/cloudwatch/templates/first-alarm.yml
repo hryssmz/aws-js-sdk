@@ -25,7 +25,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName:
-        Fn::Sub: ${AWS::StackName}-AlarmActionFunctionRole
+        Fn::Sub: ${AWS::StackName}-AlarmActionFunctionRole-${AWS::Region}
       Description: Service role for AlarmActionFunction
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -87,7 +87,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName:
-        Fn::Sub: ${AWS::StackName}-EC2InstanceRole
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
       Description: Service role for EC2 instance
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -103,6 +103,8 @@ Resources:
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
       Roles:
         - Ref: EC2InstanceRole
 
@@ -119,8 +121,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-web
+          Value: WebSecurityGroup
 
   EC2Instance:
     Type: AWS::EC2::Instance
@@ -158,8 +159,7 @@ Resources:
             find /var/www -type f -exec chmod 0664 {} \;
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-i-al2013
+          Value: EC2Instance
 
   # CloudWatch Alarm
   CPUAlarmHigh:

@@ -87,8 +87,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-web
+          Value: WebSecurityGroup
 
   EC2LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
@@ -110,8 +109,7 @@ Resources:
         - ResourceType: launch-template
           Tags:
             - Key: Name
-              Value:
-                Fn::Sub: ${AWS::StackName}-lt
+              Value: EC2LaunchTemplate
       LaunchTemplateData:
         ImageId:
           Fn::FindInMap:
@@ -132,8 +130,7 @@ Resources:
           - ResourceType: instance
             Tags:
               - Key: Name
-                Value:
-                  Fn::Sub: ${AWS::StackName}-i
+                Value: EC2Instance
         UserData:
           Fn::Base64:
             Fn::Sub: |

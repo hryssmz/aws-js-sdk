@@ -5,12 +5,6 @@ Description: Subscription filters with AWS Lambda
 
 Resources:
   # CloudWatch Logs
-  TrailLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/cloudtrail/${AWS::StackName}-TrailLogGroup
-
   SubscriptionFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -64,6 +58,12 @@ Resources:
         Fn::Sub: /aws/lambda/${SubscriptionFunction}
 
   # CloudTrail
+  TrailLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/cloudtrail/${AWS::StackName}-TrailLogGroup
+
   TrailPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:

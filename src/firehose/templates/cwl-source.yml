@@ -22,10 +22,10 @@ Mappings:
       PrivateSubnet2Cidr: 172.31.144.0/20
 
 Resources:
-  # S3
+  # S3 destination
   DestinationBucket:
     Type: AWS::S3::Bucket
-    DependsOn: DestinationBucketPermission
+    DependsOn: DestinationFunctionPermission
     Properties:
       BucketName:
         Fn::Sub: ${AWS::StackName}-destinationbucket-${AWS::Region}
@@ -38,14 +38,19 @@ Resources:
         LambdaConfigurations:
           - Event: s3:ObjectCreated:*
             Function:
-              Fn::GetAtt: DestinationBucketFunction.Arn
+              Fn::GetAtt: DestinationFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: DeliveryStream/
 
-  DestinationBucketFunctionPolicy:
+  DestinationFunctionPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
       ManagedPolicyName:
-        Fn::Sub: ${AWS::StackName}-DestinationBucketFunctionPolicy-${AWS::Region}
-      Description: Policy for DestinationBucketFunction
+        Fn::Sub: ${AWS::StackName}-DestinationFunctionPolicy-${AWS::Region}
+      Description: Policy for DestinationFunction
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -55,12 +60,12 @@ Resources:
             Resource:
               - Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}/*
 
-  DestinationBucketFunctionRole:
+  DestinationFunctionRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName:
-        Fn::Sub: ${AWS::StackName}-DestinationBucketFunctionRole-${AWS::Region}
-      Description: Service role for DestinationBucketFunction
+        Fn::Sub: ${AWS::StackName}-DestinationFunctionRole-${AWS::Region}
+      Description: Service role for DestinationFunction
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -71,16 +76,16 @@ Resources:
               - sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - Ref: DestinationBucketFunctionPolicy
+        - Ref: DestinationFunctionPolicy
 
-  DestinationBucketFunction:
+  DestinationFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName:
-        Fn::Sub: ${AWS::StackName}-DestinationBucketFunction
+        Fn::Sub: ${AWS::StackName}-DestinationFunction
       Description: Monitor function for DestinationBucket
       Role:
-        Fn::GetAtt: DestinationBucketFunctionRole.Arn
+        Fn::GetAtt: DestinationFunctionRole.Arn
       Handler: index.handler
       Runtime: nodejs18.x
       Timeout: 10
@@ -104,23 +109,134 @@ Resources:
           return "Finished";
         };
 
-  DestinationBucketPermission:
+  DestinationFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
       FunctionName:
-        Ref: DestinationBucketFunction
+        Ref: DestinationFunction
       Principal: s3.amazonaws.com
       SourceArn:
         Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}
       SourceAccount:
         Ref: AWS::AccountId
 
-  DestinationBucketFunctionLogGroup:
+  DestinationFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName:
-        Fn::Sub: /aws/lambda/${DestinationBucketFunction}
+        Fn::Sub: /aws/lambda/${DestinationFunction}
+
+  PartitionFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-PartitionFunction-${AWS::Region}
+      Description: Service role for PartitionFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  PartitionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-PartitionFunction
+      Description: Partition function
+      Role:
+        Fn::GetAtt: PartitionFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Timeout: 180
+      Architectures:
+        - arm64
+      InlineCode: |
+        const zlib = require("zlib");
+
+        exports.handler = async event => {
+          const records = event.records.map(record => {
+            const { recordId } = record;
+            const obj = JSON.parse(zlib.gunzipSync(Buffer.from(record.data, "base64")));
+            const { messageType, logEvents } = obj;
+
+            if (messageType === "CONTROL_MESSAGE") {
+              return { result: "Dropped", recordId };
+            } else if (messageType === "DATA_MESSAGE") {
+              const joinedData = logEvents
+                .map(({ message }) => `${message}\n`)
+                .join("");
+              const data = Buffer.from(joinedData, "utf-8").toString("base64");
+              return { result: "Ok", recordId, data };
+            } else {
+              return { result: "ProcessingFailed", recordId };
+            }
+          });
+
+          return { records };
+        };
+
+  PartitionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${PartitionFunction}
+
+  # CloudWatch Logs
+  SubscriptionFilterPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-SubscriptionFilterPolicy-${AWS::Region}
+      Description: Policy for subscription filter
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - firehose:PutRecord
+            Resource:
+              - Fn::GetAtt: DeliveryStream.Arn
+
+  SubscriptionFilterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SubscriptionFilterRole-${AWS::Region}
+      Description: Service role for subscription filter
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: logs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringLike:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*
+      ManagedPolicyArns:
+        - Ref: SubscriptionFilterPolicy
+
+  SubscriptionFilter:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      FilterName:
+        Fn::Sub: ${AWS::StackName}-SubscriptionFilter
+      LogGroupName:
+        Ref: FlowLogsLogGroup
+      DestinationArn:
+        Fn::GetAtt: DeliveryStream.Arn
+      RoleArn:
+        Fn::GetAtt: SubscriptionFilterRole.Arn
+      FilterPattern: "[protocol = 6, srcaddr, srcport, dstaddr, dstport, start, end, action, logStatus]"
 
   # VPC
   FlowLogsLogGroup:
@@ -210,6 +326,8 @@ Resources:
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
       Roles:
         - Ref: EC2InstanceRole
 
@@ -232,8 +350,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-ec2
+          Value: EC2SecurityGroup
 
   EC2Instance:
     Type: AWS::EC2::Instance
@@ -276,8 +393,7 @@ Resources:
             find /var/www -type f -exec chmod 0664 {} \;
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-i-ec2
+          Value: EC2Instance
 
   # Kinesis Data Firehose
   FirehoseLogGroup:
@@ -319,6 +435,12 @@ Resources:
               - logs:PutLogEvents
             Resource:
               - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${FirehoseLogGroup}:log-stream:${DeliveryStreamLogStream}
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+              - lambda:GetFunctionConfiguration
+            Resource:
+              - Fn::GetAtt: PartitionFunction.Arn
 
   DeliveryStreamS3Role:
     Type: AWS::IAM::Role
@@ -326,8 +448,6 @@ Resources:
       RoleName:
         Fn::Sub: ${AWS::StackName}-DeliveryStreamS3Role-${AWS::Region}
       Description: Service role for Kinesis Firehose Delivery Stream S3 destination
-      ManagedPolicyArns:
-        - Ref: DeliveryStreamS3Policy
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -336,6 +456,8 @@ Resources:
               Service: firehose.amazonaws.com
             Action:
               - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: DeliveryStreamS3Policy
 
   DeliveryStream:
     Type: AWS::KinesisFirehose::DeliveryStream
@@ -343,7 +465,7 @@ Resources:
       DeliveryStreamName:
         Fn::Sub: ${AWS::StackName}-DeliveryStream
       DeliveryStreamType: DirectPut
-      S3DestinationConfiguration:
+      ExtendedS3DestinationConfiguration:
         BucketARN:
           Fn::GetAtt: DestinationBucket.Arn
         Prefix: DeliveryStream/
@@ -362,3 +484,11 @@ Resources:
             Ref: FirehoseLogGroup
           LogStreamName:
             Ref: DeliveryStreamLogStream
+        ProcessingConfiguration:
+          Enabled: true
+          Processors:
+            - Type: Lambda
+              Parameters:
+                - ParameterName: LambdaArn
+                  ParameterValue:
+                    Fn::GetAtt: PartitionFunction.Arn

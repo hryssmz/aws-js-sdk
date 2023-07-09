@@ -35,17 +35,18 @@ Resources:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 172.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-vpc
+          Value: VPC
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
-          Value: CustomInternetGateway
+          Value: InternetGateway
 
   InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -64,8 +65,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sn
+          Value: Subnet
 
   RouteTable:
     Type: AWS::EC2::RouteTable
@@ -74,8 +74,7 @@ Resources:
         Ref: VPC
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-rtb
+          Value: RouteTable
 
   SubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -111,17 +110,14 @@ Resources:
             Fn::Sub: ${MyIP}/32
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg
+          Value: WebSecurityGroup
 
   EC2InstanceRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName:
-        Fn::Sub: ${AWS::StackName}-EC2InstanceRole
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
       Description: Service role for EC2 instance
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -130,10 +126,14 @@ Resources:
               Service: ec2.amazonaws.com
             Action:
               - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
       Roles:
         - Ref: EC2InstanceRole
 
@@ -158,8 +158,7 @@ Resources:
         Ref: EC2InstanceProfile
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-i
+          Value: Instance
 
   EIP:
     Type: AWS::EC2::EIP
@@ -170,5 +169,4 @@ Resources:
         Ref: Instance
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-eip
+          Value: EIP

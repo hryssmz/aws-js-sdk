@@ -3,14 +3,6 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: My first topic
 
-Globals:
-  Function:
-    Handler: index.handler
-    Runtime: nodejs18.x
-    Timeout: 10
-    Architectures:
-      - arm64
-
 Resources:
   Topic:
     Type: AWS::SNS::Topic
@@ -24,6 +16,10 @@ Resources:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-SenderFunction
       Description: Sender function for the topic
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
       Environment:
         Variables:
           TOPIC_ARN:
@@ -68,6 +64,10 @@ Resources:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-ReceiverFunction
       Description: Receiver function for the topic
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
       Events:
         SNSEvent:
           Type: SNS

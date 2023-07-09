@@ -6,6 +6,8 @@ Resources:
   LambdaDataSourcePolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-LambdaDataSourcePolicy-${AWS::Region}
       Description: Policy for data source to invoke Lambda Functions
       PolicyDocument:
         Version: "2012-10-17"
@@ -19,6 +21,9 @@ Resources:
   LambdaFunctionExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-LambdaFunctionExecutionRole-${AWS::Region}
+      Description: Execution role for Lambda Function
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -27,13 +32,15 @@ Resources:
               Service: lambda.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Execution role for Lambda Function
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
   GraphQLApiLoggingRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-GraphQLApiLoggingRole-${AWS::Region}
+      Description: Logging role for GraphQl API
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -42,13 +49,15 @@ Resources:
               Service: appsync.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Logging role for GraphQl API
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
 
   LambdaDataSourceRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-LambdaDataSourceRole-${AWS::Region}
+      Description: Role for data source to invoke Lambda Functions
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -57,7 +66,6 @@ Resources:
               Service: appsync.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Role for data source to invoke Lambda Functions
       ManagedPolicyArns:
         - Ref: LambdaDataSourcePolicy
 

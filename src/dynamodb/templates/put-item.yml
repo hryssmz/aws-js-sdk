@@ -22,14 +22,6 @@ Parameters:
       - x86_64
     ConstraintDescription: must be either 'arm64' or 'x86_64'
 
-Globals:
-  Function:
-    Handler: index.handler
-    Runtime: python3.9
-    Timeout: 60
-    Architectures:
-      - Ref: Architecture
-
 Resources:
   DateTable:
     Type: AWS::Serverless::SimpleTable
@@ -148,6 +140,10 @@ Resources:
       Description: Create todo function
       Role:
         Fn::GetAtt: PostDateFunctionRole.Arn
+      Handler: index.handler
+      Runtime: python3.9
+      Architectures:
+        - Ref: Architecture
       Environment:
         Variables:
           DATE_TABLE:

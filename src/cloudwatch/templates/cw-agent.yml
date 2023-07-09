@@ -12,6 +12,7 @@ Mappings:
       AL2023: t2.micro
 
 Resources:
+  # EC2 instances
   EC2InstanceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -29,7 +30,6 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
         - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
-        - arn:aws:iam::aws:policy/CloudWatchAgentAdminPolicy
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -39,12 +39,12 @@ Resources:
       Roles:
         - Ref: EC2InstanceRole
 
-  WebSecurityGroup:
+  EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName:
-        Fn::Sub: ${AWS::StackName}-WebSecurityGroup
-      GroupDescription: Web security group
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 security group
       SecurityGroupIngress:
         - Description: HTTP inbound rule
           IpProtocol: tcp
@@ -53,47 +53,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-web
-
-  EC2LaunchTemplate:
-    Type: AWS::EC2::LaunchTemplate
-    Properties:
-      LaunchTemplateName:
-        Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
-      VersionDescription: Launch template for EC2 instances
-      TagSpecifications:
-        - ResourceType: launch-template
-          Tags:
-            - Key: Name
-              Value:
-                Fn::Sub: ${AWS::StackName}-lt
-      LaunchTemplateData:
-        ImageId:
-          Fn::FindInMap:
-            - RegionProfile2AMI
-            - Ref: AWS::Region
-            - AL2023
-        InstanceType:
-          Fn::FindInMap:
-            - RegionProfile2Type
-            - Ref: AWS::Region
-            - AL2023
-        IamInstanceProfile:
-          Name:
-            Ref: EC2InstanceProfile
-        SecurityGroups:
-          - Ref: WebSecurityGroup
-        TagSpecifications:
-          - ResourceType: instance
-            Tags:
-              - Key: Name
-                Value:
-                  Fn::Sub: ${AWS::StackName}-i
-        UserData:
-          Fn::Base64:
-            Fn::Sub: |
-              #!/bin/sh
+          Value: EC2SecurityGroup
 
   InstallCloudWatchAgentAssociation:
     Type: AWS::SSM::Association
@@ -110,7 +70,172 @@ Resources:
       Targets:
         - Key: tag:Name
           Values:
-            - Fn::Sub: ${AWS::StackName}-i
+            - EC2Instance
+
+  StartCloudWatchAgentAssociation:
+    Type: AWS::SSM::Association
+    Properties:
+      AssociationName:
+        Fn::Sub: ${AWS::StackName}-StartCloudWatchAgentAssociation
+      Name: AmazonCloudWatch-ManageAgent
+      Parameters:
+        action:
+          - configure
+        optionalConfigurationSource:
+          - ssm
+        optionalConfigurationLocation:
+          - Fn::Sub: /AmazonCloudWatch-${AWS::StackName}/amazon-cloudwatch-agent.json
+        optionalRestart:
+          - "yes"
+      ApplyOnlyAtCronInterval: true
+      ScheduleExpression: cron(0 0 ? * MON#1 *)
+      Targets:
+        - Key: tag:Name
+          Values:
+            - EC2Instance
+
+  EC2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /etc/systemd/system/myapp.service:
+              content: |
+                [Unit]
+                Description=MyApp Service
+                After=network.target
+
+                [Service]
+                Type=simple
+                User=root
+                WorkingDirectory=/myapp
+                ExecStart=python -m uvicorn main:app --host 0.0.0.0 --port 8000
+                Restart=always
+                RestartSec=3
+                StandardOutput=append:/var/log/myapp.log
+                StandardError=inherit
+
+                [Install]
+                WantedBy=multi-user.target
+            /etc/systemd/system/cfn-hup.service:
+              content:
+                Fn::Sub: |
+                  [Unit]
+                  Description=cfn-hup service
+                  After=network.target
+
+                  [Service]
+                  Type=simple
+                  User=root
+                  ExecStart=/opt/aws/bin/cfn-hup
+                  Restart=always
+                  RestartSec=3
+
+                  [Install]
+                  WantedBy=multi-user.target
+            /myapp/main.py:
+              content: |
+                from datetime import datetime
+                from urllib.request import Request, urlopen
+
+                from fastapi import FastAPI
+
+                app = FastAPI()
+
+
+                @app.get("/")
+                async def root() -> dict[str, str]:
+                    req = Request(
+                        "http://169.254.169.254/latest/api/token",
+                        headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
+                        method="PUT",
+                    )
+                    token: str = ""
+                    with urlopen(req) as res:
+                        token = res.read().decode("utf8")
+
+                    req = Request(
+                        "http://169.254.169.254/latest/meta-data/instance-id",
+                        headers={"X-aws-ec2-metadata-token": token},
+                    )
+                    instance_id: str = ""
+                    with urlopen(req) as res:
+                        instance_id = res.read().decode("utf8")
+
+                    req = Request("http://ifconfig.me")
+                    global_ip: str = ""
+                    with urlopen(req) as res:
+                        global_ip = res.read().decode("utf8")
+
+                    response = {
+                        "instance_id": instance_id,
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "global_ip": global_ip,
+                    }
+                    return response
+            /myapp/requirements.txt:
+              content: |
+                fastapi
+                uvicorn[standard]
+            /etc/cfn/cfn-hup.conf:
+              content:
+                Fn::Sub: |
+                  [main]
+                  stack=${AWS::StackName}
+                  region=${AWS::Region}
+                  interval=1
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content:
+                Fn::Sub: |
+                  [cfn-auto-reloader-hook]
+                  triggers=post.update
+                  path=Resources.EC2LaunchTemplate.Metadata.AWS::CloudFormation::Init
+                  action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
+                  runas=root
+    Properties:
+      LaunchTemplateName:
+        Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
+      VersionDescription: Launch template for EC2 instances
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - Key: Name
+              Value: EC2LaunchTemplate
+      LaunchTemplateData:
+        ImageId:
+          Fn::FindInMap:
+            - RegionProfile2AMI
+            - Ref: AWS::Region
+            - AL2023
+        InstanceType:
+          Fn::FindInMap:
+            - RegionProfile2Type
+            - Ref: AWS::Region
+            - AL2023
+        IamInstanceProfile:
+          Name:
+            Ref: EC2InstanceProfile
+        SecurityGroups:
+          - Ref: EC2SecurityGroup
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: EC2Instance
+        UserData:
+          Fn::Base64:
+            Fn::Sub: |
+              #!/bin/sh
+              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
+              dnf install -y python python3-pip
+              pip install -r /myapp/requirements.txt
+              systemctl enable myapp.service
+              systemctl start myapp.service
+              systemctl enable cfn-hup.service
+              systemctl start cfn-hup.service
+
+              /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
 
   EC2Instance:
     Type: AWS::EC2::Instance
@@ -120,3 +245,315 @@ Resources:
           Ref: EC2LaunchTemplate
         Version:
           Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
+
+  CloudWatchAgentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/ec2/${AWS::StackName}-CloudWatchAgentLogGroup
+
+  # Admin instance
+  AdminInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-AdminInstanceRole-${AWS::Region}
+      Description: Service role for Admin instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentAdminPolicy
+
+  AdminInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-AdminInstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: AdminInstanceRole
+
+  AdminSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-AdminSecurityGroup
+      GroupDescription: Admin security group
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: AdminSecurityGroup
+
+  AdminLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /etc/systemd/system/cfn-hup.service:
+              content:
+                Fn::Sub: |
+                  [Unit]
+                  Description=cfn-hup service
+                  After=network.target
+
+                  [Service]
+                  Type=simple
+                  User=root
+                  ExecStart=/opt/aws/bin/cfn-hup
+                  Restart=always
+                  RestartSec=3
+
+                  [Install]
+                  WantedBy=multi-user.target
+            /etc/cfn/cfn-hup.conf:
+              content:
+                Fn::Sub: |
+                  [main]
+                  stack=${AWS::StackName}
+                  region=${AWS::Region}
+                  interval=1
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content:
+                Fn::Sub: |
+                  [cfn-auto-reloader-hook]
+                  triggers=post.update
+                  path=Resources.AdminLaunchTemplate.Metadata.AWS::CloudFormation::Init
+                  action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource AdminLaunchTemplate --region ${AWS::Region}
+                  runas=root
+            /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json:
+              content:
+                Fn::Sub: |
+                  {
+                    "agent": {
+                      "metrics_collection_interval": 60,
+                      "logfile": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log",
+                      "debug": true
+                    },
+                    "metrics": {
+                      "namespace": "${AWS::StackName}",
+                      "metrics_collected": {
+                        "ethtool": {},
+                        "cpu": {
+                          "resources": ["*"],
+                          "measurement": [
+                            "time_active",
+                            "time_guest",
+                            "time_guest_nice",
+                            "time_idle",
+                            "time_iowait",
+                            "time_irq",
+                            "time_nice",
+                            "time_softirq",
+                            "time_steal",
+                            "time_system",
+                            "time_user",
+                            "usage_active",
+                            "usage_guest",
+                            "usage_guest_nice",
+                            "usage_idle",
+                            "usage_iowait",
+                            "usage_irq",
+                            "usage_nice",
+                            "usage_softirq",
+                            "usage_steal",
+                            "usage_system",
+                            "usage_user"
+                          ]
+                        },
+                        "disk": {
+                          "resources": ["*"],
+                          "measurement": [
+                            "free",
+                            "total",
+                            "used",
+                            "used_percent",
+                            "inodes_free",
+                            "inodes_used",
+                            "inodes_total"
+                          ]
+                        },
+                        "diskio": {
+                          "resources": ["*"],
+                          "measurement": [
+                            "reads",
+                            "writes",
+                            "read_bytes",
+                            "write_bytes",
+                            "read_time",
+                            "write_time",
+                            "io_time",
+                            "iops_in_progress"
+                          ]
+                        },
+                        "swap": {
+                          "measurement": [
+                            "free",
+                            "used",
+                            "used_percent"
+                          ]
+                        },
+                        "mem": {
+                          "measurement": [
+                            "active",
+                            "available",
+                            "available_percent",
+                            "buffered",
+                            "cached",
+                            "free",
+                            "inactive",
+                            "total",
+                            "used",
+                            "used_percent"
+                          ]
+                        },
+                        "net": {
+                          "resources": ["*"],
+                          "measurement": [
+                            "bytes_sent",
+                            "bytes_recv",
+                            "drop_in",
+                            "drop_out",
+                            "err_in",
+                            "err_out",
+                            "packets_sent",
+                            "packets_recv"
+                          ]
+                        },
+                        "netstat": {
+                          "measurement": [
+                            "tcp_close",
+                            "tcp_close_wait",
+                            "tcp_closing",
+                            "tcp_established",
+                            "tcp_fin_wait1",
+                            "tcp_fin_wait2",
+                            "tcp_last_ack",
+                            "tcp_listen",
+                            "tcp_none",
+                            "tcp_syn_sent",
+                            "tcp_syn_recv",
+                            "tcp_time_wait",
+                            "udp_socket"
+                          ]
+                        },
+                        "processes": {
+                          "measurement": [
+                            "blocked",
+                            "dead",
+                            "idle",
+                            "paging",
+                            "running",
+                            "sleeping",
+                            "stopped",
+                            "total",
+                            "total_threads",
+                            "wait",
+                            "zombies"
+                          ]
+                        },
+                        "procstat": {},
+                        "statsd": {}
+                      },
+                      "append_dimensions": {
+                        "ImageId": "${!aws:ImageId}",
+                        "InstanceId": "${!aws:InstanceId}",
+                        "InstanceType": "${!aws:InstanceType}"
+                      }
+                    },
+                    "logs": {
+                      "logs_collected": {
+                        "files": {
+                          "collect_list": [
+                            {
+                              "file_path": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log",
+                              "log_group_name": "${CloudWatchAgentLogGroup}",
+                              "log_stream_name": "{instance_id}-amazon-cloudwatch-agent.log"
+                            },
+                            {
+                              "file_path": "/var/log/cfn-hup.log",
+                              "log_group_name": "${CloudWatchAgentLogGroup}",
+                              "log_stream_name": "{instance_id}-cfn-hup.log"
+                            },
+                            {
+                              "file_path": "/var/log/myapp.log",
+                              "log_group_name": "${CloudWatchAgentLogGroup}",
+                              "log_stream_name": "{instance_id}-myapp.log"
+                            }
+                          ]
+                        }
+                      },
+                      "log_stream_name": "default"
+                    }
+                  }
+            /usr/local/bin/apply-cloudwatch-agent-config.sh:
+              mode: "000755"
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+            /usr/local/bin/upload-cloudwatch-agent-config.sh:
+              mode: "000755"
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  aws ssm put-parameter --name /AmazonCloudWatch-${AWS::StackName}/amazon-cloudwatch-agent.json --type String --value file:///opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json --overwrite
+    Properties:
+      LaunchTemplateName:
+        Fn::Sub: ${AWS::StackName}-AdminLaunchTemplate
+      VersionDescription: Launch template for Admin instances
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - Key: Name
+              Value: AdminLaunchTemplate
+      LaunchTemplateData:
+        ImageId:
+          Fn::FindInMap:
+            - RegionProfile2AMI
+            - Ref: AWS::Region
+            - AL2023
+        InstanceType:
+          Fn::FindInMap:
+            - RegionProfile2Type
+            - Ref: AWS::Region
+            - AL2023
+        IamInstanceProfile:
+          Name:
+            Ref: AdminInstanceProfile
+        SecurityGroups:
+          - Ref: AdminSecurityGroup
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: AdminInstance
+        UserData:
+          Fn::Base64:
+            Fn::Sub: |
+              #!/bin/sh
+              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource AdminLaunchTemplate --region ${AWS::Region}
+              systemctl enable cfn-hup.service
+              systemctl start cfn-hup.service
+
+              /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AdminLaunchTemplate --region ${AWS::Region}
+
+  AdminInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: AdminLaunchTemplate
+        Version:
+          Fn::GetAtt: AdminLaunchTemplate.LatestVersionNumber

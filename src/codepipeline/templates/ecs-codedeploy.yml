@@ -78,7 +78,12 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName:
-        Fn::Sub: ${AWS::StackName}-artifacts-${AWS::Region}
+        Fn::Sub: ${AWS::StackName}-artifactsbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
 
   # CodeDeploy
   CodeDeployServiceRole:
@@ -502,8 +507,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-alb
+          Value: ALBSecurityGroup
 
   ALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -606,8 +610,7 @@ Resources:
       #     CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-tgt
+          Value: TargetSecurityGroup
 
   ALBSecurityGroupEgress:
     Type: AWS::EC2::SecurityGroupEgress
@@ -865,8 +868,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-web
+          Value: WebSecurityGroup
 
   EC2LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
@@ -888,8 +890,7 @@ Resources:
         - ResourceType: launch-template
           Tags:
             - Key: Name
-              Value:
-                Fn::Sub: ${AWS::StackName}-lt
+              Value: EC2LaunchTemplate
       LaunchTemplateData:
         ImageId:
           Fn::FindInMap:
@@ -910,8 +911,7 @@ Resources:
           - ResourceType: instance
             Tags:
               - Key: Name
-                Value:
-                  Fn::Sub: ${AWS::StackName}-i
+                Value: EC2Instance
         UserData:
           Fn::Base64:
             Fn::Sub: |

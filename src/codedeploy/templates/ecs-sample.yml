@@ -50,8 +50,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-alb
+          Value: ALBSecurityGroup
 
   ALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -141,8 +140,7 @@ Resources:
       #     CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-tgt
+          Value: TargetSecurityGroup
 
   ALBSecurityGroupEgress:
     Type: AWS::EC2::SecurityGroupEgress
@@ -205,8 +203,6 @@ Resources:
       RoleName:
         Fn::Sub: ${AWS::StackName}-ECSExecutionRole-${AWS::Region}
       Description: Service role for ECS container agents
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -215,6 +211,8 @@ Resources:
               Service: ecs-tasks.amazonaws.com
             Action:
               - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
   ECSLogGroup:
     Type: AWS::Logs::LogGroup

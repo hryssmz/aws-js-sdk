@@ -39,18 +39,18 @@ Resources:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 172.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-vpc
+          Value: VPC
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-igw
+          Value: InternetGateway
 
   InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -73,8 +73,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sn
+          Value: Subnet
 
   Subnet2:
     Type: AWS::EC2::Subnet
@@ -89,8 +88,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sn2
+          Value: Subnet2
 
   Subnet3:
     Type: AWS::EC2::Subnet
@@ -105,8 +103,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sn3
+          Value: Subnet3
 
   RouteTable:
     Type: AWS::EC2::RouteTable
@@ -115,8 +112,7 @@ Resources:
         Ref: VPC
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-rtb
+          Value: RouteTable
 
   InternetRoute:
     Type: AWS::EC2::Route
@@ -168,7 +164,7 @@ Resources:
           Description: Internal CIDR
       Tags:
         - Key: Name
-          Value: ${AWS::StackName}-pl-web
+          Value: WebPrefixList
 
   WebSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -191,8 +187,7 @@ Resources:
             Ref: WebPrefixList
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-web
+          Value: WebSecurityGroup
 
   SshSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -210,17 +205,14 @@ Resources:
             Fn::Sub: ${MyIP}/32
       Tags:
         - Key: Name
-          Value:
-            Fn::Sub: ${AWS::StackName}-sg-ssh
+          Value: SshSecurityGroup
 
   EC2InstanceRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName:
-        Fn::Sub: ${AWS::StackName}-EC2InstanceRole
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
       Description: Service role for EC2 instance
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -229,12 +221,14 @@ Resources:
               Service: ec2.amazonaws.com
             Action:
               - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       InstanceProfileName:
-        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
       Roles:
         - Ref: EC2InstanceRole
 
@@ -248,8 +242,7 @@ Resources:
         - ResourceType: launch-template
           Tags:
             - Key: Name
-              Value:
-                Fn::Sub: ${AWS::StackName}-lt-al2013
+              Value: AL2013LaunchTemplate
       LaunchTemplateData:
         ImageId:
           Fn::FindInMap:
@@ -279,8 +272,7 @@ Resources:
           - ResourceType: instance
             Tags:
               - Key: Name
-                Value:
-                  Fn::Sub: ${AWS::StackName}-i-al2013
+                Value: AL2013Instance
         UserData:
           Fn::Base64: |
             #!/bin/sh

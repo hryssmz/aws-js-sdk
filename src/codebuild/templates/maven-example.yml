@@ -16,13 +16,32 @@ Parameters:
 Resources:
   InputBucket:
     Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-inputbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
 
   OutputBucket:
     Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-outputbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
 
   BuildProjectPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-BuildProjectPolicy-${AWS::Region}
       Description: Execution policy for CodeBuild
       PolicyDocument:
         Version: "2012-10-17"
@@ -64,6 +83,9 @@ Resources:
   BuildProjectRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-BuildProjectRole-${AWS::Region}
+      Description: Service role for AWS CodeBuild
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -72,7 +94,6 @@ Resources:
               Service: codebuild.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: Service role for AWS CodeBuild
       ManagedPolicyArns:
         - Ref: BuildProjectPolicy
 

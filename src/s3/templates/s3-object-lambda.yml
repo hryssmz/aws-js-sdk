@@ -3,14 +3,6 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: S3 object Lambda
 
-Globals:
-  Function:
-    Handler: index.lambda_handler
-    Runtime: python3.9
-    Timeout: 10
-    Architectures:
-      - arm64
-
 Resources:
   S3Bucket:
     Type: AWS::S3::Bucket
@@ -53,6 +45,10 @@ Resources:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-TransformFunction
       Description: Transform function
+      Handler: index.lambda_handler
+      Runtime: python3.9
+      Architectures:
+        - arm64
       Policies:
         - arn:aws:iam::aws:policy/service-role/AmazonS3ObjectLambdaExecutionRolePolicy
       InlineCode: |

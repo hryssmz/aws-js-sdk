@@ -53,6 +53,11 @@ Resources:
     Properties:
       BucketName:
         Fn::Sub: ${ProjectName}-artifacts-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
 
   # CloudFormation
   CloudFormationServiceRole:
