@@ -1,0 +1,281 @@
+# guardduty/templates/guardduty-tutorial.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: GuardDuty tutorial
+
+Resources:
+  Detector:
+    Type: AWS::GuardDuty::Detector
+    Properties:
+      Enable: true
+      FindingPublishingFrequency: FIFTEEN_MINUTES
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: S3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: GuardDutyBucketAccessPermissions
+            Effect: Allow
+            Principal:
+              Service: guardduty.amazonaws.com
+            Action:
+              - s3:GetBucketLocation
+            Resource:
+              - Fn::GetAtt: S3Bucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:guardduty:${AWS::Region}:${AWS::AccountId}:detector/${Detector}
+          - Sid: GuardDutyObjectAccessPermissions
+            Effect: Allow
+            Principal:
+              Service: guardduty.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:guardduty:${AWS::Region}:${AWS::AccountId}:detector/${Detector}
+          - Sid: DenyUnencryptedUploads
+            Effect: Deny
+            Principal:
+              Service: guardduty.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+          - Sid: DenyIncorrectHeader
+            Effect: Deny
+            Principal:
+              Service: guardduty.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption-aws-kms-key-id:
+                  Fn::Sub: arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/${KMSKey}
+          - Sid: DenyNonHttps
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - s3:*
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Managed key for S3 bucket encryption
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: RootAccessPermission
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action:
+              - kms:*
+            Resource: "*"
+          - Sid: GuardDutyAccessPermissions
+            Effect: Allow
+            Principal:
+              Service: guardduty.amazonaws.com
+            Action:
+              - kms:GenerateDataKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:guardduty:${AWS::Region}:${AWS::AccountId}:detector/${Detector}
+
+  KMSAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName:
+        Fn::Sub: alias/${AWS::StackName}-KMSKey
+      TargetKeyId:
+        Ref: KMSKey
+
+  GuardDutyTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-GuardDutyTopic
+
+  GuardDutyRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-GuardDutyRule
+      Description: Event rule for GuardDuty findings
+      EventPattern:
+        source:
+          - aws.guardduty
+        detail-type:
+          - GuardDuty Finding
+        detail:
+          severity: # alert for any Medium to High finding
+            - 4
+            - 4.0
+            - 4.1
+            - 4.2
+            - 4.3
+            - 4.4
+            - 4.5
+            - 4.6
+            - 4.7
+            - 4.8
+            - 4.9
+            - 5
+            - 5.0
+            - 5.1
+            - 5.2
+            - 5.3
+            - 5.4
+            - 5.5
+            - 5.6
+            - 5.7
+            - 5.8
+            - 5.9
+            - 6
+            - 6.0
+            - 6.1
+            - 6.2
+            - 6.3
+            - 6.4
+            - 6.5
+            - 6.6
+            - 6.7
+            - 6.8
+            - 6.9
+            - 7
+            - 7.0
+            - 7.1
+            - 7.2
+            - 7.3
+            - 7.4
+            - 7.5
+            - 7.6
+            - 7.7
+            - 7.8
+            - 7.9
+            - 8
+            - 8.0
+            - 8.1
+            - 8.2
+            - 8.3
+            - 8.4
+            - 8.5
+            - 8.6
+            - 8.7
+            - 8.8
+            - 8.9
+      Targets:
+        - Id:
+            Fn::GetAtt: GuardDutyTopic.TopicName
+          Arn:
+            Ref: GuardDutyTopic
+
+  GuardDutyTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - Ref: GuardDutyTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sns:Publish
+            Principal:
+              Service: events.amazonaws.com
+            Resource:
+              - Ref: GuardDutyTopic
+            Condition:
+              ArnEquals:
+                aws:SourceArn:
+                  Fn::GetAtt: GuardDutyRule.Arn
+
+  SubscriberFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SubscriberFunctionRole-${AWS::Region}
+      Description: Service role for SubscriberFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SubscriberFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SubscriberFunction
+      Description: Subscriber function for the topic
+      Role:
+        Fn::GetAtt: SubscriberFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: GuardDutyTopic
+      InlineCode: |
+        exports.handler = async event => {
+          const { Records } = event;
+          const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
+            JSON.parse(Message)
+          );
+          records.forEach(record => {
+            console.log(JSON.stringify(record, null, 2));
+          });
+          return records;
+        };
+
+  SubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SubscriberFunction}

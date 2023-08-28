@@ -64,18 +64,18 @@ Resources:
               Values:
                 - Development
 
-  ResourceGroupTopic:
+  RGTopic:
     Type: AWS::SNS::Topic
     Properties:
       TopicName:
-        Fn::Sub: ${AWS::StackName}-ResourceGroupTopic
+        Fn::Sub: ${AWS::StackName}-RGTopic
       FifoTopic: false
 
   ResourceGroupRule:
     Type: AWS::Events::Rule
     Properties:
       Name:
-        Fn::Sub: ${AWS::StackName}-EC2RunningRule
+        Fn::Sub: ${AWS::StackName}-ResourceGroupRule
       Description: Event rule for resource group
       EventPattern:
         source:
@@ -86,15 +86,15 @@ Resources:
               - Fn::GetAtt: ResourceGroup.Arn
       Targets:
         - Id:
-            Fn::GetAtt: ResourceGroupTopic.TopicName
+            Fn::GetAtt: RGTopic.TopicName
           Arn:
-            Ref: ResourceGroupTopic
+            Ref: RGTopic
 
-  ResourceGroupTopicPolicy:
+  RGTopicPolicy:
     Type: AWS::SNS::TopicPolicy
     Properties:
       Topics:
-        - Ref: ResourceGroupTopic
+        - Ref: RGTopic
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -104,18 +104,37 @@ Resources:
             Principal:
               Service: events.amazonaws.com
             Resource:
-              - Ref: ResourceGroupTopic
+              - Ref: RGTopic
             Condition:
               ArnEquals:
                 aws:SourceArn:
                   Fn::GetAtt: ResourceGroupRule.Arn
 
-  ResourceGroupTopicFunction:
+  RGTopicFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-RGTopicFunctionRole-${AWS::Region}
+      Description: Service role for RGTopicFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  RGTopicFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName:
-        Fn::Sub: ${AWS::StackName}-ResourceGroupTopicFunction
+        Fn::Sub: ${AWS::StackName}-RGTopicFunction
       Description: Serverless function with EventBridge rule configured
+      Role:
+        Fn::GetAtt: RGTopicFunctionRole.Arn
       Handler: index.handler
       Runtime: nodejs18.x
       Architectures:
@@ -125,17 +144,21 @@ Resources:
           Type: SNS
           Properties:
             Topic:
-              Ref: ResourceGroupTopic
+              Ref: RGTopic
       InlineCode: |
         exports.handler = async event => {
           const { Records } = event;
-          const messages = Records.map(({ Sns }) => Sns).map(({ Message }) => Message);
-          console.log(JSON.stringify(messages, null, 2));
-          return messages;
+          const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
+            JSON.parse(Message)
+          );
+          records.forEach(record => {
+            console.log(JSON.stringify(record, null, 2));
+          });
+          return records;
         };
 
-  ResourceGroupTopicFunctionLogGroup:
+  RGTopicFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName:
-        Fn::Sub: /aws/lambda/${ResourceGroupTopicFunction}
+        Fn::Sub: /aws/lambda/${RGTopicFunction}

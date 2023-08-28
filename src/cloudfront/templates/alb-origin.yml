@@ -14,11 +14,11 @@ Parameters:
 Mappings:
   RegionProfile2AMI:
     ap-northeast-1:
-      AL2013: ami-067871d950411e643
+      AL2023: ami-067871d950411e643
 
   RegionProfile2Type:
     ap-northeast-1:
-      AL2013: t2.micro
+      AL2023: t2.micro
 
 Resources:
   # VPC
@@ -178,12 +178,12 @@ Resources:
           Fn::FindInMap:
             - RegionProfile2AMI
             - Ref: AWS::Region
-            - AL2013
+            - AL2023
         InstanceType:
           Fn::FindInMap:
             - RegionProfile2Type
             - Ref: AWS::Region
-            - AL2013
+            - AL2023
         IamInstanceProfile:
           Name:
             Ref: EC2InstanceProfile

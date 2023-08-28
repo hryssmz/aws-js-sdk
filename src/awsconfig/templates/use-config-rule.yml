@@ -1,0 +1,249 @@
+# awsconfig/templates/use-config-rule.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Use Config rules
+
+Resources:
+  # Config settings
+  ConfigBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-configbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  ConfigBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: ConfigBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ConfigBucketAccessPermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+              - s3:ListBucket
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:s3:::${ConfigBucket}
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+          - Sid: S3ObjectAccessPermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:s3:::${ConfigBucket}/AWSLogs/${AWS::AccountId}/Config/*
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+                s3:x-amz-acl: bucket-owner-full-control
+          - Sid: ConfigBucketAccessDeny
+            Action:
+              - s3:*
+            Effect: Deny
+            Principal: "*"
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:s3:::${ConfigBucket}
+              - Fn::Sub: arn:${AWS::Partition}:s3:::${ConfigBucket}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  ConfigTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-ConfigTopic
+      DisplayName: AWS Config Notification Topic
+
+  ConfigTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - Ref: ConfigTopic
+      PolicyDocument:
+        Statement:
+          - Sid: SNSAccessPermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - sns:Publish
+            Resource:
+              - Ref: ConfigTopic
+
+  SubscriberFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SubscriberFunctionRole-${AWS::Region}
+      Description: Service role for SubscriberFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SubscriberFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SubscriberFunction
+      Description: Subscriber function for the topic
+      Role:
+        Fn::GetAtt: SubscriberFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: ConfigTopic
+      InlineCode: |
+        exports.handler = async event => {
+          const { Records } = event;
+          const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
+            JSON.parse(Message)
+          );
+          records.forEach(record => {
+            console.log(JSON.stringify(record, null, 2));
+          });
+          return records;
+        };
+
+  SubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SubscriberFunction}
+
+  DeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    DependsOn: ConfigBucketPolicy
+    Properties:
+      Name:
+        Ref: AWS::StackName
+      S3BucketName:
+        Ref: ConfigBucket
+      SnsTopicARN:
+        Ref: ConfigTopic
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: One_Hour
+
+  ConfigurationRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    DependsOn: ConfigBucketPolicy
+    Properties:
+      Name:
+        Ref: AWS::StackName
+      RoleARN:
+        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig
+      RecordingGroup:
+        RecordingStrategy:
+          UseOnly: INCLUSION_BY_RESOURCE_TYPES
+        ResourceTypes:
+          - AWS::S3::Bucket
+          - AWS::CloudFormation::Stack
+
+  # Config rules
+  S3BucketLoggingEnabledRule:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName:
+        Fn::Sub: ${AWS::StackName}-S3BucketLoggingEnabledRule
+      Description: s3-bucket-logging-enabled
+      EvaluationModes:
+        - Mode: PROACTIVE
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_LOGGING_ENABLED
+
+  S3BucketLevelPublicAccessProhibitedRule:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName:
+        Fn::Sub: ${AWS::StackName}-S3BucketLevelPublicAccessProhibitedRule
+      Description: s3-bucket-level-public-access-prohibited
+      EvaluationModes:
+        - Mode: DETECTIVE
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::S3::Bucket
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_LEVEL_PUBLIC_ACCESS_PROHIBITED
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  AutomationAssumeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-AutomationAssumeRole-${AWS::Region}
+      Description: Service role for Automation
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ssm.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-execution/*
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  S3BucketPublicAccessBlockRemediationConfiguration:
+    Type: AWS::Config::RemediationConfiguration
+    Properties:
+      ConfigRuleName:
+        Ref: S3BucketLevelPublicAccessProhibitedRule
+      TargetType: SSM_DOCUMENT
+      TargetId: AWSConfigRemediation-ConfigureS3BucketPublicAccessBlock
+      TargetVersion: 2
+      Parameters:
+        AutomationAssumeRole:
+          StaticValue:
+            Values:
+              - Fn::GetAtt: AutomationAssumeRole.Arn
+        BucketName:
+          ResourceValue:
+            Value: RESOURCE_ID
+      Automatic: true
+      MaximumAutomaticAttempts: 3
+      RetryAttemptSeconds: 20

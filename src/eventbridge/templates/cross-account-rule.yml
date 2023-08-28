@@ -1,0 +1,267 @@
+# eventbridge/templates/cross-account-rule.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Creating a cross-account EventBridge rule
+
+Parameters:
+  ManagementAccountId:
+    Type: String
+    Description: Management Account ID
+    Default: 512667299293
+
+  OrganizationId:
+    Type: String
+    Description: Organization ID
+    Default: o-wz1cmd48gp
+
+Conditions:
+  IsManagementAccountCondition:
+    Fn::Equals:
+      - Ref: AWS::AccountId
+      - Ref: ManagementAccountId
+
+  IsMemberAccountCondition:
+    Fn::Not:
+      - Condition: IsManagementAccountCondition
+
+Resources:
+  # Common
+  RuleTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-RuleTopic
+      FifoTopic: false
+
+  RuleTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - Ref: RuleTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sns:Publish
+            Principal:
+              Service: events.amazonaws.com
+            Resource:
+              - Ref: RuleTopic
+            Condition:
+              ArnEquals:
+                aws:SourceArn:
+                  - Fn::Sub: arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${AWS::StackName}-ManagementRule
+                  - Fn::Sub: arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${AWS::StackName}-MemberRule
+
+  RuleTopicFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-RuleTopicFunctionRole-${AWS::Region}
+      Description: Service role for RuleTopicFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  RuleTopicFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-RuleTopicFunction
+      Description: Serverless function with EventBridge rule configured
+      Role:
+        Fn::GetAtt: RuleTopicFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: RuleTopic
+      InlineCode: |
+        exports.handler = async event => {
+          const { Records } = event;
+          const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
+            JSON.parse(Message)
+          );
+          records.forEach(record => {
+            console.log(JSON.stringify(record, null, 2));
+          });
+          return records;
+        };
+
+  RuleTopicFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${RuleTopicFunction}
+
+  # Member account
+  Trail:
+    Type: AWS::CloudTrail::Trail
+    Condition: IsMemberAccountCondition
+    DependsOn: TrailBucketPolicy
+    Properties:
+      TrailName:
+        Fn::Sub: ${AWS::StackName}-Trail
+      IsLogging: true
+      S3BucketName:
+        Ref: TrailBucket
+      IncludeGlobalServiceEvents: true
+      EnableLogFileValidation: true
+      EventSelectors:
+        - IncludeManagementEvents: true
+          ReadWriteType: All
+          ExcludeManagementEventSources:
+            - kms.amazonaws.com
+            - rdsdata.amazonaws.com
+
+  TrailBucket:
+    Type: AWS::S3::Bucket
+    Condition: IsMemberAccountCondition
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-trailbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  TrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: IsMemberAccountCondition
+    Properties:
+      Bucket:
+        Ref: TrailBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+            Resource:
+              - Fn::GetAtt: TrailBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${AWS::StackName}-Trail
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${TrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${AWS::StackName}-Trail
+
+  MemberRulePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: IsMemberAccountCondition
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-MemberRulePolicy-${AWS::Region}
+      Description: Policy for MemberRule
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - events:PutEvents
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:events:${AWS::Region}:${ManagementAccountId}:event-bus/default
+
+  MemberRuleRole:
+    Type: AWS::IAM::Role
+    Condition: IsMemberAccountCondition
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-MemberRuleRole-${AWS::Region}
+      Description: Service role for MemberRule
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: MemberRulePolicy
+
+  MemberRule:
+    Type: AWS::Events::Rule
+    Condition: IsMemberAccountCondition
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-MemberRule
+      Description: Event rule for member account
+      EventPattern:
+        source:
+          - aws.cloudformation
+        detail-type:
+          - AWS API Call via CloudTrail
+      Targets:
+        - Id:
+            Fn::GetAtt: RuleTopic.TopicName
+          Arn:
+            Ref: RuleTopic
+        - Id:
+            Fn::Sub: ${ManagementAccountId}-${AWS::Region}-DefaultEventBus
+          Arn:
+            Fn::Sub: arn:${AWS::Partition}:events:${AWS::Region}:${ManagementAccountId}:event-bus/default
+          RoleArn:
+            Fn::GetAtt: MemberRuleRole.Arn
+
+  # Management account
+  EventBusPolicy:
+    Type: AWS::Events::EventBusPolicy
+    Condition: IsManagementAccountCondition
+    Properties:
+      StatementId: EventBusPolicy
+      Statement:
+        Effect: Allow
+        Principal: "*"
+        Action:
+          - events:PutEvents
+        Resource:
+          - Fn::Sub: arn:${AWS::Partition}:events:${AWS::Region}:${ManagementAccountId}:event-bus/default
+        Condition:
+          StringEquals:
+            aws:PrincipalOrgID:
+              Ref: OrganizationId
+
+  ManagementRule:
+    Type: AWS::Events::Rule
+    Condition: IsManagementAccountCondition
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ManagementRule
+      Description: Event rule for management account
+      EventPattern:
+        account:
+          - "343562251096"
+      Targets:
+        - Id:
+            Fn::GetAtt: RuleTopic.TopicName
+          Arn:
+            Ref: RuleTopic

@@ -41,6 +41,13 @@ async function getObject() {
   return JSON.stringify(content, null, 2);
 }
 
+async function listBuckets() {
+  const s3 = new S3Wrapper();
+  const { Buckets } = await s3.listBuckets({});
+  const buckets = Buckets?.map(bucket => bucket.Name);
+  return JSON.stringify(buckets, null, 2);
+}
+
 async function uploadBinary() {
   const s3 = new S3Wrapper();
   await s3.putObject({
@@ -63,6 +70,7 @@ const actions: Record<string, Action> = {
   deleteObject,
   emptyBucket,
   getObject,
+  listBuckets,
   uploadBinary,
   uploadPlain,
 };

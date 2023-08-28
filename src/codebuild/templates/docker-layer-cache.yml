@@ -1,0 +1,273 @@
+# codebuild/templates/docker-layer-cache.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Use Docker layer cache
+
+Parameters:
+  ArtifactKey:
+    Type: String
+    Description: S3 key for artifact archive
+    Default: DockerLayerCache.zip
+
+Mappings:
+  RegionProfile2AMI:
+    ap-northeast-1:
+      AL2023: ami-067871d950411e643
+
+  RegionProfile2Type:
+    ap-northeast-1:
+      AL2023: t2.micro
+
+Resources:
+  # CodeBuild
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-artifactsbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:
+        Ref: AWS::StackName
+      ImageScanningConfiguration:
+        ScanOnPush: false
+
+  CodeBuildExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-CodeBuildExecutionPolicy
+      Description: Execution policy for CodeBuild
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudWatchLogsAccess
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${AWS::StackName}*:log-stream:*
+          - Sid: ECRAuthorizationAccess
+            Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+            Resource: "*"
+          - Sid: ECRRepositoryAccess
+            Effect: Allow
+            Action:
+              - ecr:BatchCheckLayerAvailability
+              - ecr:CompleteLayerUpload
+              - ecr:InitiateLayerUpload
+              - ecr:PutImage
+              - ecr:UploadLayerPart
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${AWS::StackName}*
+          - Sid: ArtifactsBucketAccess
+            Effect: Allow
+            Action:
+              - s3:GetBucketAcl
+              - s3:GetBucketLocation
+            Resource:
+              - Fn::GetAtt: ArtifactsBucket.Arn
+          - Sid: ArtifactsBucketObjectsAccess
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${ArtifactsBucket.Arn}/*
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CodeBuildServiceRole
+      Description: Service role for CodeBuild
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: CodeBuildExecutionPolicy
+
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-BuildProject
+      Description: Build project
+      Source:
+        Type: S3
+        Location:
+          Fn::Sub: ${ArtifactsBucket}/${ArtifactKey}
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
+        EnvironmentVariables:
+          - Name: REGION
+            Value:
+              Ref: AWS::Region
+          - Name: REPOSITORY_URI
+            Value:
+              Fn::GetAtt: ECRRepository.RepositoryUri
+        PrivilegedMode: true
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_DOCKER_LAYER_CACHE
+      ServiceRole:
+        Fn::GetAtt: CodeBuildServiceRole.Arn
+      TimeoutInMinutes: 20
+
+  BuildProjectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/codebuild/${BuildProject}
+
+  # EC2
+  EC2InstancePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-EC2InstancePolicy-${AWS::Region}
+      Description: Execution policy for EC2 instances
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
+              - ecr:BatchCheckLayerAvailability
+              - ecr:PutImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+            Resource:
+              - Fn::GetAtt: ECRRepository.Arn
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - Ref: EC2InstancePolicy
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 security group
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: EC2SecurityGroup
+
+  EC2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /usr/local/bin/run-container.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  REPOSITORY_URI="${ECRRepository.RepositoryUri}"
+                  REGISTRY_URI=`echo $REPOSITORY_URI | cut -d/ -f1`
+                  aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin $REGISTRY_URI
+                  docker container run --rm -it --name tmp $REPOSITORY_URI:latest /bin/bash
+              mode: "000755"
+    Properties:
+      LaunchTemplateName:
+        Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
+      VersionDescription: Launch template for EC2 instances
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - Key: Name
+              Value: EC2LaunchTemplate
+      LaunchTemplateData:
+        ImageId:
+          Fn::FindInMap:
+            - RegionProfile2AMI
+            - Ref: AWS::Region
+            - AL2023
+        InstanceType:
+          Fn::FindInMap:
+            - RegionProfile2Type
+            - Ref: AWS::Region
+            - AL2023
+        IamInstanceProfile:
+          Name:
+            Ref: EC2InstanceProfile
+        SecurityGroups:
+          - Ref: EC2SecurityGroup
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: EC2Instance
+        UserData:
+          Fn::Base64:
+            Fn::Sub: |
+              #!/bin/sh
+              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
+              dnf install -y docker
+              systemctl enable docker.service
+              systemctl start docker.service
+              usermod -a -G docker ec2-user
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: EC2LaunchTemplate
+        Version:
+          Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber

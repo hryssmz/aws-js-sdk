@@ -115,15 +115,27 @@ Resources:
                         headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
                         method="PUT",
                     )
-                    token: str = urlopen(req).read().decode("utf8")
+                    token: str = ""
+                    with urlopen(req) as res:
+                        token = res.read().decode("utf8")
+
                     req = Request(
                         "http://169.254.169.254/latest/meta-data/instance-id",
                         headers={"X-aws-ec2-metadata-token": token},
                     )
-                    instance_id: str = urlopen(req).read().decode("utf8")
+                    instance_id: str = ""
+                    with urlopen(req) as res:
+                        instance_id = res.read().decode("utf8")
+
+                    req = Request("http://ifconfig.me")
+                    global_ip: str = ""
+                    with urlopen(req) as res:
+                        global_ip = res.read().decode("utf8")
+
                     response = {
                         "instance_id": instance_id,
                         "timestamp": datetime.utcnow().isoformat(),
+                        "global_ip": global_ip,
                     }
                     return response
             /myapp/requirements.txt:

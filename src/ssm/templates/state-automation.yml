@@ -1,0 +1,186 @@
+# ssm/templates/scale-automation.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Automation runbook at scale
+
+Mappings:
+  RegionProfile2AMI:
+    ap-northeast-1:
+      AL2023: ami-067871d950411e643
+
+  RegionProfile2Type:
+    ap-northeast-1:
+      AL2023: t2.micro
+
+Resources:
+  DevelopmentInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+          - RegionProfile2AMI
+          - Ref: AWS::Region
+          - AL2023
+      InstanceType:
+        Fn::FindInMap:
+          - RegionProfile2Type
+          - Ref: AWS::Region
+          - AL2023
+      Tags:
+        - Key: Name
+          Value: DevelopmentInstance
+        - Key: Environment
+          Value: Development
+
+  DevelopmentTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName:
+        Fn::Sub: ${AWS::StackName}-DevelopmentTable
+      PrimaryKey:
+        Name: Id
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      Tags:
+        Environment: Development
+
+  DevelopmentTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-DevelopmentTopic
+      Tags:
+        - Key: Environment
+          Value: Development
+
+  # SSM Automation
+  ApiKeyParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name:
+        Fn::Sub: /${AWS::StackName}/ApiKeyParameter
+      Description: API key SSM parameter
+      Type: String
+      Value: keyboard cat
+
+  RunbookDocumentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-RunbookDocumentRole-${AWS::Region}
+      Description: Service role for RunbookDocument
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ssm.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-execution/*
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole
+
+  RunbookDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RunbookDocument
+      DocumentType: Automation
+      DocumentFormat: YAML
+      TargetType: /
+      UpdateMethod: NewVersion
+      Content:
+        schemaVersion: "0.3"
+        description: My first Automation runbook
+        assumeRole: "{{ AutomationAssumeRole }}"
+        parameters:
+          AutomationAssumeRole:
+            type: AWS::IAM::Role::Arn
+            description: Role to execute this runbook
+            default:
+              Fn::GetAtt: RunbookDocumentRole.Arn
+          ApiKey:
+            type: String
+            description: API key
+            default:
+              Fn::Sub: "{{ ssm:${ApiKeyParameter} }}"
+        mainSteps:
+          - name: InvokeLambdaFunction
+            action: aws:invokeLambdaFunction
+            description: Invoke custom Lambda function
+            timeoutSeconds: 30
+            inputs:
+              FunctionName:
+                Ref: LambdaFunction
+              InputPayload:
+                apiKey: "{{ ApiKey }}"
+                executionId: "{{ automation:EXECUTION_ID }}"
+            isEnd: true
+
+  LambdaFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-LambdaFunctionRole-${AWS::Region}
+      Description: Service role for LambdaFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  LambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: Automation-${AWS::StackName}-LambdaFunction
+      Description: Lambda function
+      Role:
+        Fn::GetAtt: LambdaFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Timeout: 30
+      InlineCode: |
+        exports.handler = async event => {
+          console.log(`event: ${JSON.stringify(event, null, 2)}`);
+          return { message: "Hello World!" };
+        };
+
+  LambdaFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${LambdaFunction}
+
+  RunbookAssociation:
+    Type: AWS::SSM::Association
+    Properties:
+      AssociationName:
+        Fn::Sub: ${AWS::StackName}-RunbookAssociation
+      Name:
+        Ref: RunbookDocument
+      ScheduleExpression: rate(30 minutes)
+      MaxConcurrency: "2"
+      MaxErrors: "0"
+      AutomationTargetParameterName: ApiKey
+      WaitForSuccessTimeoutSeconds: 120
+      Targets:
+        - Key: tag:Environment
+          Values:
+            - Development

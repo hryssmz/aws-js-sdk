@@ -1,0 +1,585 @@
+# ecs/templates/ec2-ecs.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creating a cluster with an EC2 task
+
+Parameters:
+  ECSOptimizedAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: ECS optimized AMI
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+
+  ContainerName:
+    Type: String
+    Description: App container name
+    Default: httpd
+
+  DesiredCount:
+    Type: Number
+    Description: Desired task count for ECS service
+    Default: 0
+    MinValue: 0
+    MaxValue: 1
+    ConstraintDescription: Must be an integer between 0 and 1
+
+Resources:
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 172.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 172.20.0.0/20
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet
+
+  Subnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 172.20.16.0/20
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet2
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: RouteTable
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet
+      RouteTableId:
+        Ref: RouteTable
+
+  Subnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet2
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 172.20.128.0/20
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 172.20.144.0/20
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet2
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable
+
+  PrivateSubnetPrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  PrivateSubnet2PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet2
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt: NatGatewayEIP.AllocationId
+      SubnetId:
+        Ref: Subnet
+
+  NatGatewayRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NatGateway
+
+  # ECS
+  ECSNamespace:
+    Type: AWS::ServiceDiscovery::HttpNamespace
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ECSNamespace
+      Description: ECS namespace
+
+  ECSExecLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/ecs/${AWS::StackName}-ECSExecLogGroup
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName:
+        Fn::Sub: ${AWS::StackName}-ECSCluster
+      Configuration:
+        ExecuteCommandConfiguration:
+          Logging: OVERRIDE
+          LogConfiguration:
+            CloudWatchLogGroupName:
+              Ref: ECSExecLogGroup
+      ClusterSettings:
+        - Name: containerInsights
+          Value: disabled
+      ServiceConnectDefaults:
+        Namespace:
+          Fn::GetAtt: ECSNamespace.Arn
+
+  ECSExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ECSExecutionRole-${AWS::Region}
+      Description: Service role for ECS container agents
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ECSTaskPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-ECSTaskPolicy-${AWS::Region}
+      Description: Execution policy for ECS containers
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SSMAccessPermissions
+            Effect: Allow
+            Action:
+              - ssmmessages:CreateControlChannel
+              - ssmmessages:CreateDataChannel
+              - ssmmessages:OpenControlChannel
+              - ssmmessages:OpenDataChannel
+            Resource: "*"
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:DescribeLogStreams
+              - logs:PutLogEvents
+            Resource:
+              - Fn::GetAtt: ECSExecLogGroup.Arn
+          - Sid: S3AccessPermissions
+            Effect: Allow
+            Action:
+              - s3:ListAllMyBuckets
+            Resource: "*"
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ECSTaskRole-${AWS::Region}
+      Description: Service role for ECS containers
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: ECSTaskPolicy
+
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/ecs/${AWS::StackName}-ECSLogGroup
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family:
+        Fn::Sub: ${AWS::StackName}-TaskDefinition
+      Cpu: 256
+      Memory: 512
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - EC2
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn:
+        Fn::GetAtt: ECSExecutionRole.Arn
+      TaskRoleArn:
+        Fn::GetAtt: ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name:
+            Ref: ContainerName
+          Image: httpd:latest
+          Command:
+            - /bin/sh
+            - -c
+            - |
+              cat <<EOF > /usr/local/apache2/htdocs/index.html
+              <html>
+                <head>
+                  <title>Amazon ECS Sample App</title>
+                  <style>
+                    body {
+                      margin-top: 40px;
+                      background-color: #333;
+                    }
+                    .container {
+                      color: white;
+                      text-align: center;
+                    }
+                  </style>
+                </head>
+                <body>
+                  <div class="container">
+                    <h1>Amazon ECS Sample App</h1>
+                    <h2>Congratulations!</h2>
+                    <p>
+                      Your application is now running on a container in Amazon ECS.
+                    </p>
+                    <p>
+                      Your container hostname is `hostname`
+                    </p>
+                  </div>
+                </body>
+              </html>
+              EOF
+
+              apt update -y && apt install -y curl unzip
+              curl -sSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+              unzip awscliv2.zip
+              ./aws/install
+              rm -rf awscliv2.zip aws
+              httpd-foreground
+          Essential: true
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 80
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region:
+                Ref: AWS::Region
+              awslogs-group:
+                Ref: ECSLogGroup
+              awslogs-stream-prefix: TaskDefinition
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost || exit 1
+            StartPeriod: 30
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ALBListener
+      - EC2Instance
+    Properties:
+      ServiceName:
+        Fn::Sub: ${AWS::StackName}-ECSService
+      Cluster:
+        Ref: ECSCluster
+      TaskDefinition:
+        Ref: TaskDefinition
+      LaunchType: EC2
+      DesiredCount:
+        Ref: DesiredCount
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - Ref: TargetSecurityGroup
+          Subnets:
+            - Ref: PrivateSubnet
+            - Ref: PrivateSubnet2
+      LoadBalancers:
+        - ContainerName:
+            Ref: ContainerName
+          ContainerPort: 80
+          TargetGroupArn:
+            Ref: ALBTargetGroup
+      HealthCheckGracePeriodSeconds: 60
+      EnableExecuteCommand: true
+      EnableECSManagedTags: true
+      PropagateTags: SERVICE
+      SchedulingStrategy: REPLICA
+
+  # EC2
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 instance security group
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: EC2SecurityGroup
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/AmazonECS_FullAccess
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: ECSOptimizedAMI
+      InstanceType: t2.micro # m5.large
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroupIds:
+        - Ref: EC2SecurityGroup
+      SubnetId:
+        Ref: Subnet
+      Tags:
+        - Key: Name
+          Value: EC2Instance
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            yum update -y
+            yum install -y https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm
+            yum install -y unzip
+            curl -sSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+            unzip awscliv2.zip
+            ./aws/install
+            rm -rf awscliv2.zip aws
+
+            cat <<\EOF >> /etc/ecs/ecs.config
+            ECS_CLUSTER=${ECSCluster}
+            EOF
+
+  # Elastic Load Balancing
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ALB
+      Type: application
+      Scheme: internet-facing
+      SecurityGroups:
+        - Ref: ALBSecurityGroup
+      Subnets:
+        - Ref: Subnet
+        - Ref: Subnet2
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ALBTargetGroup
+      VpcId:
+        Ref: VPC
+      TargetType: ip
+      Protocol: HTTP
+      Port: 80
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      Matcher:
+        HttpCode: 200
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 10
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn:
+        Ref: ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: ALBTargetGroup
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-ALBSecurityGroup
+      GroupDescription: ALB security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: ALBSecurityGroup
+
+  TargetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-TargetSecurityGroup
+      GroupDescription: Target security group
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: TargetSecurityGroup
+
+  ALBSecurityGroupEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      Description: HTTP outbound rule
+      GroupId:
+        Ref: ALBSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      DestinationSecurityGroupId:
+        Ref: TargetSecurityGroup
+
+  TargetSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: HTTP inbound rule
+      GroupId:
+        Ref: TargetSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId:
+        Ref: ALBSecurityGroup
+
+Outputs:
+  ALBDNSName:
+    Value:
+      Fn::GetAtt: ALB.DNSName

@@ -1,0 +1,134 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Infra stack
+
+Parameters:
+  # IAM parameters
+  AccountAlias:
+    Type: String
+    Description: Account alias name
+    Default: hryssmz
+
+  # SSO parameters (required SSO to be enabled)
+  SSOInstanceArn:
+    Type: String
+    Description: SSO Instance ARN
+    Default: arn:aws:sso:::instance/ssoins-775850417ae45fb7
+
+  IdentityStoreId:
+    Type: String
+    Description: Identity store ID
+    Default: d-95676dc1f8
+
+  SSOAccountIds:
+    Type: CommaDelimitedList
+    Description: List of SSO target account IDs
+    Default: 512667299293,343562251096,,229660767790,719118049436
+
+Conditions:
+  IsGlobalCondition:
+    Fn::Equals:
+      - Ref: AWS::Region
+      - us-east-1
+
+Resources:
+  # S3 resources
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AccountAlias}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  SamCliSourceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: sam-cli-source-${AccountAlias}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  SamCliSourceBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: SamCliSourceBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: serverlessrepo.amazonaws.com
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: ${SamCliSourceBucket.Arn}/*
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+
+  # SSO resources
+  AdminGroup:
+    Type: AWS::IdentityStore::Group
+    Properties:
+      DisplayName: AdminGroup
+      Description: Admin group
+      IdentityStoreId:
+        Ref: IdentityStoreId
+
+  AdminPermissionSet:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      Name: AdminPermissionSet
+      Description: Admin permission set
+      InstanceArn:
+        Ref: SSOInstanceArn
+      ManagedPolicies:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  AdminGroupAssignment:
+    Type: AWS::SSO::Assignment
+    Properties:
+      InstanceArn:
+        Ref: SSOInstanceArn
+      PermissionSetArn:
+        Fn::GetAtt: AdminPermissionSet.PermissionSetArn
+      PrincipalId:
+        Fn::GetAtt: AdminGroup.GroupId
+      PrincipalType: GROUP
+      TargetId:
+        Fn::Select:
+          - 0
+          - Ref: SSOAccountIds
+      TargetType: AWS_ACCOUNT
+
+  AdminGroupAssignment2:
+    Type: AWS::SSO::Assignment
+    Properties:
+      InstanceArn:
+        Ref: SSOInstanceArn
+      PermissionSetArn:
+        Fn::GetAtt: AdminPermissionSet.PermissionSetArn
+      PrincipalId:
+        Fn::GetAtt: AdminGroup.GroupId
+      PrincipalType: GROUP
+      TargetId:
+        Fn::Select:
+          - 1
+          - Ref: SSOAccountIds
+      TargetType: AWS_ACCOUNT
+
+Outputs:
+  # SSO outputs
+  SSOStartURL:
+    Description: URL for AWS access portal
+    Value:
+      Fn::Sub: https://${IdentityStoreId}.awsapps.com/start

@@ -1,0 +1,519 @@
+# s3/templates/s3-object-resource.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: S3 object custom resource
+
+Resources:
+  # S3
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # S3BucketPolicy:
+  #   Type: AWS::S3::BucketPolicy
+  #   Properties:
+  #     Bucket:
+  #       Ref: S3Bucket
+  #     PolicyDocument:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         - Sid: S3BucketAccessDeny
+  #           Effect: Deny
+  #           Principal: "*"
+  #           Action:
+  #             - s3:PutObject
+  #             - s3:DeleteObject
+  #           Resource:
+  #             - Fn::Sub: ${S3Bucket.Arn}/*
+
+  S3Bucket2:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket2-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # Custom resource
+  S3ObjectFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunctionPolicy-${AWS::Region}
+      Description: Policy for S3ObjectFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3AccessPermissions
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource: "*"
+
+  S3ObjectFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunctionRole-${AWS::Region}
+      Description: Service role for S3ObjectFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: S3ObjectFunctionPolicy
+
+  S3ObjectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunction
+      Description: AMI lookup function
+      Role:
+        Fn::GetAtt: S3ObjectFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Timeout: 30
+      InlineCode:
+        Fn::Join:
+          - "\n"
+          - - Fn::Sub: |
+                /* Sample Create Event
+                {
+                  "RequestType": "Create",
+                  "RequestId": "00000000-0000-0000-0000-000000000000",
+                  "ResponseURL": "https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}",
+                  "ResourceType": "AWS::CloudFormation::CustomResource",
+                  "LogicalResourceId": "IndexHtmlObject",
+                  "StackId": "${AWS::StackId}",
+                  "ResourceProperties": {
+                    "Bucket": "${S3Bucket}",
+                    "Key": "index.html",
+                    "Body": "<h1>Hello World!</h1>"
+                  }
+                }
+                */
+
+                /* Sample Update Event
+                {
+                  "RequestType": "Update",
+                  "RequestId": "00000000-0000-0000-0000-000000000010",
+                  "ResponseURL": "https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}",
+                  "ResourceType": "AWS::CloudFormation::CustomResource",
+                  "LogicalResourceId": "IndexHtmlObject",
+                  "StackId": "${AWS::StackId}",
+                  "PhysicalResourceId": "s3://${S3Bucket}/index.html",
+                  "ResourceProperties": {
+                    "Bucket": "${S3Bucket2}",
+                    "Key": "index2.html",
+                    "Body": "<h1>Lorem Ipsum</h1>"
+                  },
+                  "OldResourceProperties": {
+                    "Bucket": "${S3Bucket}",
+                    "Key": "index.html",
+                    "Body": "<h1>Hello World!</h1>"
+                  }
+                }
+                */
+
+                /* Sample Delete Event
+                {
+                  "RequestType": "Delete",
+                  "RequestId": "00000000-0000-0000-0000-000000000020",
+                  "ResponseURL": "https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}",
+                  "ResourceType": "AWS::CloudFormation::CustomResource",
+                  "LogicalResourceId": "IndexHtmlObject",
+                  "StackId": "${AWS::StackId}",
+                  "PhysicalResourceId": "s3://${S3Bucket2}/index2.html",
+                  "ResourceProperties": {
+                    "Bucket": "${S3Bucket2}",
+                    "Key": "index2.html",
+                    "Body": "<h1>Lorem Ipsum</h1>"
+                  }
+                }
+                */
+            - |
+              const https = require("https");
+              const url = require("url");
+              const {
+                DeleteObjectCommand,
+                PutObjectCommand,
+                S3Client,
+              } = require("@aws-sdk/client-s3");
+
+              const serialize = obj => JSON.stringify(obj, null, 2);
+
+              const sendResponse = async (
+                event,
+                context,
+                status,
+                data,
+                physicalResourceId,
+                noEcho
+              ) => {
+                const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
+                const body = serialize({
+                  Status: status,
+                  Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,
+                  PhysicalResourceId: physicalResourceId || context.logStreamName,
+                  Data: data,
+                  StackId,
+                  RequestId,
+                  LogicalResourceId,
+                  NoEcho: noEcho || false,
+                });
+                console.log(`RESPONSE BODY: ${body}`);
+
+                const { hostname, path } = url.parse(ResponseURL);
+                const headers = {
+                  "Content-Type": "application/json",
+                  "Content-Length": body.length,
+                };
+                console.log("SENDING RESPONSE...");
+
+                return await new Promise((resolve, reject) => {
+                  const req = https.request(
+                    { hostname, port: 443, path, method: "PUT", headers },
+                    res => {
+                      console.log(`STATUS: ${res.statusCode}`);
+                      console.log(`HEADERS: ${serialize(res.headers)}`);
+                      res.on("data", chunk => {
+                        const body = JSON.parse(chunk.toString());
+                        console.log(`BODY: ${serialize(body)}`);
+                        resolve(body);
+                      });
+                    }
+                  );
+                  req.on("error", e => {
+                    console.log(`problem with request: ${e.message}`);
+                    reject(e.message);
+                  });
+                  req.write(body);
+                  req.end();
+                });
+              };
+
+              const putObject = async (Bucket, Key, Body) => {
+                const client = new S3Client({});
+                const command = new PutObjectCommand({ Bucket, Key, Body });
+                return await client.send(command);
+              };
+
+              const deleteObject = async (Bucket, Key) => {
+                const client = new S3Client({});
+                const command = new DeleteObjectCommand({ Bucket, Key });
+                return await client.send(command);
+              };
+
+              exports.handler = async (event, context) => {
+                console.log(`REQUEST RECEIVED: ${serialize(event)}`);
+                const { ResourceProperties } = event;
+                const { Bucket, Key, Body } = ResourceProperties;
+
+                try {
+                  if (event.RequestType === "Create" || event.RequestType === "Update") {
+                    await putObject(Bucket, Key, Body);
+                    return await sendResponse(
+                      event,
+                      context,
+                      "SUCCESS",
+                      { Bucket, Key, Body },
+                      `s3://${Bucket}/${Key}`
+                    );
+                  } else if (event.RequestType === "Delete") {
+                    await deleteObject(Bucket, Key).catch(console.error);
+                    return await sendResponse(event, context, "SUCCESS");
+                  } else {
+                    throw new Error(`Invalid RequestType: ${event.RequestType}`);
+                  }
+                } catch (error) {
+                  console.error(error);
+                  return await sendResponse(event, context, "FAILED", {});
+                }
+              };
+
+  S3ObjectFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${S3ObjectFunction}
+
+  IndexHtmlObject:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: S3ObjectFunction.Arn
+      Bucket:
+        Ref: S3Bucket
+      Key: index.html
+      Body: <h1>Hello World</h1>
+
+  # REST API
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RestApi
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      StageName: dev
+      Cors:
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: My REST API
+          version: "1.0"
+        paths:
+          /:
+            put:
+              operationId: PutRoot
+              tags:
+                - Root
+              requestBody:
+                content:
+                  application/json:
+                    schema:
+                      $ref: "#/components/schemas/PutRootRequest"
+                    examples:
+                      example1:
+                        value:
+                          Status: SUCCESS
+                          Reason: "See the details in CloudWatch Log Stream: 2020/01/01/[$LATEST]0123456789abcdef0123456789abcdef"
+                          RequestId: 00000000-0000-0000-0000-000000000000
+                          LogicalResourceId: IndexHtmlObject
+                          StackId: arn:aws:cloudformation:ap-northeast-1:123456789012:stack/s3-object-resource/12345678-0000-0000-0000-000000000000
+                          PhysicalResourceId: s3://s3-object-resource-s3bucket-ap-northeast-1/index.html
+                          Data:
+                            Bucket: s3-object-resource-s3bucket-ap-northeast-1
+                            Key: index.html
+                            Body: <h1>Hello World!</h1>
+                          NoEcho: false
+                      example2:
+                        value:
+                          Status: FAILED
+                          Reason: "See the details in CloudWatch Log Stream: 2020/01/01/[$LATEST]0123456789abcdef0123456789abcdef"
+                          RequestId: 00000000-0000-0000-0000-000000000010
+                          LogicalResourceId: IndexHtmlObject
+                          StackId: arn:aws:cloudformation:ap-northeast-1:123456789012:stack/s3-object-resource/12345678-0000-0000-0000-000000000000
+                          PhysicalResourceId: s3://s3-object-resource-s3bucket-ap-northeast-1/index.html
+                          Data: {}
+                          NoEcho: false
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/PutRootResponse"
+                      examples:
+                        example1:
+                          value:
+                            message: Hello World!
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: "#/components/headers/Access-Control-Allow-Origin"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PutRootFunction.Arn}/invocations
+                httpMethod: POST
+        components:
+          schemas:
+            PutRootRequest:
+              description: Request body for PUT /
+              type: object
+              required:
+                - Status
+                - PhysicalResourceId
+                - StackId
+                - RequestId
+                - LogicalResourceId
+              properties:
+                Status:
+                  type: string
+                  enum:
+                    - SUCCESS
+                    - FAILED
+                  description: |
+                    The status value sent by the custom resource provider in response to an AWS CloudFormation-generated request.
+
+                    Must be either `SUCCESS` or `FAILED`.
+
+                    _Required_: Yes
+
+                    _Type_: String
+                Reason:
+                  type: string
+                  description: |
+                    Describes the reason for a failure response.
+
+                    _Required_: Required if `Status` is `FAILED`. It's optional otherwise.
+
+                    _Type_: String
+                PhysicalResourceId:
+                  type: string
+                  description: |
+                    This value should be an identifier unique to the custom resource vendor, and can be up to 1 KB in size. The value must be a non-empty string and must be identical for all responses for the same resource.
+
+                    The value returned for a `PhysicalResourceId` can change custom resource update operations. If the value returned is the same, it is considered a normal update. If the value returned is different, AWS CloudFormation recognizes the update as a replacement and sends a delete request to the old resource. For more information, see [AWS::CloudFormation::CustomResource](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-cfn-customresource.html).
+
+                    _Required_: Yes
+
+                    _Type_: String
+                StackId:
+                  type: string
+                  description: |
+                    The Amazon Resource Name (ARN) that identifies the stack that contains the custom resource. This response value should be copied _verbatim_ from the request.
+
+                    _Required_: Yes
+
+                    _Type_: String
+                RequestId:
+                  type: string
+                  description: |
+                    A unique ID for the request. This response value should be copied _verbatim_ from the request.
+
+                    _Required_: Yes
+
+                    _Type_: String
+                LogicalResourceId:
+                  type: string
+                  description: |
+                    The template developer-chosen name (logical ID) of the custom resource in the AWS CloudFormation template. This response value should be copied _verbatim_ from the request.
+
+                    _Required_: Yes
+
+                    _Type_: String
+                NoEcho:
+                  type: boolean
+                  default: false
+                  description: |
+                    Optional. Indicates whether to mask the output of the custom resource when retrieved by using the `Fn::GetAtt` function. If set to `true`, all returned values are masked with asterisks (`*****`), _except for those stored in the `Metadata` section of the template_. AWS CloudFormation does not transform, modify, or redact any information you include in the `Metadata` section. The default value is `false`.
+
+                    For more information about using `NoEcho` to mask sensitive information, see the [Do not embed credentials in your templates](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/best-practices.html#creds) best practice.
+
+                    _Required_: No
+
+                    _Type_: Boolean
+                Data:
+                  type: object
+                  description: |
+                    Optional. The custom resource provider-defined name-value pairs to send with the response. You can access the values provided here by name in the template with `Fn::GetAtt`.
+
+                    > **Important**
+                    >
+                    > If the name-value pairs contain sensitive information, you should use the `NoEcho` field to mask the output of the custom resource. Otherwise, the values are visible through APIs that surface property values (such as `DescribeStackEvents`).
+
+                    _Required_: No
+
+                    _Type_: JSON object
+            PutRootResponse:
+              description: Response body for PUT /
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+          headers:
+            Access-Control-Allow-Origin:
+              description: Response header for CORS support
+              schema:
+                type: string
+                example: "*"
+
+  PutRootFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-PutRootFunctionRole-${AWS::Region}
+      Description: Service role for PutRootFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  PutRootFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-PutRootFunction
+      Description: PutRoot function
+      Role:
+        Fn::GetAtt: PutRootFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: PUT
+            Path: /
+            RestApiId:
+              Ref: RestApi
+      InlineCode: |
+        exports.handler = async event => {
+          console.log(`Event:\n${JSON.stringify(event)}`);
+          return {
+            statusCode: 200,
+            headers: { "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ message: "Hello World!" }),
+          };
+        };
+
+  PutRootFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${PutRootFunction}
+
+# Outputs:
+#   IndexHtmlObjectUri:
+#     Description: URI for IndexHtmlObject
+#     Value:
+#       Ref: IndexHtmlObject
+
+#   IndexHtmlObjectBucket:
+#     Description: Bucket for IndexHtmlObject
+#     Value:
+#       Fn::GetAtt: IndexHtmlObject.Bucket
+
+#   IndexHtmlObjectKey:
+#     Description: Key for IndexHtmlObject
+#     Value:
+#       Fn::GetAtt: IndexHtmlObject.Key
+
+#   IndexHtmlObjectBody:
+#     Description: Body for IndexHtmlObject
+#     Value:
+#       Fn::GetAtt: IndexHtmlObject.Body

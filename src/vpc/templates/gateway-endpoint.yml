@@ -270,6 +270,8 @@ Resources:
         Ref: VPC
       RouteTableIds:
         - Ref: PrivateRouteTable
+      SecurityGroupIds:
+        - Ref: VPCESecurityGroup
 
   DynamoDBEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -281,3 +283,5 @@ Resources:
         Ref: VPC
       RouteTableIds:
         - Ref: PrivateRouteTable
+      SecurityGroupIds:
+        - Ref: VPCESecurityGroup

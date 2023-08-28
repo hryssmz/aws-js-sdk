@@ -1,0 +1,500 @@
+# firehose/templates/ses-event.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: SES event configurations
+
+Parameters:
+  RootDomain:
+    Type: String
+    Description: Root domain name
+    Default: hryssmz.click
+
+Resources:
+  # SES
+  ConfigurationSet:
+    Type: AWS::SES::ConfigurationSet
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ConfigurationSet
+      ReputationOptions:
+        ReputationMetricsEnabled: true
+      SuppressionOptions:
+        SuppressedReasons:
+          - COMPLAINT
+          - BOUNCE
+
+  ConfigurationSetEventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    Properties:
+      ConfigurationSetName:
+        Ref: ConfigurationSet
+      EventDestination:
+        Name:
+          Fn::Sub: ${AWS::StackName}-ConfigurationSetEventDestination
+        Enabled: true
+        MatchingEventTypes:
+          - send
+          # - reject
+          # - bounce
+          # - complaint
+          # - delivery
+          # - open
+          # - click
+          # - renderingFailure
+          # - deliveryDelay
+          # - subscription
+        SnsDestination:
+          TopicARN:
+            Ref: SESEventTopic
+
+  SESSendEventPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-SESSendEventPolicy-${AWS::Region}
+      Description: Policy for SES to send event
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: KinesisFirehosePutRecord
+            Effect: Allow
+            Action:
+              - firehose:PutRecordBatch
+            Resource:
+              - Fn::GetAtt: DeliveryStream.Arn
+
+  SESSendEventRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SESSendEventRole-${AWS::Region}
+      Description: Service role for subscription filter
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ses.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: SESSendEventPolicy
+
+  ConfigurationSetEventDestination2:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    Properties:
+      ConfigurationSetName:
+        Ref: ConfigurationSet
+      EventDestination:
+        Name:
+          Fn::Sub: ${AWS::StackName}-ConfigurationSetEventDestination2
+        Enabled: true
+        MatchingEventTypes:
+          - send
+          # - reject
+          # - bounce
+          # - complaint
+          # - delivery
+          # - open
+          # - click
+          # - renderingFailure
+          # - deliveryDelay
+          # - subscription
+        KinesisFirehoseDestination:
+          DeliveryStreamARN:
+            Fn::GetAtt: DeliveryStream.Arn
+          IAMRoleARN:
+            Fn::GetAtt: SESSendEventRole.Arn
+
+  DomainIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity:
+        Ref: RootDomain
+      ConfigurationSetAttributes:
+        ConfigurationSetName:
+          Ref: ConfigurationSet
+      DkimAttributes:
+        SigningEnabled: true
+
+  RecordSetGroup:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      Comment: RecordSet group for Route 53 hosted zone
+      HostedZoneName:
+        Fn::Sub: ${RootDomain}.
+      RecordSets:
+        - Name:
+            Fn::GetAtt: DomainIdentity.DkimDNSTokenName1
+          Type: CNAME
+          ResourceRecords:
+            - Fn::GetAtt: DomainIdentity.DkimDNSTokenValue1
+          TTL: 900
+        - Name:
+            Fn::GetAtt: DomainIdentity.DkimDNSTokenName2
+          Type: CNAME
+          ResourceRecords:
+            - Fn::GetAtt: DomainIdentity.DkimDNSTokenValue2
+          TTL: 900
+        - Name:
+            Fn::GetAtt: DomainIdentity.DkimDNSTokenName3
+          Type: CNAME
+          ResourceRecords:
+            - Fn::GetAtt: DomainIdentity.DkimDNSTokenValue3
+          TTL: 900
+
+  # Lambda
+  SendEmailFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-SendEmailFunctionPolicy-${AWS::Region}
+      Description: Policy for SendEmailFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ses:SendEmail
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+              - Fn::Sub: arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${ConfigurationSet}
+
+  SendEmailFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SendEmailFunctionRole-${AWS::Region}
+      Description: Service role for SendEmailFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: SendEmailFunctionPolicy
+
+  SendEmailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SendEmailFunction
+      Description: Push messages into Queue
+      Role:
+        Fn::GetAtt: SendEmailFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          SENDER:
+            Fn::Sub: Hiroyasu Shimizu <info@${RootDomain}>
+          RECIPIENT: success@simulator.amazonses.com
+          CONFIGURATION_SET:
+            Ref: ConfigurationSet
+      InlineCode: |
+        const { SendEmailCommand, SESv2Client } = require("@aws-sdk/client-sesv2");
+
+        exports.handler = async () => {
+          const client = new SESv2Client();
+          const sender = process.env.SENDER;
+          const recipient = process.env.RECIPIENT;
+          const configurationSet = process.env.CONFIGURATION_SET;
+          const subject = "Amazon SES Test (AWS SDK for JavaScript)";
+          const bodyTxt = [
+            "Amazon SES Test (AWS SDK for JavaScript)",
+            "This email was sent with Amazon SES using the AWS SDK for JavaScript.",
+          ].join("\r\n");
+          const bodyHtml = `
+            <html>
+              <head></head>
+              <body>
+              <h1>Amazon SES Test (AWS SDK for JavaScript)</h1>
+              <p>This email was sent with
+                <a href='https://aws.amazon.com/ses/'>Amazon SES</a> using the
+                <a href='https://aws.amazon.com/sdk-for-javascript/'>
+                AWS SDK for JavaScript</a>.</p>
+              </body>
+            </html>
+          `;
+          const charset = "UTF-8";
+
+          const command = new SendEmailCommand({
+            FromEmailAddress: sender,
+            Destination: { ToAddresses: [recipient] },
+            Content: {
+              Simple: {
+                Body: {
+                  Html: { Data: bodyHtml, CharSet: charset },
+                  Text: { Data: bodyTxt, Charset: charset },
+                },
+                Subject: { Data: subject, Charset: charset },
+              },
+            },
+            ConfigurationSetName: configurationSet,
+          });
+
+          const messageId = await client
+            .send(command)
+            .then(({ MessageId }) => {
+              console.log(`Email sent! Message ID: ${MessageId}`);
+              return MessageId;
+            })
+            .catch(error => {
+              console.error(`${error.name}: ${error.message}`);
+              return undefined;
+            });
+
+          return messageId;
+        };
+
+  SendEmailFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SendEmailFunction}
+
+  # SNS
+  SESEventTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-SESEventTopic
+
+  SESEventTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - Ref: SESEventTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sns:Publish
+            Principal:
+              Service: ses.amazonaws.com
+            Resource:
+              - Ref: SESEventTopic
+            Condition:
+              StringEquals:
+                AWS:SourceAccount:
+                  Ref: AWS::AccountId
+                AWS:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${ConfigurationSet}
+
+  SESEventFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SESEventFunctionRole-${AWS::Region}
+      Description: Service role for SESEventFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SESEventFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SESEventFunction
+      Description: Consumer function
+      Role:
+        Fn::GetAtt: SESEventFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: SESEventTopic
+      InlineCode: |
+        exports.handler = async event => {
+          const { Records } = event;
+          const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
+            JSON.parse(Message)
+          );
+          records.forEach(record => {
+            console.log(JSON.stringify(record, null, 2));
+          });
+          return records;
+        };
+
+  SESEventFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SESEventFunction}
+
+  # Kinesis Data Firehose
+  DestinationBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: DestinationFunctionPermission
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-destinationbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function:
+              Fn::GetAtt: DestinationFunction.Arn
+
+  DestinationFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-DestinationFunctionPolicy-${AWS::Region}
+      Description: Policy for DestinationFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}/*
+
+  DestinationFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DestinationFunctionRole-${AWS::Region}
+      Description: Service role for DestinationFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: DestinationFunctionPolicy
+
+  DestinationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-DestinationFunction
+      Description: Monitor function for DestinationBucket
+      Role:
+        Fn::GetAtt: DestinationFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Timeout: 10
+      Architectures:
+        - arm64
+      InlineCode: |
+        const { GetObjectCommand, S3Client } = require("@aws-sdk/client-s3");
+
+        exports.handler = async event => {
+          const client = new S3Client();
+          const promises = event.Records.map(async ({ s3 }) => {
+            const command = new GetObjectCommand({
+              Bucket: s3.bucket.name,
+              Key: s3.object.key,
+            });
+            const { Body } = await client.send(command);
+            const content = await Body.transformToString();
+            console.log(content);
+          });
+          await Promise.all(promises);
+          return "Finished";
+        };
+
+  DestinationFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: DestinationFunction
+      Principal: s3.amazonaws.com
+      SourceArn:
+        Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}
+      SourceAccount:
+        Ref: AWS::AccountId
+
+  DestinationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${DestinationFunction}
+
+  DeliveryStreamS3Policy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-DeliveryStreamS3Policy-${AWS::Region}
+      Description: Execution policy for Kinesis Firehose Delivery Stream
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:AbortMultipartUpload
+              - s3:GetBucketLocation
+              - s3:GetObject
+              - s3:ListBucket
+              - s3:ListBucketMultipartUploads
+              - s3:PutObject
+            Resource:
+              - Fn::GetAtt: DestinationBucket.Arn
+              - Fn::Sub: ${DestinationBucket.Arn}/*
+
+  DeliveryStreamS3Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DeliveryStreamS3Role-${AWS::Region}
+      Description: Service role for Kinesis Firehose Delivery Stream
+      ManagedPolicyArns:
+        - Ref: DeliveryStreamS3Policy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  DeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName:
+        Fn::Sub: ${AWS::StackName}-DeliveryStream
+      DeliveryStreamType: DirectPut
+      S3DestinationConfiguration:
+        BucketARN:
+          Fn::GetAtt: DestinationBucket.Arn
+        Prefix: DeliveryStream/
+        ErrorOutputPrefix: DeliveryStream-Error/
+        RoleARN:
+          Fn::GetAtt: DeliveryStreamS3Role.Arn
+        BufferingHints:
+          IntervalInSeconds: 60
+          SizeInMBs: 1
+        CompressionFormat: UNCOMPRESSED
+        EncryptionConfiguration:
+          NoEncryptionConfig: NoEncryption

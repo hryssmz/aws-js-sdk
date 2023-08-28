@@ -1,0 +1,49 @@
+# sso/templates/sso-permissiosn.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Permissions for IAM Identity Center
+
+Parameters:
+  InstanceArn:
+    Type: String
+    Description: Instance ARN for IAM Identity Center
+    Default: arn:aws:sso:::instance/ssoins-775850417ae45fb7
+
+  IdentityStoreId:
+    Type: String
+    Description: Identity store ID
+    Default: d-95676dc1f8
+
+Resources:
+  AdminPermissionSet:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-Admin
+      Description: Admin permission set
+      InstanceArn:
+        Ref: InstanceArn
+      ManagedPolicies:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  AdminGroup:
+    Type: AWS::IdentityStore::Group
+    Properties:
+      DisplayName:
+        Fn::Sub: ${AWS::StackName}-AdminGroup
+      Description: Admin group
+      IdentityStoreId:
+        Ref: IdentityStoreId
+
+  AdminGroupAssignment:
+    Type: AWS::SSO::Assignment
+    Properties:
+      InstanceArn:
+        Ref: InstanceArn
+      PermissionSetArn:
+        Fn::GetAtt: AdminPermissionSet.PermissionSetArn
+      PrincipalId:
+        Fn::GetAtt: AdminGroup.GroupId
+      PrincipalType: GROUP
+      TargetId:
+        Ref: AWS::AccountId
+      TargetType: AWS_ACCOUNT

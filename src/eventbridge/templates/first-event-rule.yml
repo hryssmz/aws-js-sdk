@@ -155,6 +155,8 @@ Resources:
       Targets:
         - Id:
             Fn::GetAtt: EC2RunningTopic.TopicName
+          Arn:
+            Ref: EC2RunningTopic
 
   EC2RunningTopicPolicy:
     Type: AWS::SNS::TopicPolicy
@@ -176,12 +178,31 @@ Resources:
                 aws:SourceArn:
                   Fn::GetAtt: EC2RunningRule.Arn
 
+  EC2MonitorFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2MonitorFunctionRole-${AWS::Region}
+      Description: Service role for EC2MonitorFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
   EC2MonitorFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-EC2MonitorFunction
       Description: Serverless function with EventBridge rule configured
+      Role:
+        Fn::GetAtt: EC2MonitorFunctionRole.Arn
       Handler: index.handler
       Runtime: nodejs18.x
       Architectures:
@@ -208,9 +229,13 @@ Resources:
       InlineCode: |
         exports.handler = async event => {
           const { Records } = event;
-          const messages = Records.map(({ Sns }) => Sns).map(({ Message }) => Message);
-          console.log(JSON.stringify(messages, null, 2));
-          return messages;
+          const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
+            JSON.parse(Message)
+          );
+          records.forEach(record => {
+            console.log(JSON.stringify(record, null, 2));
+          });
+          return records;
         };
 
   EC2MonitorFunctionLogGroup:

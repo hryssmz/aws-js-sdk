@@ -1,0 +1,497 @@
+# logs/templates/cw-agent-cpu.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: CloudWatch Agent collects CPU metrics
+
+Parameters:
+  DesiredCapacity:
+    Type: Number
+    Description: DesiredCapacity for auto scaling group
+    Default: 1
+    MinValue: 0
+    MaxValue: 3
+    ConstraintDescription: must be an integer between 0 and 3
+
+  AppPort:
+    Type: Number
+    Description: App port
+    Default: 8000
+
+Mappings:
+  RegionProfile2AMI:
+    ap-northeast-1:
+      AL2023: ami-067871d950411e643
+
+  RegionProfile2Type:
+    ap-northeast-1:
+      AL2023: t2.micro
+
+  Region2DefaultVPC:
+    ap-northeast-1:
+      VPC: vpc-01d5cfd2cad5314f1
+      Subnet: subnet-00ee516fa04d610fe
+      Subnet2: subnet-0c99e2001f0ae6c0a
+      Subnet3: subnet-0deeda0e1c6cd4ffa
+
+Resources:
+  # CloudWatch Logs
+  CloudWatchAgentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/ec2/${AWS::StackName}-CloudWatchAgentLogGroup
+
+  # SSM
+  CloudWatchAgentConfigParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name:
+        Fn::Sub: /AmazonCloudWatch-${AWS::StackName}/amazon-cloudwatch-agent.json
+      Description: SSM Parameter for CloudWatchAgent configuration
+      Type: String
+      Value:
+        Fn::Sub: |
+          {
+            "agent": {
+              "metrics_collection_interval": 60,
+              "logfile": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log"
+            },
+            "metrics": {
+              "namespace": "${AWS::StackName}",
+              "metrics_collected": {
+                "cpu": {
+                  "totalcpu": true,
+                  "measurement": ["cpu_usage_active", "cpu_usage_idle"]
+                }
+              },
+              "append_dimensions": {
+                "ImageId": "${!aws:ImageId}",
+                "InstanceId": "${!aws:InstanceId}",
+                "InstanceType": "${!aws:InstanceType}"
+              }
+            },
+            "logs": {
+              "logs_collected": {
+                "files": {
+                  "collect_list": [
+                    {
+                      "file_path": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log",
+                      "log_group_name": "${CloudWatchAgentLogGroup}",
+                      "log_stream_name": "{instance_id}-amazon-cloudwatch-agent.log"
+                    },
+                    {
+                      "file_path": "/var/log/cfn-hup.log",
+                      "log_group_name": "${CloudWatchAgentLogGroup}",
+                      "log_stream_name": "{instance_id}-cfn-hup.log"
+                    },
+                    {
+                      "file_path": "/var/log/myapp.log",
+                      "log_group_name": "${CloudWatchAgentLogGroup}",
+                      "log_stream_name": "{instance_id}-myapp.log"
+                    }
+                  ]
+                }
+              },
+              "log_stream_name": "default"
+            }
+          }
+
+  InstallCloudWatchAgentAssociation:
+    Type: AWS::SSM::Association
+    Properties:
+      AssociationName:
+        Fn::Sub: ${AWS::StackName}-InstallCloudWatchAgentAssociation
+      Name: AWS-ConfigureAWSPackage
+      Parameters:
+        action:
+          - Install
+        name:
+          - AmazonCloudWatchAgent
+      ApplyOnlyAtCronInterval: true
+      ScheduleExpression: cron(0 2 ? * SUN *)
+      Targets:
+        - Key: tag:Name
+          Values:
+            - EC2Instance
+
+  StartCloudWatchAgentAssociation:
+    Type: AWS::SSM::Association
+    Properties:
+      AssociationName:
+        Fn::Sub: ${AWS::StackName}-StartCloudWatchAgentAssociation
+      Name: AmazonCloudWatch-ManageAgent
+      Parameters:
+        action:
+          - configure
+        optionalConfigurationSource:
+          - ssm
+        optionalConfigurationLocation:
+          - Fn::Sub: /AmazonCloudWatch-${AWS::StackName}/amazon-cloudwatch-agent.json
+        optionalRestart:
+          - "yes"
+      ApplyOnlyAtCronInterval: true
+      ScheduleExpression: cron(0 2 ? * SUN *)
+      Targets:
+        - Key: tag:Name
+          Values:
+            - EC2Instance
+
+  # EC2
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 security group
+      VpcId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      Tags:
+        - Key: Name
+          Value: EC2SecurityGroup
+
+  EC2SecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: HTTP inbound rule
+      GroupId:
+        Ref: EC2SecurityGroup
+      IpProtocol: tcp
+      FromPort:
+        Ref: AppPort
+      ToPort:
+        Ref: AppPort
+      SourceSecurityGroupId:
+        Ref: ALBSecurityGroup
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /etc/systemd/system/myapp.service:
+              content:
+                Fn::Sub: |
+                  [Unit]
+                  Description=MyApp Service
+                  After=network.target
+
+                  [Service]
+                  Type=simple
+                  User=root
+                  WorkingDirectory=/myapp
+                  ExecStart=python -m uvicorn main:app --host 0.0.0.0 --port ${AppPort}
+                  Restart=always
+                  RestartSec=3
+                  StandardOutput=append:/var/log/myapp.log
+                  StandardError=inherit
+
+                  [Install]
+                  WantedBy=multi-user.target
+            /etc/systemd/system/cfn-hup.service:
+              content:
+                Fn::Sub: |
+                  [Unit]
+                  Description=cfn-hup service
+                  After=network.target
+
+                  [Service]
+                  Type=simple
+                  User=root
+                  ExecStart=/opt/aws/bin/cfn-hup
+                  Restart=always
+                  RestartSec=3
+
+                  [Install]
+                  WantedBy=multi-user.target
+            /myapp/main.py:
+              content: |
+                from datetime import datetime
+                from urllib.request import Request, urlopen
+
+                from fastapi import FastAPI
+
+                app = FastAPI()
+
+
+                @app.get("/")
+                async def root() -> dict[str, str]:
+                    req = Request(
+                        "http://169.254.169.254/latest/api/token",
+                        headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
+                        method="PUT",
+                    )
+                    token: str = ""
+                    with urlopen(req) as res:
+                        token = res.read().decode("utf8")
+
+                    req = Request(
+                        "http://169.254.169.254/latest/meta-data/instance-id",
+                        headers={"X-aws-ec2-metadata-token": token},
+                    )
+                    instance_id: str = ""
+                    with urlopen(req) as res:
+                        instance_id = res.read().decode("utf8")
+
+                    req = Request("http://ifconfig.me")
+                    global_ip: str = ""
+                    with urlopen(req) as res:
+                        global_ip = res.read().decode("utf8")
+
+                    response = {
+                        "instance_id": instance_id,
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "global_ip": global_ip,
+                    }
+                    return response
+            /myapp/requirements.txt:
+              content: |
+                fastapi
+                uvicorn[standard]
+            /etc/cfn/cfn-hup.conf:
+              content:
+                Fn::Sub: |
+                  [main]
+                  stack=${AWS::StackName}
+                  region=${AWS::Region}
+                  interval=1
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content:
+                Fn::Sub: |
+                  [cfn-auto-reloader-hook]
+                  triggers=post.update
+                  path=Resources.EC2LaunchTemplate.Metadata.AWS::CloudFormation::Init
+                  action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
+                  runas=root
+    Properties:
+      LaunchTemplateName:
+        Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
+      VersionDescription: Launch template for EC2 instances
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - Key: Name
+              Value: EC2LaunchTemplate
+      LaunchTemplateData:
+        ImageId:
+          Fn::FindInMap:
+            - RegionProfile2AMI
+            - Ref: AWS::Region
+            - AL2023
+        InstanceType:
+          Fn::FindInMap:
+            - RegionProfile2Type
+            - Ref: AWS::Region
+            - AL2023
+        IamInstanceProfile:
+          Name:
+            Ref: EC2InstanceProfile
+        SecurityGroupIds:
+          - Ref: EC2SecurityGroup
+        Monitoring:
+          Enabled: false
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: EC2Instance
+        UserData:
+          Fn::Base64:
+            Fn::Sub: |
+              #!/bin/sh
+              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
+              dnf install -y python python3-pip
+              pip install -r /myapp/requirements.txt
+              systemctl enable myapp.service
+              systemctl start myapp.service
+              systemctl enable cfn-hup.service
+              systemctl start cfn-hup.service
+
+              dnf install -y amazon-cloudwatch-agent
+              amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c ssm:${CloudWatchAgentConfigParameter}
+
+              timeout 600 yes >/dev/null &
+
+              /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --region ${AWS::Region} --resource AutoScalingGroup
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    CreationPolicy:
+      ResourceSignal:
+        Count:
+          Ref: DesiredCapacity
+        Timeout: PT4M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: 2
+        MinInstancesInService: 0
+        MinSuccessfulInstancesPercent: 100
+        SuspendProcesses:
+          - HealthCheck
+          - ReplaceUnhealthy
+          - AZRebalance
+          - AlarmNotification
+          - ScheduledActions
+        PauseTime: PT4M
+        WaitOnResourceSignals: true
+    Properties:
+      AutoScalingGroupName:
+        Fn::Sub: ${AWS::StackName}-AutoScalingGroup
+      MinSize: 0
+      MaxSize: 3
+      DesiredCapacity:
+        Ref: DesiredCapacity
+      DesiredCapacityType: units
+      DefaultInstanceWarmup: 120
+      HealthCheckGracePeriod: 60
+      HealthCheckType: EC2
+      VPCZoneIdentifier:
+        - Fn::FindInMap:
+            - Region2DefaultVPC
+            - Ref: AWS::Region
+            - Subnet
+        - Fn::FindInMap:
+            - Region2DefaultVPC
+            - Ref: AWS::Region
+            - Subnet2
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: EC2LaunchTemplate
+        Version:
+          Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
+      TargetGroupARNs:
+        - Ref: ALBTargetGroup
+      Tags:
+        - Key: Name
+          Value: AutoScalingGroup
+          PropagateAtLaunch: false
+
+  # Elastic Load Balancing
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-ALBSecurityGroup
+      GroupDescription: ALB security group
+      VpcId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: ALBSecurityGroup
+
+  ALBSecurityGroupEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      Description: HTTP outbound rule
+      GroupId:
+        Ref: ALBSecurityGroup
+      IpProtocol: tcp
+      FromPort:
+        Ref: AppPort
+      ToPort:
+        Ref: AppPort
+      DestinationSecurityGroupId:
+        Ref: EC2SecurityGroup
+
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ALB
+      Type: application
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      SecurityGroups:
+        - Ref: ALBSecurityGroup
+      Subnets:
+        - Fn::FindInMap:
+            - Region2DefaultVPC
+            - Ref: AWS::Region
+            - Subnet
+        - Fn::FindInMap:
+            - Region2DefaultVPC
+            - Ref: AWS::Region
+            - Subnet2
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ALBTargetGroup
+      TargetType: instance
+      IpAddressType: ipv4
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Port:
+        Ref: AppPort
+      VpcId:
+        Fn::FindInMap:
+          - Region2DefaultVPC
+          - Ref: AWS::Region
+          - VPC
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      Matcher:
+        HttpCode: 200
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 10
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn:
+        Ref: ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: ALBTargetGroup
+
+Outputs:
+  ALBDNSName:
+    Value:
+      Fn::GetAtt: ALB.DNSName

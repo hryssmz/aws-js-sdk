@@ -94,25 +94,6 @@ Resources:
       LogGroupName:
         Fn::Sub: /aws/lambda/${ProducerFunction}
 
-  ConsumerFunctionPolicy:
-    Type: AWS::IAM::ManagedPolicy
-    Properties:
-      ManagedPolicyName:
-        Fn::Sub: ${AWS::StackName}-ConsumerFunctionPolicy-${AWS::Region}
-      Description: Policy for ConsumerFunction
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Action:
-              - kinesis:GetRecords
-              - kinesis:GetShardIterator
-              - kinesis:DescribeStream
-              - kinesis:ListShards
-              - kinesis:ListStreams
-            Resource:
-              - Fn::GetAtt: KinesisStream.Arn
-
   ConsumerFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -129,7 +110,6 @@ Resources:
               - sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - Ref: ConsumerFunctionPolicy
 
   ConsumerFunction:
     Type: AWS::Serverless::Function

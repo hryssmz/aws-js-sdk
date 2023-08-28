@@ -9,7 +9,7 @@ Resources:
     Properties:
       Name:
         Fn::Sub: ${AWS::StackName}-ResourceGroup
-      Description: Tag-based resource group
+      Description: Stack-based resource group
       ResourceQuery:
         Type: CLOUDFORMATION_STACK_1_0
         Query:

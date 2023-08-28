@@ -1,0 +1,168 @@
+# securityhub/templates/first-hub.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: My first Hub
+
+Resources:
+  # AWS Config
+  ConfigBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-configbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  ConfigBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: ConfigBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ConfigBucketAccessPermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+              - s3:ListBucket
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:s3:::${ConfigBucket}
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+          - Sid: S3ObjectAccessPermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:s3:::${ConfigBucket}/AWSLogs/${AWS::AccountId}/Config/*
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+                s3:x-amz-acl: bucket-owner-full-control
+          - Sid: ConfigBucketAccessDeny
+            Action:
+              - s3:*
+            Effect: Deny
+            Principal: "*"
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:s3:::${ConfigBucket}
+              - Fn::Sub: arn:${AWS::Partition}:s3:::${ConfigBucket}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  ConfigTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-ConfigTopic
+      DisplayName: AWS Config Notification Topic
+
+  ConfigTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - Ref: ConfigTopic
+      PolicyDocument:
+        Statement:
+          - Sid: SNSAccessPermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - sns:Publish
+            Resource:
+              - Ref: ConfigTopic
+
+  SubscriberFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SubscriberFunctionRole-${AWS::Region}
+      Description: Service role for SubscriberFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SubscriberFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SubscriberFunction
+      Description: Subscriber function for the topic
+      Role:
+        Fn::GetAtt: SubscriberFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: ConfigTopic
+      InlineCode: |
+        exports.handler = async event => {
+          const { Records } = event;
+          const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
+            JSON.parse(Message)
+          );
+          records.forEach(record => {
+            console.log(JSON.stringify(record, null, 2));
+          });
+          return records;
+        };
+
+  SubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SubscriberFunction}
+
+  DeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    DependsOn: ConfigBucketPolicy
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-DeliveryChannel
+      S3BucketName:
+        Ref: ConfigBucket
+      SnsTopicARN:
+        Ref: ConfigTopic
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: One_Hour
+
+  ConfigurationRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    DependsOn: ConfigBucketPolicy
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ConfigurationRecorder
+      RoleARN:
+        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig
+      RecordingGroup:
+        AllSupported: true
+        IncludeGlobalResourceTypes: true
+
+  # Security Hub
+  Hub:
+    Type: AWS::SecurityHub::Hub
+    Properties: {}

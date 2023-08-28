@@ -1,16 +1,9 @@
-# ecs/templates/sample-batch.yml
+# ecs/templates/first-batch.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Getting started batch
 
-Parameters:
-  MyIP:
-    Type: String
-    Description: My IPv4 address
-    Default: 116.64.133.211
-    AllowedPattern: \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}
-    ConstraintDescription: must be a valid IP address of the form x.x.x.x
-
 Resources:
+  # VPC
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -74,24 +67,19 @@ Resources:
       GatewayId:
         Ref: InternetGateway
 
-  WebSecurityGroup:
+  BatchSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName:
-        Fn::Sub: ${AWS::StackName}-WebSecurityGroup
+        Fn::Sub: ${AWS::StackName}-BatchSecurityGroup
       GroupDescription: Web security group
       VpcId:
         Ref: VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp:
-            Fn::Sub: ${MyIP}/32
       Tags:
         - Key: Name
-          Value: WebSecurityGroup
+          Value: BatchSecurityGroup
 
+  # Batch
   ECSTasksServiceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -157,7 +145,7 @@ Resources:
         Type: FARGATE
         MaxvCpus: 1
         SecurityGroupIds:
-          - Ref: WebSecurityGroup
+          - Ref: BatchSecurityGroup
         Subnets:
           - Ref: Subnet
 
@@ -186,8 +174,9 @@ Resources:
         AttemptDurationSeconds: 60
       ContainerProperties:
         Command:
-          - cat
-          - /etc/os-release
+          - /bin/sh
+          - -c
+          - cat /etc/os-release
         Image: amazonlinux
         ExecutionRoleArn:
           Fn::GetAtt: ECSTasksServiceRole.Arn
@@ -196,7 +185,7 @@ Resources:
         FargatePlatformConfiguration:
           PlatformVersion: LATEST
         NetworkConfiguration:
-          AssignPublicIp: ENABLED
+          AssignPublicIp: DISABLED
         LogConfiguration:
           LogDriver: awslogs
           Options:

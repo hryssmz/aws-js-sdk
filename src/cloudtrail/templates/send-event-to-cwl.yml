@@ -212,9 +212,13 @@ Resources:
       InlineCode: |
         exports.handler = async event => {
           const { Records } = event;
-          const messages = Records.map(({ Sns }) => Sns).map(({ Message }) => Message);
-          console.log(JSON.stringify(messages, null, 2));
-          return messages;
+          const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
+            JSON.parse(Message)
+          );
+          records.forEach(record => {
+            console.log(JSON.stringify(record, null, 2));
+          });
+          return records;
         };
 
   TrailAlarmFunctionLogGroup:

@@ -1,0 +1,194 @@
+# ssm/templates/approve-automation.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: My Automation runbook with approval
+
+Parameters:
+  ApproverUserName:
+    Type: String
+    Description: Approver user name
+    Default: Administrator
+
+Resources:
+  ApiKeyParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name:
+        Fn::Sub: /${AWS::StackName}/ApiKeyParameter
+      Description: API key SSM parameter
+      Type: String
+      Value: keyboard cat
+
+  RunbookDocumentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-RunbookDocumentRole-${AWS::Region}
+      Description: Service role for RunbookDocument
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ssm.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-execution/*
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole
+
+  RunbookDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RunbookDocument
+      DocumentType: Automation
+      DocumentFormat: YAML
+      TargetType: /
+      UpdateMethod: NewVersion
+      Content:
+        schemaVersion: "0.3"
+        description: My first Automation runbook
+        assumeRole: "{{ AutomationAssumeRole }}"
+        parameters:
+          AutomationAssumeRole:
+            type: AWS::IAM::Role::Arn
+            description: Role to execute this runbook
+            default:
+              Fn::GetAtt: RunbookDocumentRole.Arn
+          ApiKey:
+            type: String
+            description: API key
+            default:
+              Fn::Sub: "{{ ssm:${ApiKeyParameter} }}"
+        mainSteps:
+          - name: ReviewInvokeLambdaFunction
+            action: aws:approve
+            description: Approve invoke custom Lambda function
+            timeoutSeconds: 3600
+            onFailure: Abort
+            inputs:
+              NotificationArn:
+                Ref: ApprovalTopic
+              Message:
+                Fn::Sub: Please approve this step of the Automation to invoke Lambda function `${LambdaFunction}`.
+              MinRequiredApprovals: 1
+              Approvers:
+                - Ref: ApproverUserName
+            nextStep: InvokeLambdaFunction
+          - name: InvokeLambdaFunction
+            action: aws:invokeLambdaFunction
+            description: Invoke custom Lambda function
+            timeoutSeconds: 30
+            inputs:
+              FunctionName:
+                Ref: LambdaFunction
+              InputPayload:
+                apiKey: "{{ ApiKey }}"
+                executionId: "{{ automation:EXECUTION_ID }}"
+            isEnd: true
+
+  ApprovalTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: Automation-${AWS::StackName}-ApprovalTopic
+
+  SubscriberFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SubscriberFunctionRole-${AWS::Region}
+      Description: Service role for SubscriberFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SubscriberFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SubscriberFunction
+      Description: Subscriber function for the topic
+      Role:
+        Fn::GetAtt: SubscriberFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: ApprovalTopic
+      InlineCode: |
+        exports.handler = async event => {
+          const { Records } = event;
+          const messages = Records.map(({ Sns }) => Sns).map(({ Message }) => Message);
+          messages.forEach(message => {
+            console.log(message);
+          });
+          return messages;
+        };
+
+  SubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SubscriberFunction}
+
+  LambdaFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-LambdaFunctionRole-${AWS::Region}
+      Description: Service role for LambdaFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  LambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: Automation-${AWS::StackName}-LambdaFunction
+      Description: Lambda function
+      Role:
+        Fn::GetAtt: LambdaFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Timeout: 30
+      InlineCode: |
+        exports.handler = async event => {
+          console.log(`event: ${JSON.stringify(event, null, 2)}`);
+          return { message: "Hello World!" };
+        };
+
+  LambdaFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${LambdaFunction}

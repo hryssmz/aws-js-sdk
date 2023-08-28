@@ -1,0 +1,131 @@
+# ssm/templates/first-patch-baseline.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: My first patch baseline
+
+Mappings:
+  RegionProfile2AMI:
+    ap-northeast-1:
+      AL2023: ami-067871d950411e643
+
+  RegionProfile2Type:
+    ap-northeast-1:
+      AL2023: t2.micro
+
+Resources:
+  # EC2
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName:
+        Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
+      VersionDescription: Launch template for EC2 instances
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - Key: Name
+              Value: EC2LaunchTemplate
+      LaunchTemplateData:
+        ImageId:
+          Fn::FindInMap:
+            - RegionProfile2AMI
+            - Ref: AWS::Region
+            - AL2023
+        InstanceType:
+          Fn::FindInMap:
+            - RegionProfile2Type
+            - Ref: AWS::Region
+            - AL2023
+        IamInstanceProfile:
+          Name:
+            Ref: EC2InstanceProfile
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: EC2Instance
+              - Key: PatchGroup
+                Value:
+                  Ref: AWS::StackName
+
+  EC2ResourceGroup:
+    Type: AWS::ResourceGroups::Group
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-EC2ResourceGroup
+      Description: EC2 resource group
+      ResourceQuery:
+        Type: CLOUDFORMATION_STACK_1_0
+        Query:
+          ResourceTypeFilters:
+            - AWS::EC2::Instance
+          StackIdentifier:
+            Ref: AWS::StackId
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: EC2LaunchTemplate
+        Version:
+          Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
+
+  EC2Instance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: EC2LaunchTemplate
+        Version:
+          Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: EC2Instance2
+        - Key: PatchGroup
+          Value: PatchGroup2
+
+  # SSM
+  PatchBaseline:
+    Type: AWS::SSM::PatchBaseline
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-PatchBaseline
+      Description: My patch baseline
+      OperatingSystem: AMAZON_LINUX_2023
+      PatchGroups:
+        - Ref: AWS::StackName
+      ApprovedPatchesEnableNonSecurity: true
+      ApprovalRules:
+        PatchRules:
+          - PatchFilterGroup:
+              PatchFilters:
+                - Key: PRODUCT
+                  Values:
+                    - AmazonLinux2023
+            ApproveAfterDays: 7
+            ComplianceLevel: UNSPECIFIED

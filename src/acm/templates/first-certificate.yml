@@ -1,0 +1,39 @@
+# acm/templates/first-certificate.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: First certificate
+
+Parameters:
+  HostedZoneId:
+    Type: String
+    Description: Hosted zone ID
+    Default: Z066591138RXWJLQXUCQK
+
+  DomainName:
+    Type: String
+    Description: Domain name
+    Default: api.hryssmz.click
+
+Resources:
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName:
+        Ref: DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName:
+            Ref: DomainName
+          HostedZoneId:
+            Ref: HostedZoneId
+
+  WildcardCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName:
+        Fn::Sub: "*.${DomainName}"
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName:
+            Ref: DomainName
+          HostedZoneId:
+            Ref: HostedZoneId

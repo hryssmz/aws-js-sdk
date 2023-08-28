@@ -9,8 +9,8 @@ Parameters:
     Default: AL2
     AllowedValues:
       - AL2
-      - AL2013
-    ConstraintDescription: must be either 'AL2' or 'AL2013'
+      - AL2023
+    ConstraintDescription: must be either 'AL2' or 'AL2023'
 
   InstanceType:
     Type: String
@@ -42,7 +42,7 @@ Mappings:
   RegionOS2AMI:
     ap-northeast-1:
       AL2: ami-030cf0a1edb8636ab
-      AL2013: ami-067871d950411e643
+      AL2023: ami-067871d950411e643
 
 Resources:
   SSHKeyPair:

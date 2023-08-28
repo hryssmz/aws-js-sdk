@@ -1,0 +1,152 @@
+# cloudtrail/templates/org-trail.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Organizations trail
+
+Parameters:
+  OrganizationId:
+    Type: String
+    Description: Organization ID
+    Default: o-wz1cmd48gp
+
+Resources:
+  Trail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: TrailBucketPolicy
+    Properties:
+      TrailName:
+        Fn::Sub: ${AWS::StackName}-Trail
+      IsLogging: true
+      S3BucketName:
+        Ref: TrailBucket
+      IncludeGlobalServiceEvents: true
+      EnableLogFileValidation: true
+      EventSelectors:
+        - IncludeManagementEvents: true
+          ReadWriteType: All
+          ExcludeManagementEventSources:
+            - kms.amazonaws.com
+            - rdsdata.amazonaws.com
+      IsMultiRegionTrail: true
+      IsOrganizationTrail: true
+
+  TrailBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-trailbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  TrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: TrailBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+            Resource:
+              - Fn::GetAtt: TrailBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${AWS::StackName}-Trail
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${TrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+              - Fn::Sub: ${TrailBucket.Arn}/AWSLogs/${OrganizationId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${AWS::StackName}-Trail
+
+Outputs:
+  AthenaDDL:
+    Description: |
+      You can use the following command to extract DDL:
+
+      $ aws cloudformation describe-stacks --query "Stacks[0].Outputs[?OutputKey == 'AthenaDDL'] | @[0].OutputValue" --output text --stack-name STACK_NAME > AthenaDDL.sql
+    Value:
+      Fn::Sub: |-
+        -- Drop table if needed.
+        DROP TABLE IF EXISTS cloudtrail_logs_${AWS::AccountId};
+
+        -- Create table.
+        CREATE EXTERNAL TABLE cloudtrail_logs_${AWS::AccountId} (
+            eventVersion STRING,
+            userIdentity STRUCT<
+                type: STRING,
+                principalId: STRING,
+                arn: STRING,
+                accountId: STRING,
+                invokedBy: STRING,
+                accessKeyId: STRING,
+                userName: STRING,
+                sessionContext: STRUCT<
+                    attributes: STRUCT<
+                        mfaAuthenticated: STRING,
+                        creationDate: STRING
+                    >,
+                    sessionIssuer: STRUCT<
+                        type: STRING,
+                        principalId: STRING,
+                        arn: STRING,
+                        accountId: STRING,
+                        username: STRING
+                    >,
+                    ec2RoleDelivery: STRING,
+                    webIdFederationData: MAP<STRING,STRING>
+                >
+            >,
+            eventTime STRING,
+            eventSource STRING,
+            eventName STRING,
+            awsRegion STRING,
+            sourceIpAddress STRING,
+            userAgent STRING,
+            errorCode STRING,
+            errorMessage STRING,
+            requestParameters STRING,
+            responseElements STRING,
+            additionalEventData STRING,
+            requestId STRING,
+            eventId STRING,
+            resources ARRAY<STRUCT<
+                arn: STRING,
+                accountId: STRING,
+                type: STRING>
+            >,
+            eventType STRING,
+            apiVersion STRING,
+            readOnly STRING,
+            recipientAccountId STRING,
+            serviceEventDetails STRING,
+            sharedEventID STRING,
+            vpcEndpointId STRING,
+            tlsDetails STRUCT<
+                tlsVersion: STRING,
+                cipherSuite: STRING,
+                clientProvidedHostHeader: STRING
+            >
+        )
+        COMMENT 'CloudTrail table for ${TrailBucket} bucket'
+        ROW FORMAT SERDE 'org.apache.hive.hcatalog.data.JsonSerDe'
+        STORED AS INPUTFORMAT 'com.amazon.emr.cloudtrail.CloudTrailInputFormat'
+        OUTPUTFORMAT 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
+        LOCATION 's3://${TrailBucket}/AWSLogs/${OrganizationId}/${AWS::AccountId}/CloudTrail/'
+        TBLPROPERTIES ('classification' = 'cloudtrail');

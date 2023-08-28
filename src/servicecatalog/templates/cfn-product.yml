@@ -1,0 +1,193 @@
+# servicecatalog/templates/cfn-product.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: CloudFormation product
+
+Parameters:
+  PublicKeyBody:
+    Type: String
+    Description: EC2 public key
+    AllowedPattern: ssh-rsa .*
+    ConstraintDescription: must be a valid RSA public key
+
+  Password:
+    Type: String
+    Description: User password
+    Default: P@ssw0rd
+
+Resources:
+  # EC2
+  KeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName:
+        Fn::Sub: ${AWS::StackName}-KeyPair
+      PublicKeyMaterial:
+        Ref: PublicKeyBody
+
+  # IAM
+  LinuxDesktopPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-LinuxDesktopPolicy-${AWS::Region}
+      Description: Policy for Launching Linux Desktop Template
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudFormationProvisionPermissions
+            Effect: Allow
+            Action:
+              - cloudformation:CreateStack
+              - cloudformation:DeleteStack
+              - cloudformation:DescribeStackEvents
+              - cloudformation:DescribeStacks
+              - cloudformation:GetTemplateSummary
+              - cloudformation:SetStackPolicy
+              - cloudformation:ValidateTemplate
+              - cloudformation:UpdateStack
+              - ec2:*
+              - servicecatalog:*
+              - sns:*
+            Resource: "*"
+          - Sid: CloudFormationTemplateAccessPermissions
+            Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: "*"
+
+  LinuxDesktopRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-LinuxDesktopRole-${AWS::Region}
+      Description: Service role for Launching Linux Desktop Template
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: servicecatalog.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: LinuxDesktopPolicy
+
+  EndUserGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EndUserGroup-${AWS::Region}
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSServiceCatalogEndUserFullAccess
+
+  EndUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName:
+        Fn::Sub: ${AWS::StackName}-EndUser
+      Groups:
+        - Ref: EndUserGroup
+      LoginProfile:
+        Password:
+          Ref: Password
+        PasswordResetRequired: false
+
+  # Service Catalog
+  Portfolio:
+    Type: AWS::ServiceCatalog::Portfolio
+    Properties:
+      DisplayName:
+        Fn::Sub: ${AWS::StackName}-Portfolio
+      Description: My first portfolio
+      ProviderName:
+        Ref: AWS::AccountId
+
+  PortfolioPrincipalAssociation:
+    Type: AWS::ServiceCatalog::PortfolioPrincipalAssociation
+    Properties:
+      PortfolioId:
+        Ref: Portfolio
+      PrincipalType: IAM
+      PrincipalARN:
+        Fn::GetAtt: EndUserGroup.Arn
+
+  Product:
+    Type: AWS::ServiceCatalog::CloudFormationProduct
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-Product
+      Description: My first CloudFormation product
+      ProductType: CLOUD_FORMATION_TEMPLATE
+      Owner:
+        Ref: AWS::AccountId
+      Distributor:
+        Ref: AWS::AccountId
+      SupportDescription: Support contact
+      SupportEmail: hryssmz@yahoo.com
+      SupportUrl: https://github.com/hryssmz
+      ProvisioningArtifactParameters:
+        - Name:
+            Fn::Sub: ${AWS::StackName}-ProductTemplate
+          Description: Base version
+          Type: CLOUD_FORMATION_TEMPLATE
+          Info:
+            LoadTemplateFromURL: https://awsdocs.s3.amazonaws.com/servicecatalog/development-environment.template
+
+  PortfolioProductAssociation:
+    Type: AWS::ServiceCatalog::PortfolioProductAssociation
+    Properties:
+      PortfolioId:
+        Ref: Portfolio
+      ProductId:
+        Ref: Product
+
+  LaunchTemplateConstraint:
+    Type: AWS::ServiceCatalog::LaunchTemplateConstraint
+    Properties:
+      Description: Small instance sizes
+      PortfolioId:
+        Ref: Portfolio
+      ProductId:
+        Ref: Product
+      Rules: |
+        {
+          "Rule1": {
+            "Assertions": [
+              {
+                "Assert": {
+                  "Fn::Contains": [["t2.micro", "t2.small"], { "Ref": "InstanceType" }]
+                },
+                "AssertDescription": "Instance type should be t2.micro or t2.small"
+              }
+            ]
+          }
+        }
+
+  LaunchRoleConstraint:
+    Type: AWS::ServiceCatalog::LaunchRoleConstraint
+    Properties:
+      Description: Launch role constraint
+      PortfolioId:
+        Ref: Portfolio
+      ProductId:
+        Ref: Product
+      RoleArn:
+        Fn::GetAtt: LinuxDesktopRole.Arn
+
+Outputs:
+  # IAM outputs
+  SignInUrl:
+    Description: AWS sign in URL
+    Value:
+      Fn::Sub: https://${AWS::AccountId}.signin.aws.amazon.com/console/
+
+  EndUserName:
+    Description: EndUser user name
+    Value:
+      Ref: EndUser
+
+  Password:
+    Description: User password
+    Value:
+      Ref: Password

@@ -1,0 +1,385 @@
+# ses/templates/receive-email.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Receive email on SES
+
+Parameters:
+  RootDomain:
+    Type: String
+    Description: Root domain name
+    Default: hryssmz.click
+
+Rules:
+  TestTokyoOrVirginia:
+    Assertions:
+      - AssertDescription: Only us-east-1 is allowed
+        Assert:
+          Fn::Equals:
+            - us-east-1
+            - Ref: AWS::Region
+
+Resources:
+  # SES
+  ConfigurationSet:
+    Type: AWS::SES::ConfigurationSet
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ConfigurationSet
+      ReputationOptions:
+        ReputationMetricsEnabled: true
+      SuppressionOptions:
+        SuppressedReasons:
+          - COMPLAINT
+          - BOUNCE
+
+  ConfigurationSetEventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    Properties:
+      ConfigurationSetName:
+        Ref: ConfigurationSet
+      EventDestination:
+        Name:
+          Fn::Sub: ${AWS::StackName}-ConfigurationSetEventDestination
+        Enabled: true
+        MatchingEventTypes:
+          - send
+          - reject
+          - bounce
+          - complaint
+          - delivery
+          - open
+          - click
+          - renderingFailure
+          - deliveryDelay
+          - subscription
+        SnsDestination:
+          TopicARN:
+            Ref: SESEventTopic
+
+  DomainIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity:
+        Ref: RootDomain
+      ConfigurationSetAttributes:
+        ConfigurationSetName:
+          Ref: ConfigurationSet
+      DkimAttributes:
+        SigningEnabled: true
+
+  RecordSetGroup:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      Comment: RecordSet group for Route 53 hosted zone
+      HostedZoneName:
+        Fn::Sub: ${RootDomain}.
+      RecordSets:
+        - Name:
+            Fn::GetAtt: DomainIdentity.DkimDNSTokenName1
+          Type: CNAME
+          ResourceRecords:
+            - Fn::GetAtt: DomainIdentity.DkimDNSTokenValue1
+          TTL: 900
+        - Name:
+            Fn::GetAtt: DomainIdentity.DkimDNSTokenName2
+          Type: CNAME
+          ResourceRecords:
+            - Fn::GetAtt: DomainIdentity.DkimDNSTokenValue2
+          TTL: 900
+        - Name:
+            Fn::GetAtt: DomainIdentity.DkimDNSTokenName3
+          Type: CNAME
+          ResourceRecords:
+            - Fn::GetAtt: DomainIdentity.DkimDNSTokenValue3
+          TTL: 900
+        - Name:
+            Ref: RootDomain
+          Type: MX
+          ResourceRecords:
+            - Fn::Sub: 10 inbound-smtp.${AWS::Region}.amazonaws.com
+          TTL: 900
+
+  ReceiptRuleSet:
+    Type: AWS::SES::ReceiptRuleSet
+    Properties:
+      RuleSetName:
+        Fn::Sub: ${AWS::StackName}-ReceiptRuleSet
+
+  ReceiptRule:
+    Type: AWS::SES::ReceiptRule
+    DependsOn:
+      - RecipientFunctionPermission
+      - SESEventTopicPolicy
+    Properties:
+      RuleSetName:
+        Ref: ReceiptRuleSet
+      Rule:
+        Name:
+          Fn::Sub: ${AWS::StackName}-ReceiptRule
+        Enabled: true
+        Recipients:
+          - Ref: RootDomain
+        Actions:
+          - LambdaAction:
+              FunctionArn:
+                Fn::GetAtt: RecipientFunction.Arn
+              TopicArn:
+                Ref: SESEventTopic
+
+  # Lambda
+  SendEmailFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-SendEmailFunctionPolicy-${AWS::Region}
+      Description: Policy for SendEmailFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ses:SendEmail
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${DomainIdentity}
+              - Fn::Sub: arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${ConfigurationSet}
+
+  SendEmailFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SendEmailFunctionRole-${AWS::Region}
+      Description: Service role for SendEmailFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: SendEmailFunctionPolicy
+
+  SendEmailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SendEmailFunction
+      Description: Send email function
+      Role:
+        Fn::GetAtt: SendEmailFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          ROOT_DOMAIN:
+            Ref: RootDomain
+          CONFIGURATION_SET:
+            Ref: ConfigurationSet
+      InlineCode: |
+        const { SendEmailCommand, SESv2Client } = require("@aws-sdk/client-sesv2");
+
+        exports.handler = async () => {
+          const client = new SESv2Client();
+          const rootDomain = process.env.ROOT_DOMAIN;
+          const sender = `Hiroyasu Shimizu <from@${rootDomain}>`;
+          const recipient = `to@${rootDomain}`;
+          const cc = `cc@${rootDomain}`;
+          const bcc = `bcc@${rootDomain}`;
+          const configurationSet = process.env.CONFIGURATION_SET;
+          const subject = "Amazon SES Test (AWS SDK for JavaScript)";
+          const bodyTxt = [
+            "Amazon SES Test (AWS SDK for JavaScript)",
+            "This email was sent with Amazon SES using the AWS SDK for JavaScript.",
+          ].join("\r\n");
+          const bodyHtml = `
+            <html>
+              <head></head>
+              <body>
+              <h1>Amazon SES Test (AWS SDK for JavaScript)</h1>
+              <p>This email was sent with
+                <a href='https://aws.amazon.com/ses/'>Amazon SES</a> using the
+                <a href='https://aws.amazon.com/sdk-for-javascript/'>
+                AWS SDK for JavaScript</a>.</p>
+              </body>
+            </html>
+          `;
+          const charset = "UTF-8";
+
+          const command = new SendEmailCommand({
+            FromEmailAddress: sender,
+            Destination: {
+              ToAddresses: [recipient],
+              CcAddresses: [cc],
+              BccAddresses: [bcc],
+            },
+            Content: {
+              Simple: {
+                Body: {
+                  Html: { Data: bodyHtml, CharSet: charset },
+                  Text: { Data: bodyTxt, Charset: charset },
+                },
+                Subject: { Data: subject, Charset: charset },
+              },
+            },
+            ConfigurationSetName: configurationSet,
+          });
+
+          const messageId = await client
+            .send(command)
+            .then(({ MessageId }) => {
+              console.log(`Email sent! Message ID: ${MessageId}`);
+              return MessageId;
+            })
+            .catch(error => {
+              console.error(`${error.name}: ${error.message}`);
+              return undefined;
+            });
+
+          return messageId;
+        };
+
+  SendEmailFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SendEmailFunction}
+
+  RecipientFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-RecipientFunctionRole-${AWS::Region}
+      Description: Service role for RecipientFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  RecipientFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-RecipientFunction
+      Description: Email receive logging function
+      Role:
+        Fn::GetAtt: RecipientFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      InlineCode: |
+        exports.handler = async event => {
+          const { Records } = event;
+          const messages = Records.map(({ ses }) => ses);
+          console.log(JSON.stringify(ses, null, 2));
+          return messages;
+        };
+
+  RecipientFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${RecipientFunction}
+
+  RecipientFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: RecipientFunction
+      Principal: ses.amazonaws.com
+      SourceArn:
+        Fn::Sub: arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:receipt-rule-set/${ReceiptRuleSet}:receipt-rule/${AWS::StackName}-ReceiptRule
+
+  # SNS
+  SESEventTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-SESEventTopic
+
+  SESEventTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - Ref: SESEventTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sns:Publish
+            Principal:
+              Service: ses.amazonaws.com
+            Resource:
+              - Ref: SESEventTopic
+            Condition:
+              StringEquals:
+                AWS:SourceAccount:
+                  Ref: AWS::AccountId
+                AWS:SourceArn:
+                  - Fn::Sub: arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${ConfigurationSet}
+                  - Fn::Sub: arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:receipt-rule-set/${ReceiptRuleSet}:receipt-rule/${AWS::StackName}-ReceiptRule
+
+  SESEventFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SESEventFunctionRole-${AWS::Region}
+      Description: Service role for SESEventFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SESEventFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SESEventFunction
+      Description: SES event logging function
+      Role:
+        Fn::GetAtt: SESEventFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: SESEventTopic
+      InlineCode: |
+        exports.handler = async event => {
+          const { Records } = event;
+          const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
+            JSON.parse(Message)
+          );
+          records.forEach(record => {
+            console.log(JSON.stringify(record, null, 2));
+          });
+          return records;
+        };
+
+  SESEventFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SESEventFunction}

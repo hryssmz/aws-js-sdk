@@ -10,12 +10,47 @@ Resources:
       TopicName:
         Fn::Sub: ${AWS::StackName}-Topic
 
+  SenderFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-SenderFunctionPolicy-${AWS::Region}
+      Description: Policy for SenderFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sns:Publish
+            Resource:
+              - Ref: Topic
+
+  SenderFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SenderFunctionRole-${AWS::Region}
+      Description: Service role for SenderFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: SenderFunctionPolicy
+
   SenderFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-SenderFunction
       Description: Sender function for the topic
+      Role:
+        Fn::GetAtt: SenderFunctionRole.Arn
       Handler: index.handler
       Runtime: nodejs18.x
       Architectures:
@@ -48,15 +83,22 @@ Resources:
       LogGroupName:
         Fn::Sub: /aws/lambda/${SenderFunction}
 
-  SenderFunctionTopicConnector:
-    Type: AWS::Serverless::Connector
+  ReceiverFunctionRole:
+    Type: AWS::IAM::Role
     Properties:
-      Source:
-        Id: SenderFunction
-      Destination:
-        Id: Topic
-      Permissions:
-        - Write
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ReceiverFunctionRole-${AWS::Region}
+      Description: Service role for ReceiverFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
   ReceiverFunction:
     Type: AWS::Serverless::Function
@@ -64,6 +106,8 @@ Resources:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-ReceiverFunction
       Description: Receiver function for the topic
+      Role:
+        Fn::GetAtt: ReceiverFunctionRole.Arn
       Handler: index.handler
       Runtime: nodejs18.x
       Architectures:
@@ -78,7 +122,9 @@ Resources:
         exports.handler = async event => {
           const { Records } = event;
           const messages = Records.map(({ Sns }) => Sns).map(({ Message }) => Message);
-          console.log(JSON.stringify(messages, null, 2));
+          messages.forEach(message => {
+            console.log(message);
+          });
           return messages;
         };
 

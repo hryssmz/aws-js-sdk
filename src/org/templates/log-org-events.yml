@@ -1,7 +1,7 @@
-# org/templates/eb-trail-global.yml
+# org/templates/log-org-events.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: EventBridge and CloudTrail in region us-east-1
+Description: Log AWS Organizations events
 
 Rules:
   TestUsEast1:

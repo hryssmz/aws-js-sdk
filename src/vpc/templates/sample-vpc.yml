@@ -27,7 +27,7 @@ Conditions:
 Mappings:
   Region2Instance:
     ap-northeast-1:
-      ImageId: ami-067871d950411e643 # AL2013
+      ImageId: ami-067871d950411e643 # AL2023
       InstanceType: t2.micro
 
 Resources:

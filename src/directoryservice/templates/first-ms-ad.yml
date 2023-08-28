@@ -1,0 +1,546 @@
+# directoryservice/templates/first-ms-ad.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: My first Microsoft Active Directory
+
+Parameters:
+  SshCidrIp:
+    Type: String
+    Description: SSH CIDR IP block
+    AllowedPattern: \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}
+    ConstraintDescription: must be a valid CIDR block of the form x.x.x.x/x
+
+  PublicKeyBody:
+    Type: String
+    Description: EC2 public key
+    AllowedPattern: ssh-rsa .*
+    ConstraintDescription: must be a valid RSA public key
+
+  DirectoryName:
+    Type: String
+    Description: Name of the directory
+    Default: corp.hryssmz.click
+
+  WindowsServerAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Windows Server AMI ID
+    Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
+
+  InstanceType:
+    Type: String
+    Description: Instance type
+    Default: t2.micro
+
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR block
+    Default: 172.21.0.0/16
+
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDR blocks
+    Default: 172.21.0.0/20,172.21.16.0/20
+
+  OpVPCCidr:
+    Type: String
+    Description: On-premises VPC CIDR block
+    Default: 172.22.0.0/16
+
+  OpSubnetCidrs:
+    Type: CommaDelimitedList
+    Description: On-premises Subnet CIDR blocks
+    Default: 172.22.0.0/20,172.22.16.0/20
+
+Resources:
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Ref: VPCCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet
+
+  Subnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet2
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: RouteTable
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet
+      RouteTableId:
+        Ref: RouteTable
+
+  SubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet2
+      RouteTableId:
+        Ref: RouteTable
+
+  # On-premises VPC
+  OpVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Ref: OpVPCCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: OpVPC
+
+  OpInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: OpInternetGateway
+
+  OpInternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: OpVPC
+      InternetGatewayId:
+        Ref: OpInternetGateway
+
+  OpSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: OpSubnetCidrs
+      VpcId:
+        Ref: OpVPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: OpSubnet
+
+  OpSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: OpSubnetCidrs
+      VpcId:
+        Ref: OpVPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: OpSubnet2
+
+  OpRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: OpVPC
+      Tags:
+        - Key: Name
+          Value: OpRouteTable
+
+  OpInternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: OpInternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: OpRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: OpInternetGateway
+
+  OpSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: OpSubnet
+      RouteTableId:
+        Ref: OpRouteTable
+
+  OpSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: OpSubnet2
+      RouteTableId:
+        Ref: OpRouteTable
+
+  # VPC Peering
+  VPCPeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId:
+        Ref: OpVPC
+      PeerRegion:
+        Ref: AWS::Region
+      PeerVpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: VPCPeeringConnection
+
+  PeeringRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock:
+        Fn::GetAtt: OpVPC.CidrBlock
+      VpcPeeringConnectionId:
+        Ref: VPCPeeringConnection
+
+  OpPeeringRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: OpRouteTable
+      DestinationCidrBlock:
+        Fn::GetAtt: VPC.CidrBlock
+      VpcPeeringConnectionId:
+        Ref: VPCPeeringConnection
+
+  # EC2
+  KeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName:
+        Fn::Sub: ${AWS::StackName}-KeyPair
+      PublicKeyMaterial:
+        Ref: PublicKeyBody
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 instance security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - Description: Remote Desktop
+          IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp:
+            Ref: SshCidrIp
+        - Description: All local VPC traffic
+          IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+      Tags:
+        - Key: Name
+          Value: EC2SecurityGroup
+
+  OpSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-OpSecurityGroup
+      GroupDescription: On-premises EC2 instance security group
+      VpcId:
+        Ref: OpVPC
+      SecurityGroupIngress:
+        - Description: Remote Desktop
+          IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp:
+            Ref: SshCidrIp
+        - Description: DNS
+          IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: Kerberos
+          IpProtocol: tcp
+          FromPort: 88
+          ToPort: 88
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: LDAP
+          IpProtocol: tcp
+          FromPort: 389
+          ToPort: 389
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: Kerberos change / set password
+          IpProtocol: tcp
+          FromPort: 464
+          ToPort: 464
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: SMB / CIFS
+          IpProtocol: tcp
+          FromPort: 445
+          ToPort: 445
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: Replication
+          IpProtocol: tcp
+          FromPort: 135
+          ToPort: 135
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: LDAP SSL
+          IpProtocol: tcp
+          FromPort: 636
+          ToPort: 636
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: RPC
+          IpProtocol: tcp
+          FromPort: 49152
+          ToPort: 65535
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: LDAP GC & LDAP GC SSL
+          IpProtocol: tcp
+          FromPort: 3268
+          ToPort: 3269
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: DNS
+          IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: Kerberos
+          IpProtocol: udp
+          FromPort: 88
+          ToPort: 88
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: Windows Time
+          IpProtocol: udp
+          FromPort: 123
+          ToPort: 123
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: LDAP
+          IpProtocol: udp
+          FromPort: 389
+          ToPort: 389
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: Kerberos change / set password
+          IpProtocol: udp
+          FromPort: 464
+          ToPort: 464
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: All local VPC traffic
+          IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp:
+            Fn::GetAtt: OpVPC.CidrBlock
+      Tags:
+        - Key: Name
+          Value: OpSecurityGroup
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonSSMDirectoryServiceAccess
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName:
+        Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
+      VersionDescription: Launch template for EC2 instances
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - Key: Name
+              Value: EC2LaunchTemplate
+      LaunchTemplateData:
+        ImageId:
+          Ref: WindowsServerAMI
+        InstanceType:
+          Ref: InstanceType
+        KeyName:
+          Ref: KeyPair
+        IamInstanceProfile:
+          Name:
+            Ref: EC2InstanceProfile
+        SecurityGroupIds:
+          - Ref: EC2SecurityGroup
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: EC2Instance
+              - Key: Directory
+                Value: MicrosoftAD
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: EC2LaunchTemplate
+        Version:
+          Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
+      SubnetId:
+        Ref: Subnet
+
+  # Directory Services
+  MicrosoftAD:
+    Type: AWS::DirectoryService::MicrosoftAD
+    Properties:
+      Name:
+        Ref: DirectoryName
+      ShortName: CORP
+      Password: P@ssw0rd
+      Edition: Standard
+      VpcSettings:
+        SubnetIds:
+          - Ref: Subnet
+          - Ref: Subnet2
+        VpcId:
+          Ref: VPC
+
+  DHCPOptions:
+    Type: AWS::EC2::DHCPOptions
+    Properties:
+      DomainName:
+        Ref: DirectoryName
+      DomainNameServers:
+        Fn::GetAtt: MicrosoftAD.DnsIpAddresses
+      Tags:
+        - Key: Name
+          Value: DHCPOptions
+
+  VPCDHCPOptionsAssociation:
+    Type: AWS::EC2::VPCDHCPOptionsAssociation
+    Properties:
+      VpcId:
+        Ref: VPC
+      DhcpOptionsId:
+        Ref: DHCPOptions
+
+  JoinDirectoryServiceDomainAssociation:
+    Type: AWS::SSM::Association
+    Properties:
+      AssociationName:
+        Fn::Sub: ${AWS::StackName}-JoinDirectoryServiceDomainAssociation
+      Name: AWS-JoinDirectoryServiceDomain
+      Parameters:
+        directoryId:
+          - Ref: MicrosoftAD
+        directoryName:
+          - Ref: DirectoryName
+        dnsIpAddresses:
+          Fn::GetAtt: MicrosoftAD.DnsIpAddresses
+      Targets:
+        - Key: tag:Directory
+          Values:
+            - MicrosoftAD

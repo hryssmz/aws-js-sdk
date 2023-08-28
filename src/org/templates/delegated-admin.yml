@@ -1,0 +1,40 @@
+# org/templates/delegated-admin.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Delegated Administrator
+
+Parameters:
+  AccountId:
+    Type: String
+    Description: Account ID for delegation
+    Default: 343562251096
+
+Resources:
+  OrganizationsResourcePolicy:
+    Type: AWS::Organizations::ResourcePolicy
+    Properties:
+      Content:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DescribeListPermissions
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: arn:aws:iam::${AccountId}:root
+            Action:
+              - organizations:DescribeOrganization
+              - organizations:DescribeOrganizationalUnit
+              - organizations:DescribeAccount
+              - organizations:DescribePolicy
+              - organizations:DescribeEffectivePolicy
+              - organizations:ListRoots
+              - organizations:ListOrganizationalUnitsForParent
+              - organizations:ListParents
+              - organizations:ListChildren
+              - organizations:ListAccounts
+              - organizations:ListAccountsForParent
+              - organizations:ListPolicies
+              - organizations:ListPoliciesForTarget
+              - organizations:ListTargetsForPolicy
+              - organizations:ListTagsForResource
+            Resource: "*"

@@ -10,12 +10,47 @@ Resources:
       QueueName:
         Fn::Sub: ${AWS::StackName}-Queue
 
+  ProducerFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-ProducerFunctionPolicy-${AWS::Region}
+      Description: Policy for ProducerFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource:
+              - Fn::GetAtt: Queue.Arn
+
+  ProducerFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ProducerFunctionRole-${AWS::Region}
+      Description: Service role for ProducerFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: ProducerFunctionPolicy
+
   ProducerFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-ProducerFunction
       Description: Push messages into Queue
+      Role:
+        Fn::GetAtt: ProducerFunctionRole.Arn
       Handler: index.handler
       Runtime: nodejs18.x
       Architectures:
@@ -46,15 +81,22 @@ Resources:
       LogGroupName:
         Fn::Sub: /aws/lambda/${ProducerFunction}
 
-  ProducerFunctionQueueConnector:
-    Type: AWS::Serverless::Connector
+  ConsumerFunctionRole:
+    Type: AWS::IAM::Role
     Properties:
-      Source:
-        Id: ProducerFunction
-      Destination:
-        Id: Queue
-      Permissions:
-        - Write
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ConsumerFunctionRole-${AWS::Region}
+      Description: Service role for ConsumerFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
   ConsumerFunction:
     Type: AWS::Serverless::Function
@@ -62,6 +104,8 @@ Resources:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-ConsumerFunction
       Description: Consumer function for Queue
+      Role:
+        Fn::GetAtt: ConsumerFunctionRole.Arn
       Handler: index.handler
       Runtime: nodejs18.x
       Architectures:

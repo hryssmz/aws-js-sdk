@@ -179,9 +179,15 @@ Resources:
             Topic:
               Ref: EC2InstanceAlarmTopic
       InlineCode: |
-        exports.handler = async (event) => {
-          console.log("Alarm received!");
-          console.log("Event: " + JSON.stringify(event, null, 2));
+        exports.handler = async event => {
+          const { Records } = event;
+          const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
+            JSON.parse(Message)
+          );
+          records.forEach(record => {
+            console.log(JSON.stringify(record, null, 2));
+          });
+          return records;
         };
 
   AlarmActionFunctionLogGroup:

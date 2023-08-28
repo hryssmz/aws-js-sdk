@@ -4,16 +4,17 @@ import { CloudFormationWrapper } from ".";
 import type { Parameter } from "@aws-sdk/client-cloudformation";
 import type { Action } from "../utils";
 
-const stackName = "metrics-filter";
-const templateDir = `${__dirname}/../../src/logs/templates`;
+const stackName = "first-simple-ad";
+const templateDir = `${__dirname}/../../src/directoryservice/templates`;
 const templatePath = `${templateDir}/${stackName}.yml`;
 const parameters: Parameter[] = [
-  // {
-  //   ParameterKey: "PublicKeyBody",
-  //   ParameterValue:
-  //     "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCaHZxpACCnY3z7+0q03vK5Tai8+VPBorTMBqLptgNgKodmOnUayp7TizM9YBQWGdWQaiiRCKMWbj00loKdSupcBK6olYy/0W2dlo6ZS88s1hi22M1uDpv3wvQXAH7fVP0aHIP3H796s7XNWCbyGjGwSxhuvzSPB0x39q85JR1apHWcH4vnVNzIU3ubHR/nw69UZXASU1qnTl9+DfKC1yuQEJtg2TIiXAdoLStRfQ5T96sStWM5RYVmK0NJkAf9vQfEi03VLJPMZ0ztQOaKy2ebhD9ypZwzZVGuxLt/ilMq+/X4ohsJBjo2Bvnc+3dcBwah4l0FvsH/PpoBlIB6o7NM0dyjxAxH0ReJMEPw0EN4b/yCPR7vQtrl/ey2IeUPz2x364dhiDBIDn0sJJJ5tgqyTxaAS31KX1VwGkN1AQ66De9Mj3KZSNeTKnTedsnqOPLSxzHWb9aG05H6n4dPTSl6rbLcO9ZvDiPZlbo5/pZtsUpGIj2brHWZIZAiEeivPFk= hryssmz@tarte",
-  // },
-  // { ParameterKey: "SshCidrIp", ParameterValue: "86.48.13.208/32" },
+  {
+    ParameterKey: "PublicKeyBody",
+    ParameterValue:
+      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC3/8npLHRT/Es4T213AupeM1hBMrbzCJ8ZUUELCoh38Z79B6Ee2wLZ2IZRGmpo0Jj+Dw35UBnw4SjU9wOGHnA7Jn8ZYjWpLeXxN7OpgyBnHgNugiRiYxHYxixEsYdSvfvD+3o5LHHyrFPhMXR2hacTYezsYGGPn+DX+UQZjDwNis+MRPK5nimQ4KHHgQ6PGQIbdWICdGreLNhIWTYT8ONRUWIBnpglNe0QhKd2XvJ1/Z4rwGZiappMDliVmzmrzlOE+riwiBhs4DElkYKk4q3rl9G0IwGQZussVE6r7VpbUbpCVhvMkDu8KUAmG3xYrWcfl1ASd1I/6bu+8Art5SrC5rjsRYbi87QislVHG5us44K5k4N0eSg4Q4CWwjh2r9vXmEEt+ItVY+BzPk0sMtpKghE5toNaAQxEmq2ZYYGkyQ0QzBgLZtBl8dE2pIMJn9ctyT8aWazh4qsKMpJn15wz1qEqwnj7NT6GXwipjoAlemJwD85Bjq/UCnn4EHCM5Ec= hryssmz@smz",
+  },
+  { ParameterKey: "SshCidrIp", ParameterValue: "60.87.155.25/32" },
+  { ParameterKey: "InstanceType", ParameterValue: "t3.micro" },
 ];
 
 async function createStack() {
@@ -26,6 +27,7 @@ async function createStack() {
     Capabilities: ["CAPABILITY_AUTO_EXPAND", "CAPABILITY_NAMED_IAM"],
     OnFailure: "DELETE",
     // TimeoutInMinutes: 10,
+    Tags: [{ Key: "AppManagerCFNStackKey", Value: stackName }],
   });
   return JSON.stringify(stackName, null, 2);
 }
@@ -38,6 +40,7 @@ async function createStackSet() {
     TemplateBody: templateBody,
     Parameters: parameters,
     Capabilities: ["CAPABILITY_AUTO_EXPAND", "CAPABILITY_NAMED_IAM"],
+    Tags: [{ Key: "AppManagerCFNStackKey", Value: stackName }],
   });
   return JSON.stringify(stackName, null, 2);
 }
@@ -45,6 +48,12 @@ async function createStackSet() {
 async function deleteStack() {
   const cloudformation = new CloudFormationWrapper();
   await cloudformation.deleteStack({ StackName: stackName });
+  return JSON.stringify(stackName, null, 2);
+}
+
+async function deleteStackSet() {
+  const cloudformation = new CloudFormationWrapper();
+  await cloudformation.deleteStackSet({ StackSetName: stackName });
   return JSON.stringify(stackName, null, 2);
 }
 
@@ -72,6 +81,7 @@ async function updateStack() {
     Parameters: parameters,
     Capabilities: ["CAPABILITY_AUTO_EXPAND", "CAPABILITY_NAMED_IAM"],
     // DisableRollback: true,
+    Tags: [{ Key: "AppManagerCFNStackKey", Value: stackName }],
   });
   return JSON.stringify(stackName, null, 2);
 }
@@ -89,6 +99,7 @@ const actions: Record<string, Action> = {
   createStack,
   createStackSet,
   deleteStack,
+  deleteStackSet,
   describeStack,
   updateStack,
   validateTemplate,
