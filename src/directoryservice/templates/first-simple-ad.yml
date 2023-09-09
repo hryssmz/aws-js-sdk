@@ -68,7 +68,7 @@ Resources:
       InternetGatewayId:
         Ref: InternetGateway
 
-  Subnet:
+  Subnet0:
     Type: AWS::EC2::Subnet
     Properties:
       CidrBlock:
@@ -84,9 +84,9 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Subnet
+          Value: Subnet0
 
-  Subnet2:
+  Subnet1:
     Type: AWS::EC2::Subnet
     Properties:
       CidrBlock:
@@ -102,7 +102,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Subnet2
+          Value: Subnet1
 
   RouteTable:
     Type: AWS::EC2::RouteTable
@@ -123,19 +123,19 @@ Resources:
       GatewayId:
         Ref: InternetGateway
 
-  SubnetRouteTableAssociation:
+  Subnet0RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: Subnet
+        Ref: Subnet0
       RouteTableId:
         Ref: RouteTable
 
-  Subnet2RouteTableAssociation:
+  Subnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: Subnet2
+        Ref: Subnet1
       RouteTableId:
         Ref: RouteTable
 
@@ -239,7 +239,7 @@ Resources:
         Version:
           Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
       SubnetId:
-        Ref: Subnet
+        Ref: Subnet0
 
   # Directory Services
   SimpleAD:
@@ -253,8 +253,8 @@ Resources:
       Size: Small
       VpcSettings:
         SubnetIds:
-          - Ref: Subnet
-          - Ref: Subnet2
+          - Ref: Subnet0
+          - Ref: Subnet1
         VpcId:
           Ref: VPC
 

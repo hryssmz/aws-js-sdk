@@ -8,11 +8,15 @@ Parameters:
     Description: Route 53 route domain
     Default: hryssmz.click
 
-Mappings:
-  Region2S3DNS:
-    ap-northeast-1:
-      DNSName: s3-website-ap-northeast-1.amazonaws.com
-      HostedZoneId: Z2M4EHUR26P7ZW
+  S3WebsiteDNSName:
+    Type: String
+    Description: S3 website DNS name
+    Default: s3-website-ap-northeast-1.amazonaws.com
+
+  S3WebsiteHostedZoneId:
+    Type: String
+    Description: S3 website hosted zone ID
+    Default: Z2M4EHUR26P7ZW
 
 Resources:
   RootBucket:
@@ -76,30 +80,18 @@ Resources:
           Type: A
           AliasTarget:
             DNSName:
-              Fn::FindInMap:
-                - Region2S3DNS
-                - Ref: AWS::Region
-                - DNSName
+              Ref: S3WebsiteDNSName
             HostedZoneId:
-              Fn::FindInMap:
-                - Region2S3DNS
-                - Ref: AWS::Region
-                - HostedZoneId
+              Ref: S3WebsiteHostedZoneId
             EvaluateTargetHealth: false
         - Name:
             Fn::Sub: www.${RootDomain}
           Type: A
           AliasTarget:
             DNSName:
-              Fn::FindInMap:
-                - Region2S3DNS
-                - Ref: AWS::Region
-                - DNSName
+              Ref: S3WebsiteDNSName
             HostedZoneId:
-              Fn::FindInMap:
-                - Region2S3DNS
-                - Ref: AWS::Region
-                - HostedZoneId
+              Ref: S3WebsiteHostedZoneId
             EvaluateTargetHealth: false
 
 Outputs:

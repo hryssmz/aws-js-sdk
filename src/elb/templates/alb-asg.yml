@@ -23,38 +23,46 @@ Parameters:
     MaxValue: 5
     ConstraintDescription: must be an integer between 0 and 5
 
-Mappings:
-  RegionProfile2AMI:
-    ap-northeast-1:
-      AL2023: ami-067871d950411e643
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
 
-  RegionProfile2Type:
-    ap-northeast-1:
-      AL2023: t2.micro
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDRs
+    Default: 172.20.0.0/20,172.20.16.0/20
 
-Conditions:
-  ThirdAZCondition:
-    Fn::Not:
-      - Fn::Equals:
-          - Ref: AWS::Region
-          - us-west-1
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
 
 Resources:
   # VPC
   VPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: 172.20.0.0/16
+      CidrBlock:
+        Ref: VPCCidr
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
         - Key: Name
           Value: VPC
 
-  Subnet:
+  Subnet0:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.16.0/20
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
       VpcId:
         Ref: VPC
       AvailabilityZone:
@@ -64,12 +72,15 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Subnet
+          Value: Subnet0
 
-  Subnet2:
+  Subnet1:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.32.0/20
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
       VpcId:
         Ref: VPC
       AvailabilityZone:
@@ -79,23 +90,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Subnet2
-
-  Subnet3:
-    Type: AWS::EC2::Subnet
-    Condition: ThirdAZCondition
-    Properties:
-      CidrBlock: 172.20.48.0/20
-      VpcId:
-        Ref: VPC
-      AvailabilityZone:
-        Fn::Select:
-          - 2
-          - Fn::GetAZs: ""
-      MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: Subnet3
+          Value: Subnet1
 
   RouteTable:
     Type: AWS::EC2::RouteTable
@@ -106,28 +101,19 @@ Resources:
         - Key: Name
           Value: RouteTable
 
-  SubnetRouteTableAssociation:
+  Subnet0RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: Subnet
+        Ref: Subnet0
       RouteTableId:
         Ref: RouteTable
 
-  Subnet2RouteTableAssociation:
+  Subnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: Subnet2
-      RouteTableId:
-        Ref: RouteTable
-
-  Subnet3RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Condition: ThirdAZCondition
-    Properties:
-      SubnetId:
-        Ref: Subnet3
+        Ref: Subnet1
       RouteTableId:
         Ref: RouteTable
 
@@ -258,15 +244,9 @@ Resources:
               Value: AsgLaunchTemplate
       LaunchTemplateData:
         ImageId:
-          Fn::FindInMap:
-            - RegionProfile2AMI
-            - Ref: AWS::Region
-            - AL2023
+          Ref: ImageId
         InstanceType:
-          Fn::FindInMap:
-            - RegionProfile2Type
-            - Ref: AWS::Region
-            - AL2023
+          Ref: InstanceType
         KeyName:
           Ref: SSHKeyPair
         IamInstanceProfile:
@@ -346,12 +326,8 @@ Resources:
       HealthCheckGracePeriod: 120
       HealthCheckType: EC2
       VPCZoneIdentifier:
-        - Ref: Subnet
-        - Ref: Subnet2
-        - Fn::If:
-            - ThirdAZCondition
-            - Ref: Subnet3
-            - Ref: AWS::NoValue
+        - Ref: Subnet0
+        - Ref: Subnet1
       LaunchTemplate:
         LaunchTemplateId:
           Ref: AsgLaunchTemplate
@@ -387,12 +363,8 @@ Resources:
       SecurityGroups:
         - Ref: WebSecurityGroup
       Subnets:
-        - Ref: Subnet
-        - Ref: Subnet2
-        - Fn::If:
-            - ThirdAZCondition
-            - Ref: Subnet3
-            - Ref: AWS::NoValue
+        - Ref: Subnet0
+        - Ref: Subnet1
 
   ALBTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup

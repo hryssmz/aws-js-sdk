@@ -15,12 +15,23 @@ Parameters:
     Description: My ASN
     Default: 212238
 
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
+
+  SubnetCidr:
+    Type: String
+    Description: Subnet CIDR
+    Default: 172.20.0.0/20
+
 Resources:
   # VPC
   VPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: 172.20.0.0/16
+      CidrBlock:
+        Ref: VPCCidr
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
@@ -30,13 +41,10 @@ Resources:
   Subnet:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.0.0/20
+      CidrBlock:
+        Ref: SubnetCidr
       VpcId:
         Ref: VPC
-      AvailabilityZone:
-        Fn::Select:
-          - 0
-          - Fn::GetAZs: ""
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name

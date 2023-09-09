@@ -3,22 +3,15 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: LAMP server tutorial
 
 Parameters:
-  OperatingSystem:
-    Type: String
-    Description: Operating system name
-    Default: AL2
-    AllowedValues:
-      - AL2
-      - AL2023
-    ConstraintDescription: must be either 'AL2' or 'AL2023'
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
 
   InstanceType:
     Type: String
     Description: EC2 instance type
     Default: t2.micro
-    AllowedValues:
-      - t2.micro
-    ConstraintDescription: must be 't2.micro' only
 
   PublicKeyBody:
     Type: String
@@ -37,12 +30,6 @@ Parameters:
     Type: String
     Description: Name for the EC2 instance
     Default: LAMPServerTutorial
-
-Mappings:
-  RegionOS2AMI:
-    ap-northeast-1:
-      AL2: ami-030cf0a1edb8636ab
-      AL2023: ami-067871d950411e643
 
 Resources:
   SSHKeyPair:
@@ -103,10 +90,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       ImageId:
-        Fn::FindInMap:
-          - RegionOS2AMI
-          - Ref: AWS::Region
-          - Ref: OperatingSystem
+        Ref: ImageId
       InstanceType:
         Ref: InstanceType
       KeyName:

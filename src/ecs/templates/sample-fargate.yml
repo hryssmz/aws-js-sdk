@@ -18,11 +18,22 @@ Parameters:
     MaxValue: 5
     ConstraintDescription: Must be an integer between 0 and 5
 
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
+
+  SubnetCidr:
+    Type: String
+    Description: Subnet CIDR
+    Default: 172.20.0.0/20
+
 Resources:
   VPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: 172.20.0.0/16
+      CidrBlock:
+        Ref: VPCCidr
       EnableDnsHostnames: true
       EnableDnsSupport: true
       Tags:
@@ -32,7 +43,8 @@ Resources:
   Subnet:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.0.0/20
+      CidrBlock:
+        Ref: SubnetCidr
       VpcId:
         Ref: VPC
       MapPublicIpOnLaunch: true

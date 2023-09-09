@@ -34,6 +34,21 @@ Parameters:
     MaxValue: 1
     ConstraintDescription: Must be an integer between 0 and 1
 
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
+
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDRs
+    Default: 172.20.0.0/20,172.20.16.0/20
+
+  PrivateSubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Private subnet CIDRs
+    Default: 172.20.128.0/20,172.20.144.0/20
+
   Image:
     Type: String
     Description: Container image
@@ -73,17 +88,21 @@ Resources:
   VPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: 172.20.0.0/16
+      CidrBlock:
+        Ref: VPCCidr
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
         - Key: Name
           Value: VPC
 
-  Subnet:
+  Subnet0:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.0.0/20
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
       VpcId:
         Ref: VPC
       AvailabilityZone:
@@ -93,12 +112,15 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Subnet
+          Value: Subnet0
 
-  Subnet2:
+  Subnet1:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.16.0/20
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
       VpcId:
         Ref: VPC
       AvailabilityZone:
@@ -108,7 +130,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Subnet2
+          Value: Subnet1
 
   RouteTable:
     Type: AWS::EC2::RouteTable
@@ -119,19 +141,19 @@ Resources:
         - Key: Name
           Value: RouteTable
 
-  SubnetRouteTableAssociation:
+  Subnet0RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: Subnet
+        Ref: Subnet0
       RouteTableId:
         Ref: RouteTable
 
-  Subnet2RouteTableAssociation:
+  Subnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: Subnet2
+        Ref: Subnet1
       RouteTableId:
         Ref: RouteTable
 
@@ -160,10 +182,13 @@ Resources:
       GatewayId:
         Ref: InternetGateway
 
-  PrivateSubnet:
+  PrivateSubnet0:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.128.0/20
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: PrivateSubnetCidrs
       VpcId:
         Ref: VPC
       AvailabilityZone:
@@ -172,12 +197,15 @@ Resources:
           - Fn::GetAZs: ""
       Tags:
         - Key: Name
-          Value: PrivateSubnet
+          Value: PrivateSubnet0
 
-  PrivateSubnet2:
+  PrivateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.144.0/20
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: PrivateSubnetCidrs
       VpcId:
         Ref: VPC
       AvailabilityZone:
@@ -186,7 +214,7 @@ Resources:
           - Fn::GetAZs: ""
       Tags:
         - Key: Name
-          Value: PrivateSubnet2
+          Value: PrivateSubnet1
 
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
@@ -197,19 +225,19 @@ Resources:
         - Key: Name
           Value: PrivateRouteTable
 
-  PrivateSubnetPrivateRouteTableAssociation:
+  PrivateSubnet0PrivateRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: PrivateSubnet
+        Ref: PrivateSubnet0
       RouteTableId:
         Ref: PrivateRouteTable
 
-  PrivateSubnet2PrivateRouteTableAssociation:
+  PrivateSubnet1PrivateRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: PrivateSubnet2
+        Ref: PrivateSubnet1
       RouteTableId:
         Ref: PrivateRouteTable
 
@@ -226,7 +254,7 @@ Resources:
       AllocationId:
         Fn::GetAtt: NatGatewayEIP.AllocationId
       SubnetId:
-        Ref: Subnet
+        Ref: Subnet0
 
   NatGatewayRoute:
     Type: AWS::EC2::Route
@@ -415,8 +443,8 @@ Resources:
       HealthCheckGracePeriod: 60
       HealthCheckType: EC2
       VPCZoneIdentifier:
-        - Ref: Subnet
-        - Ref: Subnet2
+        - Ref: Subnet0
+        - Ref: Subnet1
       LaunchTemplate:
         LaunchTemplateId:
           Ref: EC2LaunchTemplate
@@ -640,8 +668,8 @@ Resources:
           SecurityGroups:
             - Ref: ECSSecurityGroup
           Subnets:
-            - Ref: PrivateSubnet
-            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet0
+            - Ref: PrivateSubnet1
       EnableExecuteCommand: true
       EnableECSManagedTags: true
       PropagateTags: SERVICE

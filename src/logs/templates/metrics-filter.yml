@@ -12,21 +12,25 @@ Parameters:
     MaxValue: 3
     ConstraintDescription: must be an integer between 0 and 3
 
-Mappings:
-  RegionProfile2AMI:
-    ap-northeast-1:
-      AL2023: ami-067871d950411e643
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+    Default: vpc-01d5cfd2cad5314f1
 
-  RegionProfile2Type:
-    ap-northeast-1:
-      AL2023: t2.micro
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs
+    Default: subnet-00ee516fa04d610fe,subnet-0c99e2001f0ae6c0a
 
-  Region2DefaultVPC:
-    ap-northeast-1:
-      VPC: vpc-01d5cfd2cad5314f1
-      Subnet: subnet-00ee516fa04d610fe
-      Subnet2: subnet-0c99e2001f0ae6c0a
-      Subnet3: subnet-0deeda0e1c6cd4ffa
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
 
 Resources:
   # CloudWatch Logs
@@ -252,10 +256,7 @@ Resources:
         Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
       GroupDescription: EC2 security group
       VpcId:
-        Fn::FindInMap:
-          - Region2DefaultVPC
-          - Ref: AWS::Region
-          - VPC
+        Ref: VpcId
       Tags:
         - Key: Name
           Value: EC2SecurityGroup
@@ -311,15 +312,9 @@ Resources:
               Value: EC2LaunchTemplate
       LaunchTemplateData:
         ImageId:
-          Fn::FindInMap:
-            - RegionProfile2AMI
-            - Ref: AWS::Region
-            - AL2023
+          Ref: ImageId
         InstanceType:
-          Fn::FindInMap:
-            - RegionProfile2Type
-            - Ref: AWS::Region
-            - AL2023
+          Ref: InstanceType
         IamInstanceProfile:
           Name:
             Ref: EC2InstanceProfile
@@ -458,14 +453,7 @@ Resources:
       HealthCheckGracePeriod: 60
       HealthCheckType: EC2
       VPCZoneIdentifier:
-        - Fn::FindInMap:
-            - Region2DefaultVPC
-            - Ref: AWS::Region
-            - Subnet
-        - Fn::FindInMap:
-            - Region2DefaultVPC
-            - Ref: AWS::Region
-            - Subnet2
+        Ref: SubnetIds
       LaunchTemplate:
         LaunchTemplateId:
           Ref: EC2LaunchTemplate
@@ -486,10 +474,7 @@ Resources:
         Fn::Sub: ${AWS::StackName}-ALBSecurityGroup
       GroupDescription: ALB security group
       VpcId:
-        Fn::FindInMap:
-          - Region2DefaultVPC
-          - Ref: AWS::Region
-          - VPC
+        Ref: VpcId
       SecurityGroupIngress:
         - Description: HTTP inbound rule
           IpProtocol: tcp
@@ -523,14 +508,7 @@ Resources:
       SecurityGroups:
         - Ref: ALBSecurityGroup
       Subnets:
-        - Fn::FindInMap:
-            - Region2DefaultVPC
-            - Ref: AWS::Region
-            - Subnet
-        - Fn::FindInMap:
-            - Region2DefaultVPC
-            - Ref: AWS::Region
-            - Subnet2
+        Ref: SubnetIds
 
   ALBTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -543,10 +521,7 @@ Resources:
       ProtocolVersion: HTTP1
       Port: 80
       VpcId:
-        Fn::FindInMap:
-          - Region2DefaultVPC
-          - Ref: AWS::Region
-          - VPC
+        Ref: VpcId
       HealthCheckPath: /
       HealthCheckProtocol: HTTP
       Matcher:

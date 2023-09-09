@@ -3,22 +3,43 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: CloudFront website with Route 53
 
 Parameters:
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: Hosted zone ID
+    Default: Z066591138RXWJLQXUCQK
+
   RootDomain:
     Type: String
     Description: Route 53 route domain
     Default: hryssmz.click
 
-Mappings:
-  Region2S3DNS:
-    ap-northeast-1:
-      DNSName: s3-website-ap-northeast-1.amazonaws.com
-      HostedZoneId: Z2M4EHUR26P7ZW
+  S3WebsiteDNSName:
+    Type: String
+    Description: S3 website DNS name
+    Default: s3-website-us-east-1.amazonaws.com
 
-  Region2Certificate:
-    us-east-1:
-      CertificateArn: arn:aws:acm:us-east-1:512667299293:certificate/49eb3c1e-e627-4a14-b5c5-5825e8b30028
+Rules:
+  TestUsEast1:
+    Assertions:
+      - AssertDescription: Only us-east-1 is allowed
+        Assert:
+          Fn::Equals:
+            - Ref: AWS::Region
+            - us-east-1
 
 Resources:
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName:
+        Ref: RootDomain
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName:
+            Ref: RootDomain
+          HostedZoneId:
+            Ref: HostedZoneId
+
   RootBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -131,10 +152,7 @@ Resources:
           ViewerProtocolPolicy: redirect-to-https
         ViewerCertificate:
           AcmCertificateArn:
-            Fn::FindInMap:
-              - Region2Certificate
-              - us-east-1
-              - CertificateArn
+            Ref: Certificate
           MinimumProtocolVersion: TLSv1
           SslSupportMethod: sni-only
 
@@ -173,10 +191,7 @@ Resources:
               Fn::Sub:
                 - ${RootDomain}.${S3DNSName}
                 - S3DNSName:
-                    Fn::FindInMap:
-                      - Region2S3DNS
-                      - Ref: AWS::Region
-                      - DNSName
+                    Ref: S3WebsiteDNSName
             CustomOriginConfig:
               OriginProtocolPolicy: http-only
         DefaultCacheBehavior:
@@ -194,10 +209,7 @@ Resources:
           ViewerProtocolPolicy: redirect-to-https
         ViewerCertificate:
           AcmCertificateArn:
-            Fn::FindInMap:
-              - Region2Certificate
-              - us-east-1
-              - CertificateArn
+            Ref: Certificate
           MinimumProtocolVersion: TLSv1
           SslSupportMethod: sni-only
 

@@ -3,19 +3,38 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: Getting started with a secure static website
 
 Parameters:
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: Hosted zone ID
+    Default: Z066591138RXWJLQXUCQK
+
   RootDomain:
     Type: String
     Description: The part of a website address after your SubDomain - e.g. example.com
     Default: hryssmz.click
 
-Mappings:
-  Region2ACM:
-    us-east-1:
-      Arn: arn:aws:acm:us-east-1:512667299293:certificate/49eb3c1e-e627-4a14-b5c5-5825e8b30028
-    ap-northeast-1:
-      Arn: arn:aws:acm:ap-northeast-1:512667299293:certificate/22ce6d09-fbd5-40d9-b4c6-4072c5f75413
+Rules:
+  TestUsEast1:
+    Assertions:
+      - AssertDescription: Only us-east-1 is allowed
+        Assert:
+          Fn::Equals:
+            - Ref: AWS::Region
+            - us-east-1
 
 Resources:
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName:
+        Ref: RootDomain
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName:
+            Ref: RootDomain
+          HostedZoneId:
+            Ref: HostedZoneId
+
   RootBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -153,10 +172,7 @@ Resources:
         DefaultRootObject: index.html
         ViewerCertificate:
           AcmCertificateArn:
-            Fn::FindInMap:
-              - Region2ACM
-              - us-east-1
-              - Arn
+            Ref: Certificate
           MinimumProtocolVersion: TLSv1
           SslSupportMethod: sni-only
 

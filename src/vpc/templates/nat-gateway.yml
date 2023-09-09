@@ -2,31 +2,52 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: NAT Gateway
 
-Mappings:
-  RegionProfile2AMI:
-    ap-northeast-1:
-      AL2023: ami-067871d950411e643
+Parameters:
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
 
-  RegionProfile2Type:
-    ap-northeast-1:
-      AL2023: t2.micro
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDRs
+    Default: 172.20.0.0/20,172.20.16.0/20
+
+  PrivateSubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Private subnet CIDRs
+    Default: 172.20.128.0/20,172.20.144.0/20
+
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
 
 Resources:
   # VPC
   VPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: 172.20.0.0/16
+      CidrBlock:
+        Ref: VPCCidr
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
         - Key: Name
           Value: VPC
 
-  Subnet:
+  Subnet0:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.0.0/20
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
       VpcId:
         Ref: VPC
       AvailabilityZone:
@@ -36,12 +57,15 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Subnet
+          Value: Subnet0
 
-  Subnet2:
+  Subnet1:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.16.0/20
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
       VpcId:
         Ref: VPC
       AvailabilityZone:
@@ -51,7 +75,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Subnet2
+          Value: Subnet1
 
   RouteTable:
     Type: AWS::EC2::RouteTable
@@ -62,19 +86,19 @@ Resources:
         - Key: Name
           Value: RouteTable
 
-  SubnetRouteTableAssociation:
+  Subnet0RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: Subnet
+        Ref: Subnet0
       RouteTableId:
         Ref: RouteTable
 
-  Subnet2RouteTableAssociation:
+  Subnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: Subnet2
+        Ref: Subnet1
       RouteTableId:
         Ref: RouteTable
 
@@ -104,10 +128,13 @@ Resources:
         Ref: InternetGateway
 
   # Private subnet
-  PrivateSubnet:
+  PrivateSubnet0:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.128.0/20
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: PrivateSubnetCidrs
       VpcId:
         Ref: VPC
       AvailabilityZone:
@@ -116,12 +143,15 @@ Resources:
           - Fn::GetAZs: ""
       Tags:
         - Key: Name
-          Value: PrivateSubnet
+          Value: PrivateSubnet0
 
-  PrivateSubnet2:
+  PrivateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.144.0/20
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: PrivateSubnetCidrs
       VpcId:
         Ref: VPC
       AvailabilityZone:
@@ -130,85 +160,85 @@ Resources:
           - Fn::GetAZs: ""
       Tags:
         - Key: Name
-          Value: PrivateSubnet2
+          Value: PrivateSubnet1
 
-  PrivateRouteTable:
+  PrivateRouteTable0:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId:
         Ref: VPC
       Tags:
         - Key: Name
-          Value: PrivateRouteTable
+          Value: PrivateRouteTable0
 
-  PrivateRouteTable2:
+  PrivateRouteTable1:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId:
         Ref: VPC
       Tags:
         - Key: Name
-          Value: PrivateRouteTable2
+          Value: PrivateRouteTable1
 
-  PrivateSubnetPrivateRouteTableAssociation:
+  PrivateSubnet0PrivateRouteTable0Association:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: PrivateSubnet
+        Ref: PrivateSubnet0
       RouteTableId:
-        Ref: PrivateRouteTable
+        Ref: PrivateRouteTable0
 
-  PrivateSubnet2PrivateRouteTable2Association:
+  PrivateSubnet1PrivateRouteTable1Association:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: PrivateSubnet2
+        Ref: PrivateSubnet1
       RouteTableId:
-        Ref: PrivateRouteTable2
+        Ref: PrivateRouteTable1
 
-  NatGatewayEIP:
+  NatGatewayEIP0:
     Type: AWS::EC2::EIP
     Properties:
       Domain: vpc
 
-  NatGatewayEIP2:
+  NatGatewayEIP1:
     Type: AWS::EC2::EIP
     Properties:
       Domain: vpc
 
-  NatGateway:
+  NatGateway0:
     Type: AWS::EC2::NatGateway
     Properties:
       AllocationId:
-        Fn::GetAtt: NatGatewayEIP.AllocationId
+        Fn::GetAtt: NatGatewayEIP0.AllocationId
       SubnetId:
-        Ref: Subnet
+        Ref: Subnet0
 
-  NatGateway2:
+  NatGateway1:
     Type: AWS::EC2::NatGateway
     Properties:
       AllocationId:
-        Fn::GetAtt: NatGatewayEIP2.AllocationId
+        Fn::GetAtt: NatGatewayEIP1.AllocationId
       SubnetId:
-        Ref: Subnet2
+        Ref: Subnet1
 
-  NatGatewayRoute:
+  NatGatewayRoute0:
     Type: AWS::EC2::Route
     Properties:
       RouteTableId:
-        Ref: PrivateRouteTable
+        Ref: PrivateRouteTable0
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId:
-        Ref: NatGateway
+        Ref: NatGateway0
 
-  NatGatewayRoute2:
+  NatGatewayRoute1:
     Type: AWS::EC2::Route
     Properties:
       RouteTableId:
-        Ref: PrivateRouteTable2
+        Ref: PrivateRouteTable1
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId:
-        Ref: NatGateway2
+        Ref: NatGateway1
 
   # EC2
   EC2InstanceRole:
@@ -258,21 +288,15 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       ImageId:
-        Fn::FindInMap:
-          - RegionProfile2AMI
-          - Ref: AWS::Region
-          - AL2023
+        Ref: ImageId
       InstanceType:
-        Fn::FindInMap:
-          - RegionProfile2Type
-          - Ref: AWS::Region
-          - AL2023
+        Ref: InstanceType
       IamInstanceProfile:
         Ref: EC2InstanceProfile
       SecurityGroupIds:
         - Ref: EC2SecurityGroup
       SubnetId:
-        Ref: Subnet
+        Ref: Subnet0
       Tags:
         - Key: Name
           Value: EC2Instance
@@ -366,21 +390,15 @@ Resources:
                 uvicorn[standard]
     Properties:
       ImageId:
-        Fn::FindInMap:
-          - RegionProfile2AMI
-          - Ref: AWS::Region
-          - AL2023
+        Ref: ImageId
       InstanceType:
-        Fn::FindInMap:
-          - RegionProfile2Type
-          - Ref: AWS::Region
-          - AL2023
+        Ref: InstanceType
       IamInstanceProfile:
         Ref: EC2InstanceProfile
       SecurityGroupIds:
         - Ref: WebSecurityGroup
       SubnetId:
-        Ref: PrivateSubnet2
+        Ref: PrivateSubnet1
       UserData:
         Fn::Base64:
           Fn::Sub: |
@@ -409,12 +427,12 @@ Resources:
           Value: WebInstance
 
 Outputs:
-  NatGatewayEIPAddress:
-    Description: Public IP address of NatGatewayEIP
+  NatGatewayEIP0Address:
+    Description: Public IP address of NatGatewayEIP0
     Value:
-      Fn::GetAtt: NatGatewayEIP.PublicIp
+      Fn::GetAtt: NatGatewayEIP0.PublicIp
 
-  NatGatewayEIP2Address:
-    Description: Public IP address of NatGatewayEIP2
+  NatGatewayEIP1Address:
+    Description: Public IP address of NatGatewayEIP1
     Value:
-      Fn::GetAtt: NatGatewayEIP2.PublicIp
+      Fn::GetAtt: NatGatewayEIP1.PublicIp

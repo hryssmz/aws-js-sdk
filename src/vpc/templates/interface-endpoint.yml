@@ -15,21 +15,38 @@ Parameters:
     AllowedPattern: ssh-rsa .*
     ConstraintDescription: must be a valid RSA public key
 
-Mappings:
-  RegionProfile2AMI:
-    ap-northeast-1:
-      AL2023: ami-067871d950411e643
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
 
-  RegionProfile2Type:
-    ap-northeast-1:
-      AL2023: t2.micro
+  SubnetCidr:
+    Type: String
+    Description: Subnet CIDR
+    Default: 172.20.0.0/20
+
+  PrivateSubnetCidr:
+    Type: String
+    Description: Private CIDR
+    Default: 172.20.128.0/20
+
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
 
 Resources:
   # VPC
   VPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: 172.20.0.0/16
+      CidrBlock:
+        Ref: VPCCidr
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
@@ -39,13 +56,10 @@ Resources:
   Subnet:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.0.0/20
+      CidrBlock:
+        Ref: SubnetCidr
       VpcId:
         Ref: VPC
-      AvailabilityZone:
-        Fn::Select:
-          - 0
-          - Fn::GetAZs: ""
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -96,13 +110,10 @@ Resources:
   PrivateSubnet:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.128.0/20
+      CidrBlock:
+        Ref: PrivateSubnetCidr
       VpcId:
         Ref: VPC
-      AvailabilityZone:
-        Fn::Select:
-          - 0
-          - Fn::GetAZs: ""
       Tags:
         - Key: Name
           Value: PrivateSubnet
@@ -198,15 +209,9 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       ImageId:
-        Fn::FindInMap:
-          - RegionProfile2AMI
-          - Ref: AWS::Region
-          - AL2023
+        Ref: ImageId
       InstanceType:
-        Fn::FindInMap:
-          - RegionProfile2Type
-          - Ref: AWS::Region
-          - AL2023
+        Ref: InstanceType
       KeyName:
         Ref: SSHKeyPair
       SecurityGroupIds:
@@ -221,15 +226,9 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       ImageId:
-        Fn::FindInMap:
-          - RegionProfile2AMI
-          - Ref: AWS::Region
-          - AL2023
+        Ref: ImageId
       InstanceType:
-        Fn::FindInMap:
-          - RegionProfile2Type
-          - Ref: AWS::Region
-          - AL2023
+        Ref: InstanceType
       KeyName:
         Ref: SSHKeyPair
       SecurityGroupIds:

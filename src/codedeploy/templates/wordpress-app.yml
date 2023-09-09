@@ -26,12 +26,15 @@ Parameters:
       - "false"
       - "true"
 
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
   InstanceType:
     Type: String
     Description: EC2 instance type
     Default: t2.micro
-    AllowedValues:
-      - t2.micro
 
   PublicKeyBody:
     Type: String
@@ -55,12 +58,6 @@ Conditions:
     Fn::Equals:
       - Ref: CreateDeployment
       - "true"
-
-Mappings:
-  RegionOS2AMI:
-    ap-northeast-1:
-      Linux: ami-030cf0a1edb8636ab
-      Windows: ami-0500753a8b9c3c925
 
 Resources:
   DemoBucket:
@@ -210,10 +207,7 @@ Resources:
               ensureRunning: true
     Properties:
       ImageId:
-        Fn::FindInMap:
-          - RegionOS2AMI
-          - Ref: AWS::Region
-          - Linux
+        Ref: ImageId
       InstanceType:
         Ref: InstanceType
       KeyName:

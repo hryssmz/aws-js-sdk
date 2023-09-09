@@ -3,14 +3,16 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: Automation runbook at scale
 
-Mappings:
-  RegionProfile2AMI:
-    ap-northeast-1:
-      AL2023: ami-067871d950411e643
+Parameters:
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
 
-  RegionProfile2Type:
-    ap-northeast-1:
-      AL2023: t2.micro
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
 
 Resources:
   # Resource group
@@ -18,15 +20,9 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       ImageId:
-        Fn::FindInMap:
-          - RegionProfile2AMI
-          - Ref: AWS::Region
-          - AL2023
+        Ref: ImageId
       InstanceType:
-        Fn::FindInMap:
-          - RegionProfile2Type
-          - Ref: AWS::Region
-          - AL2023
+        Ref: InstanceType
       Tags:
         - Key: Name
           Value: DevelopmentInstance

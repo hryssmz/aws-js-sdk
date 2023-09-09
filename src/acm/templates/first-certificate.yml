@@ -4,7 +4,7 @@ Description: First certificate
 
 Parameters:
   HostedZoneId:
-    Type: String
+    Type: AWS::Route53::HostedZone::Id
     Description: Hosted zone ID
     Default: Z066591138RXWJLQXUCQK
 

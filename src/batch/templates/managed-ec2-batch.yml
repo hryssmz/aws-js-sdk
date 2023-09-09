@@ -2,22 +2,37 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Managed On-Demand EC2 batch
 
+Parameters:
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
+
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDRs
+    Default: 172.20.0.0/20,172.20.16.0/20
+
 Resources:
   # VPC
   VPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: 172.20.0.0/16
+      CidrBlock:
+        Ref: VPCCidr
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
         - Key: Name
           Value: VPC
 
-  Subnet:
+  Subnet0:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.0.0/20
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
       VpcId:
         Ref: VPC
       AvailabilityZone:
@@ -27,12 +42,15 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Subnet
+          Value: Subnet0
 
-  Subnet2:
+  Subnet1:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: 172.20.16.0/20
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
       VpcId:
         Ref: VPC
       AvailabilityZone:
@@ -42,7 +60,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Subnet2
+          Value: Subnet1
 
   RouteTable:
     Type: AWS::EC2::RouteTable
@@ -53,19 +71,19 @@ Resources:
         - Key: Name
           Value: RouteTable
 
-  SubnetRouteTableAssociation:
+  Subnet0RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: Subnet
+        Ref: Subnet0
       RouteTableId:
         Ref: RouteTable
 
-  Subnet2RouteTableAssociation:
+  Subnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: Subnet2
+        Ref: Subnet1
       RouteTableId:
         Ref: RouteTable
 
@@ -153,8 +171,8 @@ Resources:
         SecurityGroupIds:
           - Ref: EC2SecurityGroup
         Subnets:
-          - Ref: Subnet
-          - Ref: Subnet2
+          - Ref: Subnet0
+          - Ref: Subnet1
         MinvCpus: 0
         MaxvCpus: 2
         Tags:

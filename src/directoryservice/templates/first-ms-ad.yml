@@ -78,7 +78,7 @@ Resources:
       InternetGatewayId:
         Ref: InternetGateway
 
-  Subnet:
+  Subnet0:
     Type: AWS::EC2::Subnet
     Properties:
       CidrBlock:
@@ -94,9 +94,9 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Subnet
+          Value: Subnet0
 
-  Subnet2:
+  Subnet1:
     Type: AWS::EC2::Subnet
     Properties:
       CidrBlock:
@@ -112,7 +112,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Subnet2
+          Value: Subnet1
 
   RouteTable:
     Type: AWS::EC2::RouteTable
@@ -133,19 +133,19 @@ Resources:
       GatewayId:
         Ref: InternetGateway
 
-  SubnetRouteTableAssociation:
+  Subnet0RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: Subnet
+        Ref: Subnet0
       RouteTableId:
         Ref: RouteTable
 
-  SubnetRouteTableAssociation2:
+  Subnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: Subnet2
+        Ref: Subnet1
       RouteTableId:
         Ref: RouteTable
 
@@ -176,7 +176,7 @@ Resources:
       InternetGatewayId:
         Ref: OpInternetGateway
 
-  OpSubnet:
+  OpSubnet0:
     Type: AWS::EC2::Subnet
     Properties:
       CidrBlock:
@@ -192,9 +192,9 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: OpSubnet
+          Value: OpSubnet0
 
-  OpSubnet2:
+  OpSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       CidrBlock:
@@ -210,7 +210,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: OpSubnet2
+          Value: OpSubnet1
 
   OpRouteTable:
     Type: AWS::EC2::RouteTable
@@ -231,19 +231,19 @@ Resources:
       GatewayId:
         Ref: OpInternetGateway
 
-  OpSubnetRouteTableAssociation:
+  OpSubnet0RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: OpSubnet
+        Ref: OpSubnet0
       RouteTableId:
         Ref: OpRouteTable
 
-  OpSubnetRouteTableAssociation2:
+  OpSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
-        Ref: OpSubnet2
+        Ref: OpSubnet1
       RouteTableId:
         Ref: OpRouteTable
 
@@ -490,7 +490,7 @@ Resources:
         Version:
           Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
       SubnetId:
-        Ref: Subnet
+        Ref: Subnet0
 
   # Directory Services
   MicrosoftAD:
@@ -503,8 +503,8 @@ Resources:
       Edition: Standard
       VpcSettings:
         SubnetIds:
-          - Ref: Subnet
-          - Ref: Subnet2
+          - Ref: Subnet0
+          - Ref: Subnet1
         VpcId:
           Ref: VPC
 

@@ -5,20 +5,15 @@ Transform:
 Description: ECS blue/green deployment
 
 Parameters:
-  Vpc:
+  VpcId:
     Type: AWS::EC2::VPC::Id
     Description: VPC ID
     Default: vpc-01d5cfd2cad5314f1
 
-  Subnet1:
-    Type: AWS::EC2::Subnet::Id
-    Description: Subnet1 ID
-    Default: subnet-00ee516fa04d610fe
-
-  Subnet2:
-    Type: AWS::EC2::Subnet::Id
-    Description: Subnet2 ID
-    Default: subnet-0c99e2001f0ae6c0a
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs
+    Default: subnet-00ee516fa04d610fe,subnet-0c99e2001f0ae6c0a
 
 Hooks:
   CodeDeployBlueGreenHook:
@@ -54,7 +49,7 @@ Resources:
     Properties:
       GroupDescription: Security group for ec2 access
       VpcId:
-        Ref: Vpc
+        Ref: VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
@@ -88,7 +83,7 @@ Resources:
       TargetType: ip
       UnhealthyThresholdCount: 4
       VpcId:
-        Ref: Vpc
+        Ref: VpcId
 
   ALBTargetGroupGreen:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -109,7 +104,7 @@ Resources:
       TargetType: ip
       UnhealthyThresholdCount: 4
       VpcId:
-        Ref: Vpc
+        Ref: VpcId
 
   ExampleALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -118,8 +113,7 @@ Resources:
       SecurityGroups:
         - Ref: ExampleSecurityGroup
       Subnets:
-        - Ref: Subnet1
-        - Ref: Subnet2
+        Ref: SubnetIds
       Tags:
         - Key: Group
           Value: Example
@@ -220,8 +214,7 @@ Resources:
           SecurityGroups:
             - Ref: ExampleSecurityGroup
           Subnets:
-            - Ref: Subnet1
-            - Ref: Subnet2
+            Ref: SubnetIds
       PlatformVersion: 1.4.0
       Scale:
         Unit: PERCENT
