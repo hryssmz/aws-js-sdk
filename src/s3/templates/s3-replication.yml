@@ -1,0 +1,94 @@
+# s3/templates/s3-replication.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: S3 replication
+
+Resources:
+  ReplicationPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-ReplicationPolicy-${AWS::Region}
+      Description: Policy for S3 replication
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SourceBucketAccess
+            Effect: Allow
+            Action:
+              - s3:GetReplicationConfiguration
+              - s3:ListBucket
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-s3bucket-${AWS::Region}
+          - Sid: SourceObjectAccess
+            Effect: Allow
+            Action:
+              - s3:GetObjectVersionForReplication
+              - s3:GetObjectVersionAcl
+              - s3:GetObjectVersionTagging
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-s3bucket-${AWS::Region}/*
+          - Sid: DestinationObjectAccess
+            Effect: Allow
+            Action:
+              - s3:ReplicateObject
+              - s3:ReplicateDelete
+              - s3:ReplicateTags
+            Resource:
+              - Fn::Sub: ${ReplicaBucket.Arn}/*
+
+  ReplicationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ReplicationRole-${AWS::Region}
+      Description: Service role for S3 replication
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: ReplicationPolicy
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      ReplicationConfiguration:
+        Role:
+          Fn::GetAtt: ReplicationRole.Arn
+        Rules:
+          - Id: BackupDocs
+            Status: Enabled
+            DeleteMarkerReplication:
+              Status: Enabled
+            Filter:
+              Prefix: docs/
+            Priority: 1
+            Destination:
+              Bucket:
+                Fn::GetAtt: ReplicaBucket.Arn
+
+  ReplicaBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-replicabucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled

@@ -1,0 +1,11 @@
+# pinpoint/templates/sms-registration.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: SMS registration system
+
+Resources:
+  PinpointApp:
+    Type: AWS::Pinpoint::App
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-PinpointApp

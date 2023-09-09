@@ -1,0 +1,549 @@
+# cognito/templates/apigw-cognito.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Use Cognito as authorizer for API Gateway
+
+Parameters:
+  Username:
+    Type: String
+    Description: User name
+    Default: hryssmz
+
+  Password:
+    Type: String
+    Description: User password
+    Default: P@ssw0rd
+
+  EmailAddress:
+    Type: String
+    Description: Email address
+    Default: hryssmz@yahoo.com
+
+Resources:
+  # User pool
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName:
+        Fn::Sub: ${AWS::StackName}-UserPool
+      UsernameConfiguration:
+        CaseSensitive: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 6
+          RequireNumbers: false
+          RequireSymbols: false
+          RequireUppercase: false
+          RequireLowercase: false
+      AutoVerifiedAttributes:
+        - email
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate:
+          - email
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName:
+        Fn::Sub: ${AWS::StackName}-UserPoolClient
+      UserPoolId:
+        Ref: UserPool
+      ExplicitAuthFlows:
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      ReadAttributes:
+        - email
+        - email_verified
+      WriteAttributes:
+        - email
+
+  # REST API
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RestApi
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      StageName: dev
+      Cors:
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      Auth:
+        Authorizers:
+          CognitoAuth:
+            UserPoolArn:
+              Fn::GetAtt: UserPool.Arn
+            Identity:
+              Header: Authorization
+            AuthorizationScopes:
+              - aws.cognito.signin.user.admin
+        DefaultAuthorizer: CognitoAuth
+        AddDefaultAuthorizerToCorsPreflight: false
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: My REST API
+          version: "1.0"
+        servers:
+          - url: https://{restApiId}.execute-api.{region}.amazonaws.com/{basePath}
+            variables:
+              restApiId:
+                default: example123
+              region:
+                default: ap-northeast-1
+              basePath:
+                default: dev
+        security:
+          - CognitoAuthorizer:
+              - aws.cognito.signin.user.admin
+        paths:
+          /:
+            get:
+              operationId: GetRoot
+              tags:
+                - GetRoot
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/GetRootResponse"
+                      examples:
+                        example1:
+                          value:
+                            origin_jti: ab1aaac1-c343-4e71-9901-30b6381a5d0a
+                            sub: 17740ae8-7081-70b2-93a0-1577f2e611ab
+                            event_id: 5befc155-f385-49f6-9e5f-cad3f9884d43
+                            token_use: access
+                            scope: aws.cognito.signin.user.admin
+                            auth_time: "1693502522"
+                            iss: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_yNbC6Cny6
+                            exp: Thu Aug 31 18:22:02 UTC 2023
+                            iat: Thu Aug 31 17:22:02 UTC 2023
+                            client_id: 4dvqs9hmkv74cs6upkhshr598a
+                            jti: de4befe6-6ef4-4b60-8f0a-f6b89f36e4f6
+                            username: hryssmz
+                  headers:
+                    Access-Control-Allow-Origin:
+                      description: Response header for CORS support
+                      schema:
+                        type: string
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetRootFunction.Arn}/invocations
+                httpMethod: POST
+        components:
+          securitySchemes:
+            CognitoAuthorizer:
+              type: apiKey
+              name: Authorization
+              in: header
+              x-amazon-apigateway-authtype: cognito_user_pools
+              x-amazon-apigateway-authorizer:
+                type: cognito_user_pools
+                providerARNs:
+                  - Fn::GetAtt: UserPool.Arn
+          schemas:
+            GetRootResponse:
+              description: Response body for GET /
+              type: object
+
+  GetRootFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-GetRootFunctionRole-${AWS::Region}
+      Description: Service role for GetRootFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  GetRootFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-GetRootFunction
+      Description: GetRoot function
+      Role:
+        Fn::GetAtt: GetRootFunctionRole.Arn
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /
+            RestApiId:
+              Ref: RestApi
+      InlineCode: |
+        exports.handler = async event => {
+          const body = event.requestContext.authorizer.claims;
+          return {
+            statusCode: 200,
+            headers: { "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify(body, null, 2),
+          };
+        };
+
+  GetRootFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${GetRootFunction}
+
+  # Lambda
+  CreateUserFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-CreateUserFunctionPolicy-${AWS::Region}
+      Description: Execution policy for CreateUserFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - cognito-idp:AdminCreateUser
+              - cognito-idp:AdminInitiateAuth
+              - cognito-idp:AdminRespondToAuthChallenge
+            Resource:
+              - Fn::GetAtt: UserPool.Arn
+
+  CreateUserFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CreateUserFunctionRole-${AWS::Region}
+      Description: Service role for CreateUserFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: CreateUserFunctionPolicy
+
+  CreateUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-CreateUserFunction
+      Description: Create user function
+      Role:
+        Fn::GetAtt: CreateUserFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          USERNAME:
+            Ref: Username
+          PASSWORD:
+            Ref: Password
+          EMAIL_ADDRESS:
+            Ref: EmailAddress
+          USER_POOL_ID:
+            Ref: UserPool
+          CLIENT_ID:
+            Ref: UserPoolClient
+      InlineCode: |
+        const {
+          AdminCreateUserCommand,
+          AdminInitiateAuthCommand,
+          AdminRespondToAuthChallengeCommand,
+          CognitoIdentityProviderClient,
+        } = require("@aws-sdk/client-cognito-identity-provider");
+
+        exports.handler = async () => {
+          const username = process.env.USERNAME;
+          const password = process.env.PASSWORD;
+          const email = process.env.EMAIL_ADDRESS;
+          const userPoolId = process.env.USER_POOL_ID;
+          const clientId = process.env.CLIENT_ID;
+          const client = new CognitoIdentityProviderClient({});
+
+          const adminCreateUserCommand = new AdminCreateUserCommand({
+            UserPoolId: userPoolId,
+            Username: username,
+            UserAttributes: [
+              { Name: "email", Value: email },
+              { Name: "email_verified", Value: "true" },
+            ],
+            TemporaryPassword: `temp-${password}`,
+            DesiredDeliveryMediums: ["EMAIL"],
+          });
+          await client.send(adminCreateUserCommand);
+
+          const adminInitiateAuthCommand = new AdminInitiateAuthCommand({
+            UserPoolId: userPoolId,
+            ClientId: clientId,
+            AuthFlow: "ADMIN_USER_PASSWORD_AUTH",
+            AuthParameters: {
+              USERNAME: username,
+              PASSWORD: `temp-${password}`,
+            },
+          });
+          const { Session, ChallengeName } = await client.send(
+            adminInitiateAuthCommand
+          );
+
+          const adminRespondToAuthChallengeCommand =
+            new AdminRespondToAuthChallengeCommand({
+              UserPoolId: userPoolId,
+              ClientId: clientId,
+              ChallengeName,
+              ChallengeResponses: {
+                USERNAME: username,
+                NEW_PASSWORD: password,
+              },
+              Session,
+            });
+          const { AuthenticationResult } = await client.send(
+            adminRespondToAuthChallengeCommand
+          );
+
+          const accessToken = AuthenticationResult?.AccessToken;
+          const idToken = AuthenticationResult?.IdToken;
+
+          if (accessToken !== undefined) {
+            const payload = Buffer.from(accessToken.split(".")[1], "base64").toString();
+            console.log(JSON.stringify(JSON.parse(payload), null, 2));
+          }
+
+          if (idToken !== undefined) {
+            const payload = Buffer.from(idToken.split(".")[1], "base64").toString();
+            console.log(JSON.stringify(JSON.parse(payload), null, 2));
+          }
+
+          return AuthenticationResult;
+        };
+
+  CreateUserFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${CreateUserFunction}
+
+  SignInFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SignInFunctionRole-${AWS::Region}
+      Description: Service role for SignInFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SignInFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SignInFunction
+      Description: Sign in function
+      Role:
+        Fn::GetAtt: SignInFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          USERNAME:
+            Ref: Username
+          PASSWORD:
+            Ref: Password
+          CLIENT_ID:
+            Ref: UserPoolClient
+      InlineCode: |
+        const {
+          CognitoIdentityProviderClient,
+          InitiateAuthCommand,
+        } = require("@aws-sdk/client-cognito-identity-provider");
+
+        exports.handler = async () => {
+          const username = process.env.USERNAME;
+          const password = process.env.PASSWORD;
+          const clientId = process.env.CLIENT_ID;
+          const client = new CognitoIdentityProviderClient({});
+
+          const initiateAuthCommand = new InitiateAuthCommand({
+            ClientId: clientId,
+            AuthFlow: "USER_PASSWORD_AUTH",
+            AuthParameters: {
+              USERNAME: username,
+              PASSWORD: password,
+            },
+          });
+          const { AuthenticationResult } = await client.send(initiateAuthCommand);
+
+          const accessToken = AuthenticationResult?.AccessToken;
+          const idToken = AuthenticationResult?.IdToken;
+
+          if (accessToken !== undefined) {
+            const payload = Buffer.from(accessToken.split(".")[1], "base64").toString();
+            console.log(JSON.stringify(JSON.parse(payload), null, 2));
+          }
+
+          if (idToken !== undefined) {
+            const payload = Buffer.from(idToken.split(".")[1], "base64").toString();
+            console.log(JSON.stringify(JSON.parse(payload), null, 2));
+          }
+
+          return AuthenticationResult;
+        };
+
+  SignInFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SignInFunction}
+
+  ExecuteApiFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ExecuteApiFunctionRole-${AWS::Region}
+      Description: Service role for ExecuteApiFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ExecuteApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ExecuteApiFunction
+      Description: Sign in function
+      Role:
+        Fn::GetAtt: ExecuteApiFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          USERNAME:
+            Ref: Username
+          PASSWORD:
+            Ref: Password
+          CLIENT_ID:
+            Ref: UserPoolClient
+          API_HOST:
+            Fn::Sub: ${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+          API_PATH:
+            Fn::Sub: /${RestApi.Stage}/
+      InlineCode: |
+        const https = require("https");
+        const {
+          CognitoIdentityProviderClient,
+          InitiateAuthCommand,
+        } = require("@aws-sdk/client-cognito-identity-provider");
+
+        exports.handler = async () => {
+          const accessToken = await getAccessToken();
+          const resBody = await new Promise((resolve, reject) => {
+            const req = https.request(
+              {
+                hostname: process.env.API_HOST,
+                path: process.env.API_PATH,
+                method: "GET",
+                headers: { Authorization: accessToken },
+              },
+              res => {
+                res.on("data", chunk => {
+                  const body = JSON.parse(chunk.toString());
+                  resolve(body);
+                });
+              }
+            );
+            req.on("error", error => {
+              reject(error);
+            });
+            req.end();
+          });
+          return resBody;
+        };
+
+        const getAccessToken = async () => {
+          const username = process.env.USERNAME;
+          const password = process.env.PASSWORD;
+          const clientId = process.env.CLIENT_ID;
+          const client = new CognitoIdentityProviderClient();
+
+          const initiateAuthCommand = new InitiateAuthCommand({
+            ClientId: clientId,
+            AuthFlow: "USER_PASSWORD_AUTH",
+            AuthParameters: {
+              USERNAME: username,
+              PASSWORD: password,
+            },
+          });
+          const { AuthenticationResult } = await client.send(initiateAuthCommand);
+          return AuthenticationResult?.AccessToken;
+        };
+
+  ExecuteApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${ExecuteApiFunction}
+
+Outputs:
+  UserPool:
+    Description: User pool ID
+    Value:
+      Ref: UserPool
+
+  UserPoolClient:
+    Description: User pool client ID
+    Value:
+      Ref: UserPoolClient
+
+  RestApi:
+    Description: REST API ID
+    Value:
+      Ref: RestApi
+
+  RestApiUrl:
+    Description: REST API URL
+    Value:
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}

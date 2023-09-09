@@ -1,0 +1,136 @@
+# dynamodb/templates/ddb-autoscaling.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: DynamoDB Stream with Kinesis Data Stream
+
+Resources:
+  SimpleTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Fn::Sub: ${AWS::StackName}-SimpleTable
+      AttributeDefinitions:
+        - AttributeName: Id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: Id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+
+  PutItemFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-PutItemFunctionPolicy-${AWS::Region}
+      Description: Policy for PutItemFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:PutItem
+            Resource:
+              - Fn::GetAtt: SimpleTable.Arn
+
+  PutItemFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-PutItemFunctionRole-${AWS::Region}
+      Description: Service role for PutItemFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: PutItemFunctionPolicy
+
+  PutItemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-PutItemFunction
+      Description: Producer function
+      Role:
+        Fn::GetAtt: PutItemFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: SimpleTable
+      InlineCode: |
+        const { randomUUID } = require("crypto");
+        const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+        const { DynamoDBDocumentClient, PutCommand } = require("@aws-sdk/lib-dynamodb");
+
+        exports.handler = async () => {
+          const client = DynamoDBDocumentClient.from(new DynamoDBClient());
+          const command = new PutCommand({
+            TableName: process.env.TABLE_NAME,
+            Item: { Id: randomUUID() },
+          });
+          const { Attributes } = await client.send(command);
+          return Attributes;
+        };
+
+  PutItemFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${PutItemFunction}
+
+  ScalableTargetWCU:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      ServiceNamespace: dynamodb
+      ResourceId:
+        Fn::Sub: table/${SimpleTable}
+      ScalableDimension: dynamodb:table:WriteCapacityUnits
+      MinCapacity: 1
+      MaxCapacity: 5
+
+  ScalableTargetRCU:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      ServiceNamespace: dynamodb
+      ResourceId:
+        Fn::Sub: table/${SimpleTable}
+      ScalableDimension: dynamodb:table:ReadCapacityUnits
+      MinCapacity: 1
+      MaxCapacity: 5
+
+  ScalingPolicyWCU:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName:
+        Fn::Sub: ${AWS::StackName}-ScalingPolicyWCU
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId:
+        Ref: ScalableTargetWCU
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 70
+        PredefinedMetricSpecification:
+          PredefinedMetricType: DynamoDBWriteCapacityUtilization
+
+  ScalingPolicyRCU:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName:
+        Fn::Sub: ${AWS::StackName}-ScalingPolicyRCU
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId:
+        Ref: ScalableTargetRCU
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 70
+        PredefinedMetricSpecification:
+          PredefinedMetricType: DynamoDBReadCapacityUtilization

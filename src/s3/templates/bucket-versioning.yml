@@ -15,3 +15,61 @@ Resources:
               SSEAlgorithm: AES256
       VersioningConfiguration:
         Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: TestRule
+            Status: Enabled
+            ExpirationInDays: 3
+            NoncurrentVersionExpiration:
+              NewerNoncurrentVersions: 2
+              NoncurrentDays: 1
+      InventoryConfigurations:
+        - Id: TestInventory
+          Enabled: true
+          IncludedObjectVersions: All
+          OptionalFields:
+            - StorageClass
+            - ETag
+          ScheduleFrequency: Daily
+          Destination:
+            BucketArn:
+              Fn::GetAtt: InventoryBucket.Arn
+            Prefix: inventory
+            Format: CSV
+            BucketAccountId:
+              Ref: AWS::AccountId
+
+  InventoryBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-inventorybucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  InventoryBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: InventoryBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${InventoryBucket.Arn}/*
+            Condition:
+              ArnLike:
+                aws:SourceArn:
+                  Fn::GetAtt: S3Bucket.Arn
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+                s3:x-amz-acl: bucket-owner-full-control

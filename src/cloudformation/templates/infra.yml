@@ -9,7 +9,7 @@ Parameters:
     Description: Account alias name
     Default: hryssmz
 
-  # SSO parameters (required SSO to be enabled)
+  # SSO parameters (require SSO to be enabled)
   SSOInstanceArn:
     Type: String
     Description: SSO Instance ARN
@@ -26,18 +26,19 @@ Parameters:
     Default: 512667299293,343562251096,,229660767790,719118049436
 
 Conditions:
-  IsGlobalCondition:
+  IsHomeRegion:
     Fn::Equals:
       - Ref: AWS::Region
-      - us-east-1
+      - ap-northeast-1
 
 Resources:
   # S3 resources
   Bucket:
     Type: AWS::S3::Bucket
+    Condition: IsHomeRegion
     Properties:
       BucketName:
-        Fn::Sub: ${AccountAlias}-${AWS::Region}
+        Ref: AccountAlias
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - BucketKeyEnabled: true
@@ -78,6 +79,7 @@ Resources:
   # SSO resources
   AdminGroup:
     Type: AWS::IdentityStore::Group
+    Condition: IsHomeRegion
     Properties:
       DisplayName: AdminGroup
       Description: Admin group
@@ -86,16 +88,19 @@ Resources:
 
   AdminPermissionSet:
     Type: AWS::SSO::PermissionSet
+    Condition: IsHomeRegion
     Properties:
       Name: AdminPermissionSet
       Description: Admin permission set
       InstanceArn:
         Ref: SSOInstanceArn
+      SessionDuration: PT12H
       ManagedPolicies:
         - arn:aws:iam::aws:policy/AdministratorAccess
 
   AdminGroupAssignment:
     Type: AWS::SSO::Assignment
+    Condition: IsHomeRegion
     Properties:
       InstanceArn:
         Ref: SSOInstanceArn
@@ -112,6 +117,7 @@ Resources:
 
   AdminGroupAssignment2:
     Type: AWS::SSO::Assignment
+    Condition: IsHomeRegion
     Properties:
       InstanceArn:
         Ref: SSOInstanceArn

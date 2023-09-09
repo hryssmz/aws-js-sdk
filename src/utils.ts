@@ -8,7 +8,7 @@ import archiver from "archiver";
 import { HmacSHA256, SHA256 } from "crypto-js";
 import { DateTime } from "luxon";
 
-export { accountAlias, defaultClientConfig, isLocal, region } from "./config";
+export { accountAlias, defaultClientConfig, region } from "./config";
 
 export type Action = (...args: string[]) => Promise<string>;
 
@@ -17,6 +17,18 @@ export const camelize = (s: string) =>
 
 export const sleep = async (sec: number) => {
   await new Promise(resolve => setTimeout(resolve, sec * 1000));
+};
+
+export const jsonSerialize = (obj: any) => {
+  return JSON.stringify(obj, null, 2);
+};
+
+export const jsonFormat = (jsonStr: string) => {
+  return jsonSerialize(JSON.parse(jsonStr));
+};
+
+export const base64Decode = (base64Str: string) => {
+  return Buffer.from(base64Str, "base64").toString("utf-8");
 };
 
 export const zip = async (sourceDir: string) => {

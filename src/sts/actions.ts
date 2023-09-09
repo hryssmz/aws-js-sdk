@@ -1,0 +1,26 @@
+// sts/actions.ts
+import { jsonSerialize } from "../utils";
+import { STSWrapper } from ".";
+import type { Action } from "../utils";
+
+const roleArn =
+  "arn:aws:iam::512667299293:role/first-identity-pool-AuthenticatedRole-ap-northeast-1";
+const token =
+  "eyJraWQiOiJmRytQOHlaN1pUR1o5V0FMQnl5dTR1Wnp5azRkWkZtcDVHdTNrMzVcL0pkUT0iLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIzZDI4ZmYxMS0xNTA1LTRlMTAtODMwYi1lNzYwMWUxZGQ2YWEiLCJjb2duaXRvOmdyb3VwcyI6WyJVc2VyUG9vbEdyb3VwIl0sImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJjb2duaXRvOnByZWZlcnJlZF9yb2xlIjoiYXJuOmF3czppYW06OjUxMjY2NzI5OTI5Mzpyb2xlXC9maXJzdC1pZGVudGl0eS1wb29sLUF1dGhlbnRpY2F0ZWRTM1JvbGUtYXAtbm9ydGhlYXN0LTEiLCJpc3MiOiJodHRwczpcL1wvY29nbml0by1pZHAuYXAtbm9ydGhlYXN0LTEuYW1hem9uYXdzLmNvbVwvYXAtbm9ydGhlYXN0LTFfTDRRM0FTQ21hIiwiY29nbml0bzp1c2VybmFtZSI6ImhyeXNzbXoiLCJvcmlnaW5fanRpIjoiZWE0ZjcwMzItZjJkOC00MGJmLThlNjQtYjY1N2EzOWU5YmRlIiwiY29nbml0bzpyb2xlcyI6WyJhcm46YXdzOmlhbTo6NTEyNjY3Mjk5MjkzOnJvbGVcL2ZpcnN0LWlkZW50aXR5LXBvb2wtQXV0aGVudGljYXRlZFMzUm9sZS1hcC1ub3J0aGVhc3QtMSJdLCJhdWQiOiIxMGI2a21ncmxwZTRwOHFhZWJlYm5hcWs5IiwiZXZlbnRfaWQiOiI4MGVmZDRmYi03YjkzLTQ4YjktYTI4MC0wNjRjOGEyZDU4OWUiLCJ0b2tlbl91c2UiOiJpZCIsImF1dGhfdGltZSI6MTY5MzY2NjM2MCwiZXhwIjoxNjkzNjY5OTYwLCJpYXQiOjE2OTM2NjYzNjAsImp0aSI6IjYxZDMzZTEyLWQ5NzktNDk1MS05M2VjLTA3M2M4YTM1NjBiNyIsImVtYWlsIjoiaHJ5c3NtekB5YWhvby5jb20ifQ.gDR_UwIpA8q21MmCMCTJjH2Q4lH6m2Ba1-CNZ7GbfgSbcKputAxi0FeQS5ADixSOFT3cSPB5tg9JPRwo3IXW8PQI0QRDnxOuMXPBimIydOk3DUERpCNkbtLA37nm9sw8_ABYRkZvOGAq3j0XdTqS7euG6j74dwdUJUhd98IbnpXKYjwxs9EmZi1zG8Pez--jVXCfE5v0w2EpaJeT-IEtMbA8yVFcWjRsjN0CvRqXf96341Lx2bzcVBqNlEUNzsxbc5-PJeQWUgxITf2Y6EC3mCAN-eIc_CYzGC8WOhL8FqsyWzDiJo7NW6BXsy3pTeZwrCyfY7rwki7qzw1lu6Rk9A";
+const sessionName = "mySession";
+
+async function assumeRoleWithWebId() {
+  const stsWrapper = new STSWrapper();
+  const { Credentials } = await stsWrapper.assumeRoleWithWebIdentity({
+    RoleArn: roleArn,
+    WebIdentityToken: token,
+    RoleSessionName: sessionName,
+  });
+  return jsonSerialize(Credentials);
+}
+
+const actions: Record<string, Action> = {
+  assumeRoleWithWebId,
+};
+
+export default actions;

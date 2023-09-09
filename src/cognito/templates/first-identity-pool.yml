@@ -1,0 +1,583 @@
+# cognito/templates/first-identity-pool.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: My first Cognito Identity Pool
+
+Parameters:
+  Username:
+    Type: String
+    Description: User name
+    Default: hryssmz
+
+  Password:
+    Type: String
+    Description: User password
+    Default: P@ssw0rd
+
+  EmailAddress:
+    Type: String
+    Description: Email address
+    Default: hryssmz@yahoo.com
+
+Resources:
+  # User pool
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName:
+        Fn::Sub: ${AWS::StackName}-UserPool
+      UsernameConfiguration:
+        CaseSensitive: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 6
+          RequireNumbers: false
+          RequireSymbols: false
+          RequireUppercase: false
+          RequireLowercase: false
+      AutoVerifiedAttributes:
+        - email
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate:
+          - email
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName:
+        Fn::Sub: ${AWS::StackName}-UserPoolClient
+      UserPoolId:
+        Ref: UserPool
+      ExplicitAuthFlows:
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      ReadAttributes:
+        - email
+        - email_verified
+      WriteAttributes:
+        - email
+
+  UserPoolGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName:
+        Fn::Sub: UserPoolGroup
+      Description: User pool group
+      UserPoolId:
+        Ref: UserPool
+      RoleArn:
+        Fn::GetAtt: AuthenticatedS3Role.Arn
+      Precedence: 0
+
+  # Identity pool
+  AuthenticatedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-AuthenticatedPolicy-${AWS::Region}
+      Description: Execution policy for AuthenticatedRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - cognito-identity:GetCredentialsForIdentity
+            Resource: "*"
+
+  AuthenticatedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-AuthenticatedRole-${AWS::Region}
+      Description: Authenticated role for Cognito identity pool
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                cognito-identity.amazonaws.com:aud:
+                  Ref: IdentityPool
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: authenticated
+      ManagedPolicyArns:
+        - Ref: AuthenticatedPolicy
+
+  UnauthenticatedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-UnauthenticatedPolicy-${AWS::Region}
+      Description: Execution policy for UnauthenticatedRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - cognito-identity:GetCredentialsForIdentity
+            Resource: "*"
+
+  UnauthenticatedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-UnauthenticatedRole-${AWS::Region}
+      Description: Unauthenticated role for Cognito identity pool
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                cognito-identity.amazonaws.com:aud:
+                  Ref: IdentityPool
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: unauthenticated
+      ManagedPolicyArns:
+        - Ref: UnauthenticatedPolicy
+
+  AuthenticatedS3Policy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-AuthenticatedS3Policy-${AWS::Region}
+      Description: Execution policy for AuthenticatedS3Role
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - cognito-identity:GetCredentialsForIdentity
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - s3:ListAllMyBuckets
+            Resource: "*"
+
+  AuthenticatedS3Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-AuthenticatedS3Role-${AWS::Region}
+      Description: Authenticated admin role for Cognito identity pool
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                cognito-identity.amazonaws.com:aud:
+                  Ref: IdentityPool
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: authenticated
+      ManagedPolicyArns:
+        - Ref: AuthenticatedS3Policy
+
+  IdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      IdentityPoolName:
+        Fn::Sub: ${AWS::StackName}-IdentityPool
+      CognitoIdentityProviders:
+        - ClientId:
+            Ref: UserPoolClient
+          ProviderName:
+            Fn::Sub: cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPool}
+      AllowUnauthenticatedIdentities: true
+
+  IdentityPoolRoleAttachment:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId:
+        Ref: IdentityPool
+      Roles:
+        authenticated:
+          Fn::GetAtt: AuthenticatedRole.Arn
+        unauthenticated:
+          Fn::GetAtt: UnauthenticatedRole.Arn
+      RoleMappings:
+        UserPool:
+          IdentityProvider:
+            Fn::Sub: cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPool}:${UserPoolClient}
+          Type: Token
+          AmbiguousRoleResolution: AuthenticatedRole
+
+  # Lambda
+  CreateUserFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-CreateUserFunctionPolicy-${AWS::Region}
+      Description: Execution policy for CreateUserFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - cognito-idp:AdminAddUserToGroup
+              - cognito-idp:AdminCreateUser
+              - cognito-idp:AdminInitiateAuth
+              - cognito-idp:AdminRespondToAuthChallenge
+            Resource:
+              - Fn::GetAtt: UserPool.Arn
+
+  CreateUserFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CreateUserFunctionRole-${AWS::Region}
+      Description: Service role for CreateUserFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: CreateUserFunctionPolicy
+
+  CreateUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-CreateUserFunction
+      Description: Create user function
+      Role:
+        Fn::GetAtt: CreateUserFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          USERNAME:
+            Ref: Username
+          PASSWORD:
+            Ref: Password
+          EMAIL_ADDRESS:
+            Ref: EmailAddress
+          USER_POOL_ID:
+            Ref: UserPool
+          CLIENT_ID:
+            Ref: UserPoolClient
+          GROUP_NAME:
+            Ref: UserPoolGroup
+      InlineCode: |
+        const {
+          AdminAddUserToGroupCommand,
+          AdminCreateUserCommand,
+          AdminInitiateAuthCommand,
+          AdminRespondToAuthChallengeCommand,
+          CognitoIdentityProviderClient,
+        } = require("@aws-sdk/client-cognito-identity-provider");
+
+        exports.handler = async () => {
+          const username = process.env.USERNAME;
+          const password = process.env.PASSWORD;
+          const email = process.env.EMAIL_ADDRESS;
+          const userPoolId = process.env.USER_POOL_ID;
+          const clientId = process.env.CLIENT_ID;
+          const groupName = process.env.GROUP_NAME;
+          const client = new CognitoIdentityProviderClient({});
+
+          const adminCreateUserCommand = new AdminCreateUserCommand({
+            UserPoolId: userPoolId,
+            Username: username,
+            UserAttributes: [
+              { Name: "email", Value: email },
+              { Name: "email_verified", Value: "true" },
+            ],
+            TemporaryPassword: `temp-${password}`,
+            DesiredDeliveryMediums: ["EMAIL"],
+          });
+          await client.send(adminCreateUserCommand);
+
+          const adminAddUserToGroupCommand = new AdminAddUserToGroupCommand({
+            GroupName: groupName,
+            Username: username,
+            UserPoolId: userPoolId,
+          });
+          await client.send(adminAddUserToGroupCommand);
+
+          const adminInitiateAuthCommand = new AdminInitiateAuthCommand({
+            UserPoolId: userPoolId,
+            ClientId: clientId,
+            AuthFlow: "ADMIN_USER_PASSWORD_AUTH",
+            AuthParameters: {
+              USERNAME: username,
+              PASSWORD: `temp-${password}`,
+            },
+          });
+          const { Session, ChallengeName } = await client.send(
+            adminInitiateAuthCommand
+          );
+
+          const adminRespondToAuthChallengeCommand =
+            new AdminRespondToAuthChallengeCommand({
+              UserPoolId: userPoolId,
+              ClientId: clientId,
+              ChallengeName,
+              ChallengeResponses: {
+                USERNAME: username,
+                NEW_PASSWORD: password,
+              },
+              Session,
+            });
+          const { AuthenticationResult } = await client.send(
+            adminRespondToAuthChallengeCommand
+          );
+
+          const accessToken = AuthenticationResult?.AccessToken;
+          const idToken = AuthenticationResult?.IdToken;
+
+          if (accessToken !== undefined) {
+            const payload = Buffer.from(accessToken.split(".")[1], "base64").toString();
+            console.log(JSON.stringify(JSON.parse(payload), null, 2));
+          }
+
+          if (idToken !== undefined) {
+            const payload = Buffer.from(idToken.split(".")[1], "base64").toString();
+            console.log(JSON.stringify(JSON.parse(payload), null, 2));
+          }
+
+          return AuthenticationResult;
+        };
+
+  CreateUserFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${CreateUserFunction}
+
+  SignInFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SignInFunctionRole-${AWS::Region}
+      Description: Service role for SignInFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SignInFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SignInFunction
+      Description: Sign in function
+      Role:
+        Fn::GetAtt: SignInFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          USERNAME:
+            Ref: Username
+          PASSWORD:
+            Ref: Password
+          CLIENT_ID:
+            Ref: UserPoolClient
+      InlineCode: |
+        const {
+          CognitoIdentityProviderClient,
+          InitiateAuthCommand,
+        } = require("@aws-sdk/client-cognito-identity-provider");
+
+        exports.handler = async () => {
+          const username = process.env.USERNAME;
+          const password = process.env.PASSWORD;
+          const clientId = process.env.CLIENT_ID;
+          const client = new CognitoIdentityProviderClient({});
+
+          const initiateAuthCommand = new InitiateAuthCommand({
+            ClientId: clientId,
+            AuthFlow: "USER_PASSWORD_AUTH",
+            AuthParameters: {
+              USERNAME: username,
+              PASSWORD: password,
+            },
+          });
+          const { AuthenticationResult } = await client.send(initiateAuthCommand);
+
+          const accessToken = AuthenticationResult?.AccessToken;
+          const idToken = AuthenticationResult?.IdToken;
+
+          if (accessToken !== undefined) {
+            const payload = Buffer.from(accessToken.split(".")[1], "base64").toString();
+            console.log(JSON.stringify(JSON.parse(payload), null, 2));
+          }
+
+          if (idToken !== undefined) {
+            const payload = Buffer.from(idToken.split(".")[1], "base64").toString();
+            console.log(JSON.stringify(JSON.parse(payload), null, 2));
+          }
+
+          return AuthenticationResult;
+        };
+
+  SignInFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SignInFunction}
+
+  GetCredentialsFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-GetCredentialsFunctionRole-${AWS::Region}
+      Description: Service role for GetCredentialsFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  GetCredentialsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-GetCredentialsFunction
+      Description: Sign in function
+      Role:
+        Fn::GetAtt: GetCredentialsFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          USERNAME:
+            Ref: Username
+          PASSWORD:
+            Ref: Password
+          CLIENT_ID:
+            Ref: UserPoolClient
+          IDENTITY_POOL_ID:
+            Ref: IdentityPool
+          IDENTITY_PROVIDER_NAME:
+            Fn::Sub: cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+      InlineCode: |
+        const {
+          CognitoIdentityClient,
+          GetIdCommand,
+          GetCredentialsForIdentityCommand,
+        } = require("@aws-sdk/client-cognito-identity");
+        const {
+          CognitoIdentityProviderClient,
+          InitiateAuthCommand,
+        } = require("@aws-sdk/client-cognito-identity-provider");
+        const { ListBucketsCommand, S3Client } = require("@aws-sdk/client-s3");
+
+        exports.handler = async () => {
+          const idToken = await getIdToken();
+          const credentials = await getCredentials(idToken);
+          const accessKeyId = credentials?.AccessKeyId;
+          const secretAccessKey = credentials?.SecretKey;
+          const sessionToken = credentials?.SessionToken;
+          const expiration = credentials?.Expiration;
+          if (accessKeyId === undefined || secretAccessKey === undefined) {
+            return undefined;
+          }
+          const client = new S3Client({
+            credentials: { accessKeyId, secretAccessKey, sessionToken, expiration },
+          });
+          const listBucketsCommand = new ListBucketsCommand({});
+          const { Buckets } = await client.send(listBucketsCommand);
+          console.log(JSON.stringify(Buckets, null, 2));
+          return credentials;
+        };
+
+        const getIdToken = async () => {
+          const username = process.env.USERNAME;
+          const password = process.env.PASSWORD;
+          const clientId = process.env.CLIENT_ID;
+          const client = new CognitoIdentityProviderClient();
+
+          const initiateAuthCommand = new InitiateAuthCommand({
+            ClientId: clientId,
+            AuthFlow: "USER_PASSWORD_AUTH",
+            AuthParameters: {
+              USERNAME: username,
+              PASSWORD: password,
+            },
+          });
+          const { AuthenticationResult } = await client.send(initiateAuthCommand);
+          return AuthenticationResult?.IdToken;
+        };
+
+        const getCredentials = async tokenId => {
+          const identityPoolId = process.env.IDENTITY_POOL_ID;
+          const identityProviderName = process.env.IDENTITY_PROVIDER_NAME;
+          const client = new CognitoIdentityClient();
+
+          const getIdCommand = new GetIdCommand({ IdentityPoolId: identityPoolId });
+          const { IdentityId } = await client.send(getIdCommand);
+
+          const getCredentialsForIdentityCommand = new GetCredentialsForIdentityCommand(
+            {
+              IdentityId,
+              Logins: {
+                [identityProviderName]: tokenId,
+              },
+            }
+          );
+          const { Credentials } = await client.send(getCredentialsForIdentityCommand);
+          return Credentials;
+        };
+
+  GetCredentialsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${GetCredentialsFunction}
+
+Outputs:
+  UserPool:
+    Description: User pool ID
+    Value:
+      Ref: UserPool
+
+  UserPoolClient:
+    Description: User pool client ID
+    Value:
+      Ref: UserPoolClient
+
+  IdentityPool:
+    Description: Identity pool ID
+    Value:
+      Ref: IdentityPool

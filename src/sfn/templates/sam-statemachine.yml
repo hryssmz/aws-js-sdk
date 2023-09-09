@@ -1,0 +1,603 @@
+# sfn/templates/sam-statemachine.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: State machine with AWS SAM
+
+Resources:
+  # State Machine
+  StateMachineExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-StateMachineExecutionPolicy-${AWS::Region}
+      Description: Execution policy for StateMachine
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LambdaAccess
+            Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-*
+
+  StateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-StateMachineExecutionRole-${AWS::Region}
+      Description: Execution role for StateMachine
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: StateMachineExecutionPolicy
+
+  StateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-StateMachine
+      Type: STANDARD
+      Role:
+        Fn::GetAtt: StateMachineExecutionRole.Arn
+      Definition:
+        Comment: Sample state machine
+        StartAt: Initialize
+        States:
+          Initialize:
+            Type: Task
+            Resource:
+              Fn::GetAtt: InitializeFunction.Arn
+            Parameters:
+              records.$: $.records
+              executionArn.$: $$.Execution.Id
+            Next: Process
+          Process:
+            Type: Map
+            MaxConcurrency: 2
+            ItemsPath: $.chunks
+            ItemSelector:
+              executionId.$: $.executionId
+              chunk.$: $$.Map.Item.Value
+            ResultPath: $.chunks
+            Iterator:
+              StartAt: ProcessItem
+              States:
+                ProcessItem:
+                  Type: Task
+                  Resource:
+                    Fn::GetAtt: ProcessItemFunction.Arn
+                  End: true
+            Next: Finalize
+          Finalize:
+            Type: Task
+            Resource:
+              Fn::GetAtt: FinalizeFunction.Arn
+            Parameters:
+              chunks.$: $.chunks
+              executionArn.$: $.executionArn
+            End: true
+
+  # Lambda
+  InitializeFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-InitializeFunctionRole-${AWS::Region}
+      Description: Service role for InitializeFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  InitializeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-InitializeFunction
+      Description: Initialize function
+      Role:
+        Fn::GetAtt: InitializeFunctionRole.Arn
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          CHUNK_SIZE: "6"
+      InlineCode: |
+        exports.handler = async event => {
+          const chunkSize = Number(process.env.CHUNK_SIZE);
+          const { records, executionArn } = event;
+          const arnSegments = executionArn.split(":");
+          const chunks = Array(Math.ceil(records.length / chunkSize))
+            .fill()
+            .map((_, i) => i * chunkSize)
+            .map(i => records.slice(i, i + chunkSize));
+          return {
+            chunks,
+            executionArn,
+            executionId: arnSegments[arnSegments.length - 1],
+          };
+        };
+
+  InitializeFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${InitializeFunction}
+
+  ProcessItemFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ProcessItemFunctionRole-${AWS::Region}
+      Description: Service role for ProcessItemFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ProcessItemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ProcessItemFunction
+      Description: Process item function
+      Role:
+        Fn::GetAtt: ProcessItemFunctionRole.Arn
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      InlineCode: |
+        exports.handler = async event => {
+          const { chunk, executionId } = event;
+          return chunk.map(({ order, id }) => ({
+            order,
+            id,
+            result: Math.random() > 0.3 ? "0" : "1",
+            executionId,
+          }));
+        };
+
+  ProcessItemFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${ProcessItemFunction}
+
+  FinalizeFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-FinalizeFunctionRole-${AWS::Region}
+      Description: Service role for FinalizeFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  FinalizeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-FinalizeFunction
+      Description: Finalize function
+      Role:
+        Fn::GetAtt: FinalizeFunctionRole.Arn
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      InlineCode: |
+        exports.handler = async event => {
+          const { chunks, executionArn } = event;
+          const results = chunks.reduce((acc, chunk) => [...acc, ...chunk], []);
+          return { results, executionArn };
+        };
+
+  FinalizeFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${FinalizeFunction}
+
+  # REST API
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RestApi
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      StageName: dev
+      Cors:
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: My REST API
+          version: "1.0"
+        servers:
+          - url: https://{restApiId}.execute-api.{region}.amazonaws.com/{basePath}
+            variables:
+              restApiId:
+                default: hxhhn2xxx4
+              region:
+                default: ap-northeast-1
+              basePath:
+                default: dev
+        paths:
+          /:
+            post:
+              operationId: StartExecution
+              summary: StartExecution API
+              description: Start execution
+              tags:
+                - StartExecution
+              requestBody:
+                description: StartExecution request body
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      $ref: "#/components/schemas/StartExecutionRequest"
+                    examples:
+                      example1:
+                        value:
+                          records:
+                            - order: 1
+                              id: 1a5de478-ed0e-48c2-a4b4-eaf5fc15018e
+                            - order: 2
+                              id: d73e041d-a746-414e-9f37-86416cbf77dd
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/StartExecutionResponse"
+                      examples:
+                        example1:
+                          value:
+                            executionId: 1c0a08fa-4229-421b-83d0-a43b6ccd1fa9
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: "#/components/headers/Access-Control-Allow-Origin"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${StartExecutionFunction.Arn}/invocations
+                httpMethod: POST
+          /{execution_id}:
+            parameters:
+              - name: execution_id
+                in: path
+                required: true
+                schema:
+                  type: string
+                  format: uuid
+                examples:
+                  example1:
+                    value: 1c0a08fa-4229-421b-83d0-a43b6ccd1fa9
+            get:
+              operationId: DescribeExecution
+              summary: DescribeExecution API
+              description: Describe execution
+              tags:
+                - DescribeExecution
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/DescribeExecutionResponse"
+                      examples:
+                        example1:
+                          value:
+                            status: SUCCEEDED
+                            output:
+                              results:
+                                - order: 1
+                                  id: 1a5de478-ed0e-48c2-a4b4-eaf5fc15018e
+                                  result: "0"
+                                  executionId: 1c0a08fa-4229-421b-83d0-a43b6ccd1fa9
+                                - order: 2
+                                  id: d73e041d-a746-414e-9f37-86416cbf77dd
+                                  result: "0"
+                                  executionId: 1c0a08fa-4229-421b-83d0-a43b6ccd1fa9
+                              executionArn: arn:aws:states:ap-northeast-1:512667299293:execution:sam-statemachine-StateMachine:1c0a08fa-4229-421b-83d0-a43b6ccd1fa9
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: "#/components/headers/Access-Control-Allow-Origin"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DescribeExecutionFunction.Arn}/invocations
+                httpMethod: POST
+        components:
+          headers:
+            Access-Control-Allow-Origin:
+              description: CORS header
+              schema:
+                type: string
+          schemas:
+            StartExecutionRequest:
+              type: object
+              required:
+                - records
+              properties:
+                records:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - id
+                      - order
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      order:
+                        type: integer
+                        minimum: 1
+            StartExecutionResponse:
+              type: object
+              required:
+                - executionId
+              properties:
+                executionId:
+                  type: string
+                  format: uuid
+            DescribeExecutionResponse:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  enum:
+                    - SUCCEEDED
+                    - RUNNING
+                    - FAILED
+                    - TIMED_OUT
+                    - ABORTED
+                output:
+                  type: object
+                  required:
+                    - results
+                    - executionArn
+                  properties:
+                    results:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - id
+                          - order
+                          - result
+                          - executionId
+                        properties:
+                          id:
+                            type: string
+                            format: uuid
+                          order:
+                            type: integer
+                            minimum: 1
+                          result:
+                            enum:
+                              - "0"
+                              - "1"
+                          executionId:
+                            type: string
+                            format: uuid
+                    executionArn:
+                      type: string
+
+  StartExecutionFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-StartExecutionFunctionPolicy-${AWS::Region}
+      Description: Execution policy for StartExecutionFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: StateMachineAccessPermissions
+            Effect: Allow
+            Action:
+              - states:StartExecution
+            Resource:
+              - Ref: StateMachine
+
+  StartExecutionFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-StartExecutionFunctionRole-${AWS::Region}
+      Description: Service role for StartExecutionFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: StartExecutionFunctionPolicy
+
+  StartExecutionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-StartExecutionFunction
+      Description: StartExecution function
+      Role:
+        Fn::GetAtt: StartExecutionFunctionRole.Arn
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN:
+            Ref: StateMachine
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: POST
+            Path: /
+            RestApiId:
+              Ref: RestApi
+      InlineCode: |
+        const { StartExecutionCommand, SFNClient } = require("@aws-sdk/client-sfn");
+
+        exports.handler = async event => {
+          const client = new SFNClient();
+          const command = new StartExecutionCommand({
+            input: event.body,
+            stateMachineArn: process.env.STATE_MACHINE_ARN,
+          });
+          const { executionArn } = await client.send(command);
+          const arnSegments = executionArn.split(":");
+          const body = { executionId: arnSegments[arnSegments.length - 1] };
+          return {
+            statusCode: 200,
+            headers: { "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify(body, null, 2),
+          };
+        };
+
+  StartExecutionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${StartExecutionFunction}
+
+  DescribeExecutionFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-DescribeExecutionFunctionPolicy-${AWS::Region}
+      Description: Execution policy for DescribeExecutionFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: StateMachineExecutionAccessPermissions
+            Effect: Allow
+            Action:
+              - states:DescribeExecution
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${StateMachine.Name}:*
+
+  DescribeExecutionFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DescribeExecutionFunctionRole-${AWS::Region}
+      Description: Service role for DescribeExecutionFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: DescribeExecutionFunctionPolicy
+
+  DescribeExecutionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-DescribeExecutionFunction
+      Description: StartExecution function
+      Role:
+        Fn::GetAtt: DescribeExecutionFunctionRole.Arn
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          EXECUTION_ARN_PREFIX:
+            Fn::Sub: arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${StateMachine.Name}
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /{execution_id}
+            RestApiId:
+              Ref: RestApi
+      InlineCode: |
+        const { DescribeExecutionCommand, SFNClient } = require("@aws-sdk/client-sfn");
+
+        exports.handler = async event => {
+          const executionId = event.pathParameters.execution_id;
+          const executionArnPrefix = process.env.EXECUTION_ARN_PREFIX;
+          const client = new SFNClient();
+          const command = new DescribeExecutionCommand({
+            executionArn: `${executionArnPrefix}:${executionId}`,
+          });
+          const { status, output } = await client.send(command);
+          const body = {
+            status,
+            output: status === "SUCCEEDED" ? JSON.parse(output) : undefined,
+          };
+          return {
+            statusCode: 200,
+            headers: { "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify(body, null, 2),
+          };
+        };
+
+  DescribeExecutionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${DescribeExecutionFunction}
+
+Outputs:
+  RestApiUrl:
+    Description: REST API URL
+    Value:
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}
+
+  RestApi:
+    Description: REST API ID
+    Value:
+      Ref: RestApi

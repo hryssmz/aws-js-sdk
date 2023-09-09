@@ -1,0 +1,138 @@
+# apigateway/templates/aws-sdk-debug-api.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: AWS SDK debugging API
+
+Resources:
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RestApi
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      StageName: dev
+      Cors:
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        servers:
+          - url: https://{restApiId}.execute-api.{region}.amazonaws.com/{basePath}
+            variables:
+              restApiId:
+                default: hxhhn2xxx4
+              region:
+                default: ap-northeast-1
+              basePath:
+                default: dev
+        info:
+          title: My REST API
+          version: "1.0"
+        paths:
+          /:
+            post:
+              operationId: PostRoot
+              tags:
+                - Root
+              requestBody:
+                description: POST / request body
+                content:
+                  application/x-amz-json-1.1:
+                    schema:
+                      $ref: "#/components/schemas/PostRootRequest"
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/PostRootResponse"
+                      examples:
+                        example1:
+                          value:
+                            message: Hello World!
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: "#/components/headers/Access-Control-Allow-Origin"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PostRootFunction.Arn}/invocations
+                httpMethod: POST
+        components:
+          headers:
+            Access-Control-Allow-Origin:
+              description: Response header for CORS support
+              schema:
+                type: string
+          schemas:
+            PostRootRequest:
+              description: Request body for POST /
+              type: object
+            PostRootResponse:
+              description: Response body for POST /
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+
+  PostRootFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-PostRootFunctionRole-${AWS::Region}
+      Description: Service role for PostRootFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  PostRootFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-PostRootFunction
+      Description: PostRoot function
+      Role:
+        Fn::GetAtt: PostRootFunctionRole.Arn
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: POST
+            Path: /
+            RestApiId:
+              Ref: RestApi
+      InlineCode: |
+        exports.handler = async event => {
+          console.log(JSON.stringify(event, null, 2));
+          const body = { message: "Hello World!" };
+          return { statusCode: 200, body: JSON.stringify(body, null, 2) };
+        };
+
+  PostRootFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${PostRootFunction}
+
+Outputs:
+  RestApiUrl:
+    Description: REST API URL
+    Value:
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}

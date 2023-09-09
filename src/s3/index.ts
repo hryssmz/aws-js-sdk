@@ -6,13 +6,15 @@ import {
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
+  GetObjectRetentionCommand,
   ListBucketsCommand,
   ListObjectsCommand,
+  ListObjectVersionsCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { defaultClientConfig, isLocal } from "../utils";
+import { defaultClientConfig } from "../utils";
 import {
   CopyObjectCommandInput,
   CreateBucketCommandInput,
@@ -20,18 +22,16 @@ import {
   DeleteObjectCommandInput,
   DeleteObjectsCommandInput,
   GetObjectCommandInput,
+  GetObjectRetentionCommandInput,
   ListBucketsCommandInput,
   ListObjectsCommandInput,
+  ListObjectVersionsCommandInput,
   PutObjectCommandInput,
   S3ClientConfig,
 } from "@aws-sdk/client-s3";
 import type { RequestPresigningArguments } from "@aws-sdk/types";
 
-export const defaultS3ClientConfig = {
-  ...defaultClientConfig,
-  /* c8 ignore next */
-  forcePathStyle: isLocal ? true : undefined,
-};
+export const defaultS3ClientConfig = { ...defaultClientConfig };
 
 export class S3Wrapper {
   client: S3Client;
@@ -76,6 +76,12 @@ export class S3Wrapper {
     return result;
   }
 
+  async getObjectRetention(params: GetObjectRetentionCommandInput) {
+    const command = new GetObjectRetentionCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
   async getObjectUrl(
     params: GetObjectCommandInput,
     options?: RequestPresigningArguments
@@ -93,6 +99,12 @@ export class S3Wrapper {
 
   async listObjects(params: ListObjectsCommandInput) {
     const command = new ListObjectsCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async listObjectVersions(params: ListObjectVersionsCommandInput) {
+    const command = new ListObjectVersionsCommand(params);
     const result = await this.client.send(command);
     return result;
   }

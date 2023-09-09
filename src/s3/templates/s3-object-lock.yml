@@ -1,0 +1,114 @@
+# s3/templates/s3-object-lock.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Bucket Object Lock
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: GOVERNANCE
+            Days: 1
+
+  DeleteObjectFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-DeleteObjectFunctionPolicy-${AWS::Region}
+      Description: Execution policy for DeleteObjectFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:ListBucketVersions
+            Resource:
+              - Fn::GetAtt: S3Bucket.Arn
+          - Effect: Allow
+            Action:
+              - s3:DeleteObjectVersion
+              - s3:BypassGovernanceRetention
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+
+  DeleteObjectFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DeleteObjectFunctionRole-${AWS::Region}
+      Description: Service role for DeleteObjectFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: DeleteObjectFunctionPolicy
+
+  DeleteObjectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-DeleteObjectFunction
+      Description: Delete object function
+      Role:
+        Fn::GetAtt: DeleteObjectFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          BUCKET_NAME:
+            Ref: S3Bucket
+      InlineCode: |
+        const {
+          DeleteObjectsCommand,
+          ListObjectVersionsCommand,
+          S3Client,
+        } = require("@aws-sdk/client-s3");
+
+        exports.handler = async event => {
+          const { prefix, bypass } = event;
+          const bucket = process.env.BUCKET_NAME;
+          const client = new S3Client();
+
+          const listObjectVersionsCommand = new ListObjectVersionsCommand({
+            Bucket: bucket,
+            Prefix: prefix,
+          });
+          const { Versions } = await client.send(listObjectVersionsCommand);
+
+          const deleteObjectCommand = new DeleteObjectsCommand({
+            Bucket: bucket,
+            Delete: {
+              Objects: Versions?.map(({ Key, VersionId }) => ({ Key, VersionId })),
+            },
+            BypassGovernanceRetention: bypass,
+          });
+          const { Deleted } = await client.send(deleteObjectCommand);
+
+          return Deleted;
+        };
+
+  DeleteObjectFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${DeleteObjectFunction}
