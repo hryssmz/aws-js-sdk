@@ -1,6 +1,7 @@
-# rds/templates/postgresql-tutorial.yml
+# rds/templates/multi-az-rds-instance.yml
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Aurora PostgreSQL tutorial
+Transform: AWS::Serverless-2016-10-31
+Description: Multi-AZ RDS instance
 
 Parameters:
   VpcId:
@@ -143,13 +144,7 @@ Resources:
               content:
                 Fn::Sub: |
                   #!/bin/sh
-                  psql -d postgresql://postgres:postgres@${AuroraCluster.Endpoint.Address}:${AuroraCluster.Endpoint.Port}/$1
-              mode: "000755"
-            /usr/local/bin/ro-db-login.sh:
-              content:
-                Fn::Sub: |
-                  #!/bin/sh
-                  psql -d postgresql://postgres:postgres@${AuroraCluster.ReadEndpoint.Address}:${AuroraCluster.Endpoint.Port}/$1
+                  psql -d postgresql://postgres:postgres@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/$1
               mode: "000755"
     Properties:
       LaunchTemplateName:
@@ -222,49 +217,39 @@ Resources:
         - Ref: PrivateSubnet0
         - Ref: PrivateSubnet1
 
-  AuroraCluster:
-    Type: AWS::RDS::DBCluster
+  DBInstance:
+    Type: AWS::RDS::DBInstance
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      DBClusterIdentifier:
-        Fn::Sub: ${AWS::StackName}-AuroraCluster
-      Engine: aurora-postgresql
-      EngineVersion: 15.2
+      DBInstanceIdentifier:
+        Fn::Sub: ${AWS::StackName}-DBInstance
+      Engine: postgres
+      EngineVersion: 15.3
       MasterUsername: postgres
       MasterUserPassword: postgres
       Port: 5432
-      DatabaseName: postgres
-      StorageType: aurora
+      DBName: postgres
+      DBInstanceClass: db.t3.micro
+      StorageType: gp2
+      AllocatedStorage: 20
+      MaxAllocatedStorage: 100
       StorageEncrypted: true
+      BackupRetentionPeriod: 1
       NetworkType: IPV4
       DBSubnetGroupName:
         Ref: DBSubnetGroup
-      VpcSecurityGroupIds:
+      VPCSecurityGroups:
         - Ref: DBSecurityGroup
-
-  AuroraInstance:
-    Type: AWS::RDS::DBInstance
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      DBClusterIdentifier:
-        Ref: AuroraCluster
-      DBInstanceIdentifier:
-        Fn::Sub: ${AWS::StackName}-AuroraInstance
-      Engine: aurora-postgresql
-      DBInstanceClass: db.t3.medium
       CACertificateIdentifier: rds-ca-rsa4096-g1
+      MultiAZ: true
 
-  AuroraInstance2:
+  ReplicaDBInstance:
     Type: AWS::RDS::DBInstance
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
     Properties:
-      DBClusterIdentifier:
-        Ref: AuroraCluster
       DBInstanceIdentifier:
-        Fn::Sub: ${AWS::StackName}-AuroraInstance2
-      Engine: aurora-postgresql
-      DBInstanceClass: db.t3.medium
+        Fn::Sub: ${AWS::StackName}-ReplicaDBInstance
+      SourceDBInstanceIdentifier:
+        Ref: DBInstance
       CACertificateIdentifier: rds-ca-rsa4096-g1
+      MultiAZ: true

@@ -1,0 +1,300 @@
+# ec2/templates/postgres-on-ec2.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Install PostgreSQL on EC2 instance
+
+Parameters:
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
+
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
+
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDRs
+    Default: 172.20.0.0/20,172.20.16.0/20
+
+  PrivateSubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Private subnet CIDRs
+    Default: 172.20.128.0/20,172.20.144.0/20
+
+Resources:
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Ref: VPCCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  Subnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet0
+
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet1
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: RouteTable
+
+  Subnet0RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet0
+      RouteTableId:
+        Ref: RouteTable
+
+  Subnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet1
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  # EC2
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-DBSecurityGroup
+      GroupDescription: DB security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - Description: ICMP inbound rule
+          IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+        - Description: PostgreSQL inbound rule
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+      Tags:
+        - Key: Name
+          Value: DBSecurityGroup
+
+  DBLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName:
+        Fn::Sub: ${AWS::StackName}-DBLaunchTemplate
+      VersionDescription: Launch template for DB instances
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - Key: Name
+              Value: DBLaunchTemplate
+      LaunchTemplateData:
+        ImageId:
+          Ref: ImageId
+        InstanceType:
+          Ref: InstanceType
+        IamInstanceProfile:
+          Name:
+            Ref: EC2InstanceProfile
+        SecurityGroupIds:
+          - Ref: DBSecurityGroup
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: DBInstance
+        UserData:
+          Fn::Base64:
+            Fn::Sub: |
+              #!/bin/sh
+              dnf update -y
+              dnf install -y postgresql15-server
+
+              sudo -i -u postgres /bin/sh - <<\EOF
+              postgresql-setup --initdb
+              echo "local all all peer" > /var/lib/pgsql/data/pg_hba.conf
+              echo "host all all 0.0.0.0/0 md5" >> /var/lib/pgsql/data/pg_hba.conf
+              echo "listen_addresses = '*'" >> /var/lib/pgsql/data/postgresql.conf
+              EOF
+              systemctl enable postgresql.service
+              systemctl start postgresql.service
+              sudo -i -u postgres psql -c "ALTER ROLE postgres WITH PASSWORD 'postgres';"
+
+  DBInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: DBLaunchTemplate
+        Version:
+          Fn::GetAtt: DBLaunchTemplate.LatestVersionNumber
+      SubnetId:
+        Ref: Subnet0
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 security group
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: EC2SecurityGroup
+
+  EC2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /usr/local/bin/db-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  psql -d postgresql://postgres:postgres@${DBInstance.PrivateDnsName}/$1
+              mode: "000755"
+    Properties:
+      LaunchTemplateName:
+        Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
+      VersionDescription: Launch template for EC2 instances
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - Key: Name
+              Value: EC2LaunchTemplate
+      LaunchTemplateData:
+        ImageId:
+          Ref: ImageId
+        InstanceType:
+          Ref: InstanceType
+        IamInstanceProfile:
+          Name:
+            Ref: EC2InstanceProfile
+        SecurityGroupIds:
+          - Ref: EC2SecurityGroup
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: EC2Instance
+        UserData:
+          Fn::Base64:
+            Fn::Sub: |
+              #!/bin/sh
+              dnf update -y
+              dnf install -y postgresql15
+              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: EC2LaunchTemplate
+        Version:
+          Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
+      SubnetId:
+        Ref: Subnet1

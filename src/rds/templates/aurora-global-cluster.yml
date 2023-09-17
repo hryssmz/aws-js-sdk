@@ -1,22 +1,22 @@
-# rds/templates/postgresql-tutorial.yml
+# rds/templates/aurora-global-cluster.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Aurora PostgreSQL tutorial
 
 Parameters:
-  VpcId:
-    Type: AWS::EC2::VPC::Id
-    Description: VPC ID
-    Default: vpc-01d5cfd2cad5314f1
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
 
-  SubnetIds:
-    Type: List<AWS::EC2::Subnet::Id>
-    Description: Subnet IDs
-    Default: subnet-00ee516fa04d610fe,subnet-0c99e2001f0ae6c0a
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDRs
+    Default: 172.20.0.0/20,172.20.16.0/20
 
   PrivateSubnetCidrs:
     Type: CommaDelimitedList
     Description: Private subnet CIDRs
-    Default: 172.31.128.0/20,172.31.144.0/20
+    Default: 172.20.128.0/20,172.20.144.0/20
 
   ImageId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
@@ -28,8 +28,126 @@ Parameters:
     Description: EC2 instance type
     Default: t2.micro
 
+Rules:
+  TestTokyoOrVirginia:
+    Assertions:
+      - AssertDescription: Only ap-northeast-1 and us-east-1 are allowed
+        Assert:
+          Fn::Contains:
+            - - ap-northeast-1
+              - us-east-1
+            - Ref: AWS::Region
+
+Conditions:
+  IsTokyoCondition:
+    Fn::Equals:
+      - Ref: AWS::Region
+      - ap-northeast-1
+
+  IsVerginiaCondition:
+    Fn::Equals:
+      - Ref: AWS::Region
+      - us-east-1
+
 Resources:
   # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Ref: VPCCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  Subnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet0
+
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet1
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: RouteTable
+
+  Subnet0RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet0
+      RouteTableId:
+        Ref: RouteTable
+
+  Subnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet1
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
   PrivateSubnet0:
     Type: AWS::EC2::Subnet
     Properties:
@@ -38,7 +156,7 @@ Resources:
           - 0
           - Ref: PrivateSubnetCidrs
       VpcId:
-        Ref: VpcId
+        Ref: VPC
       AvailabilityZone:
         Fn::Select:
           - 0
@@ -55,7 +173,7 @@ Resources:
           - 1
           - Ref: PrivateSubnetCidrs
       VpcId:
-        Ref: VpcId
+        Ref: VPC
       AvailabilityZone:
         Fn::Select:
           - 1
@@ -68,7 +186,7 @@ Resources:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId:
-        Ref: VpcId
+        Ref: VPC
       Tags:
         - Key: Name
           Value: PrivateRouteTable
@@ -97,7 +215,7 @@ Resources:
         Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
       GroupDescription: EC2 security group
       VpcId:
-        Ref: VpcId
+        Ref: VPC
       SecurityGroupIngress:
         - Description: HTTP inbound rule
           IpProtocol: tcp
@@ -141,15 +259,20 @@ Resources:
           files:
             /usr/local/bin/db-login.sh:
               content:
-                Fn::Sub: |
-                  #!/bin/sh
-                  psql -d postgresql://postgres:postgres@${AuroraCluster.Endpoint.Address}:${AuroraCluster.Endpoint.Port}/$1
-              mode: "000755"
-            /usr/local/bin/ro-db-login.sh:
-              content:
-                Fn::Sub: |
-                  #!/bin/sh
-                  psql -d postgresql://postgres:postgres@${AuroraCluster.ReadEndpoint.Address}:${AuroraCluster.Endpoint.Port}/$1
+                Fn::Sub:
+                  - |
+                    #!/bin/sh
+                    psql -d postgresql://postgres:postgres@${Host}:${Port}/$1
+                  - Host:
+                      Fn::If:
+                        - IsTokyoCondition
+                        - Fn::GetAtt: PrimaryCluster.Endpoint.Address
+                        - Fn::GetAtt: SecondaryCluster.ReadEndpoint.Address
+                    Port:
+                      Fn::If:
+                        - IsTokyoCondition
+                        - Fn::GetAtt: PrimaryCluster.Endpoint.Port
+                        - Fn::GetAtt: SecondaryCluster.Endpoint.Port
               mode: "000755"
     Properties:
       LaunchTemplateName:
@@ -191,6 +314,8 @@ Resources:
           Ref: EC2LaunchTemplate
         Version:
           Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
+      SubnetId:
+        Ref: Subnet0
 
   # RDS
   DBSecurityGroup:
@@ -200,7 +325,7 @@ Resources:
         Fn::Sub: ${AWS::StackName}-DBSecurityGroup
       GroupDescription: DB security group
       VpcId:
-        Ref: VpcId
+        Ref: VPC
       SecurityGroupIngress:
         - Description: DB inbound rule
           IpProtocol: tcp
@@ -222,13 +347,25 @@ Resources:
         - Ref: PrivateSubnet0
         - Ref: PrivateSubnet1
 
-  AuroraCluster:
+  GlobalCluster:
+    Type: AWS::RDS::GlobalCluster
+    Condition: IsTokyoCondition
+    Properties:
+      GlobalClusterIdentifier:
+        Fn::Sub: ${AWS::StackName}-GlobalCluster
+      Engine: aurora-postgresql
+      EngineVersion: 15.2
+
+  PrimaryCluster:
     Type: AWS::RDS::DBCluster
+    Condition: IsTokyoCondition
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
       DBClusterIdentifier:
-        Fn::Sub: ${AWS::StackName}-AuroraCluster
+        Fn::Sub: ${AWS::StackName}-PrimaryCluster
+      GlobalClusterIdentifier:
+        Ref: GlobalCluster
       Engine: aurora-postgresql
       EngineVersion: 15.2
       MasterUsername: postgres
@@ -236,35 +373,52 @@ Resources:
       Port: 5432
       DatabaseName: postgres
       StorageType: aurora
-      StorageEncrypted: true
+      StorageEncrypted: false
       NetworkType: IPV4
       DBSubnetGroupName:
         Ref: DBSubnetGroup
       VpcSecurityGroupIds:
         - Ref: DBSecurityGroup
 
-  AuroraInstance:
+  PrimaryInstance:
     Type: AWS::RDS::DBInstance
+    Condition: IsTokyoCondition
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
       DBClusterIdentifier:
-        Ref: AuroraCluster
+        Ref: PrimaryCluster
       DBInstanceIdentifier:
-        Fn::Sub: ${AWS::StackName}-AuroraInstance
+        Fn::Sub: ${AWS::StackName}-PrimaryInstance
       Engine: aurora-postgresql
-      DBInstanceClass: db.t3.medium
+      DBInstanceClass: db.r5.large
       CACertificateIdentifier: rds-ca-rsa4096-g1
 
-  AuroraInstance2:
+  SecondaryCluster:
+    Type: AWS::RDS::DBCluster
+    Condition: IsVerginiaCondition
+    Properties:
+      GlobalClusterIdentifier:
+        Fn::Sub: ${AWS::StackName}-GlobalCluster
+      Engine: aurora-postgresql
+      EngineVersion: 15.2
+      Port: 5432
+      StorageType: aurora
+      StorageEncrypted: false
+      NetworkType: IPV4
+      DBSubnetGroupName:
+        Ref: DBSubnetGroup
+      VpcSecurityGroupIds:
+        - Ref: DBSecurityGroup
+
+  SecondaryInstance:
     Type: AWS::RDS::DBInstance
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
+    Condition: IsVerginiaCondition
     Properties:
       DBClusterIdentifier:
-        Ref: AuroraCluster
+        Ref: SecondaryCluster
       DBInstanceIdentifier:
-        Fn::Sub: ${AWS::StackName}-AuroraInstance2
+        Fn::Sub: ${AWS::StackName}-SecondaryInstance
       Engine: aurora-postgresql
-      DBInstanceClass: db.t3.medium
+      DBInstanceClass: db.r5.large
       CACertificateIdentifier: rds-ca-rsa4096-g1

@@ -1,9 +1,34 @@
-# apigateway/templates/hello-world-api.yml
+# apigateway/templates/custom-domain-api.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Hello World API
+Description: API with custom domain
+
+Parameters:
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: Hosted zone ID
+    Default: Z09445683VNYYIVGA22CI
+
+  DomainName:
+    Type: String
+    Description: Domain name
+    Default: api.hryssmz.click
 
 Resources:
+  # ACM
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName:
+        Ref: DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName:
+            Ref: DomainName
+          HostedZoneId:
+            Ref: HostedZoneId
+
+  # REST API
   RestApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -16,16 +41,31 @@ Resources:
         AllowHeaders: "'*'"
         AllowMethods: "'*'"
         AllowOrigin: "'*'"
+      DisableExecuteApiEndpoint: true
+      Domain:
+        DomainName:
+          Ref: DomainName
+        CertificateArn:
+          Ref: Certificate
+        EndpointConfiguration: REGIONAL
+        BasePath:
+          - /
+        Route53:
+          HostedZoneId:
+            Ref: HostedZoneId
       OpenApiVersion: "3.0.1"
       DefinitionBody:
         openapi: "3.0.1"
         info:
           title: My REST API
           version: "1.0"
+        servers:
+          - url: https://api.hryssmz.click
         paths:
           /:
             get:
               operationId: HelloWorld
+              summary: HelloWorld API
               tags:
                 - HelloWorld
               responses:
@@ -41,15 +81,18 @@ Resources:
                             message: Hello World!
                   headers:
                     Access-Control-Allow-Origin:
-                      description: Response header for CORS support
-                      schema:
-                        type: string
+                      $ref: "#/components/headers/Access-Control-Allow-Origin"
               x-amazon-apigateway-integration:
                 type: aws_proxy
                 uri:
                   Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunction.Arn}/invocations
                 httpMethod: POST
         components:
+          headers:
+            Access-Control-Allow-Origin:
+              description: CORS header
+              schema:
+                type: string
           schemas:
             HelloWorldResponse:
               description: Response body for GET /
@@ -113,9 +156,3 @@ Resources:
     Properties:
       LogGroupName:
         Fn::Sub: /aws/lambda/${LambdaFunction}
-
-Outputs:
-  RestApiUrl:
-    Description: REST API URL
-    Value:
-      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}

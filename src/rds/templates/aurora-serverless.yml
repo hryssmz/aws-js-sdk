@@ -1,6 +1,6 @@
-# rds/templates/postgresql-tutorial.yml
+# rds/templates/aurora-serverless.yml
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Aurora PostgreSQL tutorial
+Description: Aurora Serverless v2
 
 Parameters:
   VpcId:
@@ -242,6 +242,9 @@ Resources:
         Ref: DBSubnetGroup
       VpcSecurityGroupIds:
         - Ref: DBSecurityGroup
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: 0.5
+        MaxCapacity: 1.0
 
   AuroraInstance:
     Type: AWS::RDS::DBInstance
@@ -253,7 +256,7 @@ Resources:
       DBInstanceIdentifier:
         Fn::Sub: ${AWS::StackName}-AuroraInstance
       Engine: aurora-postgresql
-      DBInstanceClass: db.t3.medium
+      DBInstanceClass: db.serverless
       CACertificateIdentifier: rds-ca-rsa4096-g1
 
   AuroraInstance2:
@@ -266,5 +269,5 @@ Resources:
       DBInstanceIdentifier:
         Fn::Sub: ${AWS::StackName}-AuroraInstance2
       Engine: aurora-postgresql
-      DBInstanceClass: db.t3.medium
+      DBInstanceClass: db.serverless
       CACertificateIdentifier: rds-ca-rsa4096-g1

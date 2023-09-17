@@ -10,7 +10,7 @@ Parameters:
     Default: hryssmz.click
 
 Rules:
-  TestTokyoOrVirginia:
+  TestVirginia:
     Assertions:
       - AssertDescription: Only us-east-1 is allowed
         Assert:

@@ -1,6 +1,7 @@
-# rds/templates/postgresql-tutorial.yml
+# rds/templates/multi-az-rds-cluster.yml
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Aurora PostgreSQL tutorial
+Transform: AWS::Serverless-2016-10-31
+Description: Multi-AZ RDS cluster
 
 Parameters:
   VpcId:
@@ -16,7 +17,7 @@ Parameters:
   PrivateSubnetCidrs:
     Type: CommaDelimitedList
     Description: Private subnet CIDRs
-    Default: 172.31.128.0/20,172.31.144.0/20
+    Default: 172.31.128.0/20,172.31.144.0/20,172.31.160.0/20
 
   ImageId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
@@ -64,6 +65,23 @@ Resources:
         - Key: Name
           Value: PrivateSubnet1
 
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 2
+          - Ref: PrivateSubnetCidrs
+      VpcId:
+        Ref: VpcId
+      AvailabilityZone:
+        Fn::Select:
+          - 2
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet2
+
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -86,6 +104,14 @@ Resources:
     Properties:
       SubnetId:
         Ref: PrivateSubnet1
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  PrivateSubnet2PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet2
       RouteTableId:
         Ref: PrivateRouteTable
 
@@ -143,13 +169,13 @@ Resources:
               content:
                 Fn::Sub: |
                   #!/bin/sh
-                  psql -d postgresql://postgres:postgres@${AuroraCluster.Endpoint.Address}:${AuroraCluster.Endpoint.Port}/$1
+                  psql -d postgresql://postgres:postgres@${DBCluster.Endpoint.Address}:${DBCluster.Endpoint.Port}/$1
               mode: "000755"
             /usr/local/bin/ro-db-login.sh:
               content:
                 Fn::Sub: |
                   #!/bin/sh
-                  psql -d postgresql://postgres:postgres@${AuroraCluster.ReadEndpoint.Address}:${AuroraCluster.Endpoint.Port}/$1
+                  psql -d postgresql://postgres:postgres@${DBCluster.ReadEndpoint.Address}:${DBCluster.Endpoint.Port}/$1
               mode: "000755"
     Properties:
       LaunchTemplateName:
@@ -221,50 +247,28 @@ Resources:
       SubnetIds:
         - Ref: PrivateSubnet0
         - Ref: PrivateSubnet1
+        - Ref: PrivateSubnet2
 
-  AuroraCluster:
+  DBCluster:
     Type: AWS::RDS::DBCluster
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
       DBClusterIdentifier:
-        Fn::Sub: ${AWS::StackName}-AuroraCluster
-      Engine: aurora-postgresql
-      EngineVersion: 15.2
+        Fn::Sub: ${AWS::StackName}-DBCluster
+      Engine: postgres
+      EngineVersion: 15.4
       MasterUsername: postgres
       MasterUserPassword: postgres
       Port: 5432
       DatabaseName: postgres
-      StorageType: aurora
+      DBClusterInstanceClass: db.m6gd.large
+      StorageType: io1
+      Iops: 1000
+      AllocatedStorage: 100
       StorageEncrypted: true
       NetworkType: IPV4
       DBSubnetGroupName:
         Ref: DBSubnetGroup
       VpcSecurityGroupIds:
         - Ref: DBSecurityGroup
-
-  AuroraInstance:
-    Type: AWS::RDS::DBInstance
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      DBClusterIdentifier:
-        Ref: AuroraCluster
-      DBInstanceIdentifier:
-        Fn::Sub: ${AWS::StackName}-AuroraInstance
-      Engine: aurora-postgresql
-      DBInstanceClass: db.t3.medium
-      CACertificateIdentifier: rds-ca-rsa4096-g1
-
-  AuroraInstance2:
-    Type: AWS::RDS::DBInstance
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      DBClusterIdentifier:
-        Ref: AuroraCluster
-      DBInstanceIdentifier:
-        Fn::Sub: ${AWS::StackName}-AuroraInstance2
-      Engine: aurora-postgresql
-      DBInstanceClass: db.t3.medium
-      CACertificateIdentifier: rds-ca-rsa4096-g1

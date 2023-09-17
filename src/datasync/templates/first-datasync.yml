@@ -1,7 +1,6 @@
-# dynamodb/templates/dax-cluster.yml
+# datasync/templates/first-datasync.yml
 AWSTemplateFormatVersion: "2010-09-09"
-Transform: AWS::Serverless-2016-10-31
-Description: DynamoDB Stream with Kinesis Data Stream
+Description: First DataSync
 
 Parameters:
   VPCCidr:
@@ -18,6 +17,43 @@ Parameters:
     Type: CommaDelimitedList
     Description: Private subnet CIDRs
     Default: 172.20.128.0/20,172.20.144.0/20
+
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
+
+  DataSyncAgentImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: DataSync agent image ID
+    Default: /aws/service/datasync/ami
+
+  DataSyncAgentInstanceType:
+    Type: String
+    Description: DataSync agent instance type
+    Default: m5.2xlarge
+
+  MountDir:
+    Type: String
+    Description: Mount directory
+    Default: /mnt/efs
+
+  ActivationKey:
+    Type: String
+    Description: Activation key for DataSync agent
+    Default: ""
+
+Conditions:
+  CreateAgentCondition:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: ActivationKey
+          - ""
 
 Resources:
   # VPC
@@ -177,108 +213,89 @@ Resources:
       RouteTableId:
         Ref: PrivateRouteTable
 
-  # DynamoDB
-  SimpleTable:
-    Type: AWS::Serverless::SimpleTable
-    Properties:
-      TableName:
-        Fn::Sub: ${AWS::StackName}-SimpleTable
-      PrimaryKey:
-        Name: Id
-        Type: String
-      ProvisionedThroughput:
-        ReadCapacityUnits: 1
-        WriteCapacityUnits: 1
-
-  DAXClusterPolicy:
-    Type: AWS::IAM::ManagedPolicy
-    Properties:
-      ManagedPolicyName:
-        Fn::Sub: ${AWS::StackName}-DAXClusterPolicy-${AWS::Region}
-      Description: Policy for DAX Cluster
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Action:
-              - dynamodb:DescribeTable
-              - dynamodb:PutItem
-              - dynamodb:GetItem
-              - dynamodb:UpdateItem
-              - dynamodb:DeleteItem
-              - dynamodb:Query
-              - dynamodb:Scan
-              - dynamodb:BatchGetItem
-              - dynamodb:BatchWriteItem
-              - dynamodb:ConditionCheckItem
-            Resource:
-              - Fn::GetAtt: SimpleTable.Arn
-
-  DAXClusterRole:
+  # EC2
+  EC2InstanceRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName:
-        Fn::Sub: ${AWS::StackName}-DAXClusterRole-${AWS::Region}
-      Description: Service role for DAX Cluster
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
-              Service: dax.amazonaws.com
+              Service: ec2.amazonaws.com
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - Ref: DAXClusterPolicy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
-  DAXSubnetGroup:
-    Type: AWS::DAX::SubnetGroup
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
     Properties:
-      SubnetGroupName:
-        Fn::Sub: ${AWS::StackName}-DAXSubnetGroup
-      Description: DAX subnet group
-      SubnetIds:
-        - Ref: Subnet0
-        - Ref: Subnet1
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
 
-  DAXSecurityGroup:
+  DataSyncAgentSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName:
-        Fn::Sub: ${AWS::StackName}-DAXSecurityGroup
-      GroupDescription: DAX security group
+        Fn::Sub: ${AWS::StackName}-DataSyncAgentSecurityGroup
+      GroupDescription: DataSync agent security group
       VpcId:
         Ref: VPC
       SecurityGroupIngress:
-        - Description: DAX inbound rule
+        - Description: HTTP inbound rule
           IpProtocol: tcp
-          FromPort: 8111
-          ToPort: 8111
-          CidrIp:
-            Fn::GetAtt: VPC.CidrBlock
-        - Description: DAX inbound rule 2
-          IpProtocol: tcp
-          FromPort: 9111
-          ToPort: 9111
-          CidrIp:
-            Fn::GetAtt: VPC.CidrBlock
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: DAXSecurityGroup
+          Value: DataSyncAgentSecurityGroup
 
-  DAXCluster:
-    Type: AWS::DAX::Cluster
+  DataSyncAgentInstance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /usr/local/bin/local-console.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  sudo su -l admin
+              mode: "000755"
     Properties:
-      ClusterName:
-        Ref: AWS::StackName
-      Description: DAX cluster
-      NodeType: dax.t3.small
-      ReplicationFactor: 2
-      IAMRoleARN:
-        Fn::GetAtt: DAXClusterRole.Arn
-      SubnetGroupName:
-        Ref: DAXSubnetGroup
+      ImageId:
+        Ref: DataSyncAgentImageId
+      InstanceType:
+        Ref: DataSyncAgentInstanceType
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
       SecurityGroupIds:
-        - Ref: DAXSecurityGroup
-      SSESpecification:
-        SSEEnabled: true
+        - Ref: DataSyncAgentSecurityGroup
+      SubnetId:
+        Ref: Subnet0
+      Tags:
+        - Key: Name
+          Value: DataSyncAgentInstance
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            dnf update -y
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource DataSyncAgentInstance --region ${AWS::Region}
+
+  # DataSync
+  DataSyncAgent:
+    Type: AWS::DataSync::Agent
+    Condition: CreateAgentCondition
+    Properties:
+      AgentName:
+        Fn::Sub: ${AWS::StackName}-DataSyncAgent
+      ActivationKey:
+        Ref: ActivationKey

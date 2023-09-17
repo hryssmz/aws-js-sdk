@@ -1,0 +1,239 @@
+# route53/templates/new-hosted-zone.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Child Route 53 Hosted Zone
+
+Rules:
+  TestVirginia:
+    Assertions:
+      - AssertDescription: Only us-east-1 is allowed
+        Assert:
+          Fn::Equals:
+            - us-east-1
+            - Ref: AWS::Region
+
+Parameters:
+  RootHostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: Root hosted zone ID
+    Default: Z09445683VNYYIVGA22CI
+
+  RootDomainName:
+    Type: String
+    Description: Root hosted zone domain name
+    Default: hryssmz.click
+
+  DomainName:
+    Type: String
+    Description: Hosted zone domain name
+    Default: dev.hryssmz.click
+
+Resources:
+  # Route 53
+  HostedZoneLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/route53/${DomainName}
+
+  HostedZoneLogGroupPolicy:
+    Type: AWS::Logs::ResourcePolicy
+    Properties:
+      PolicyName:
+        Fn::Sub: ${AWS::StackName}-HostedZoneLogGroupPolicy
+      PolicyDocument:
+        Fn::Sub: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "Route53CloudWatchLogsAccess",
+                "Effect": "Allow",
+                "Principal": {
+                  "Service": "route53.amazonaws.com"
+                },
+                "Action": [
+                  "logs:CreateLogStream",
+                  "logs:DescribeLogStreams",
+                  "logs:PutLogEvents"
+                ],
+                "Resource": "${HostedZoneLogGroup.Arn}",
+                "Condition": {
+                  "ArnLike": {
+                    "aws:SourceArn": "arn:${AWS::Partition}:route53:::hostedzone/${HostedZone}"
+                  },
+                  "StringEquals": {
+                    "aws:SourceAccount": "${AWS::AccountId}"
+                  }
+                }
+              }
+            ]
+          }
+
+  HostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name:
+        Ref: DomainName
+      HostedZoneConfig:
+        Comment: My child Hosted Zone
+      QueryLoggingConfig:
+        CloudWatchLogsLogGroupArn:
+          Fn::GetAtt: HostedZoneLogGroup.Arn
+
+  RootRecordSetGroup:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      Comment: RecordSet group for root hosted zone
+      HostedZoneName:
+        Fn::Sub: ${RootDomainName}.
+      RecordSets:
+        - Name:
+            Ref: DomainName
+          Type: NS
+          ResourceRecords:
+            Fn::GetAtt: HostedZone.NameServers
+          TTL: 172800
+
+  # ACM
+  ApiCertificate:
+    Type: AWS::CertificateManager::Certificate
+    DependsOn: RootRecordSetGroup
+    Properties:
+      DomainName:
+        Fn::Sub: api.${DomainName}
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName:
+            Fn::Sub: api.${DomainName}
+          HostedZoneId:
+            Ref: HostedZone
+
+  # REST API
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RestApi
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      StageName: dev
+      Cors:
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      DisableExecuteApiEndpoint: true
+      Domain:
+        DomainName:
+          Fn::Sub: api.${DomainName}
+        CertificateArn:
+          Ref: ApiCertificate
+        EndpointConfiguration: EDGE
+        BasePath:
+          - /
+        Route53:
+          HostedZoneId:
+            Ref: HostedZone
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: My REST API
+          version: "1.0"
+        servers:
+          - url: https://api.dev.hryssmz.click
+        paths:
+          /:
+            get:
+              operationId: HelloWorld
+              summary: HelloWorld API
+              tags:
+                - HelloWorld
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/HelloWorldResponse"
+                      examples:
+                        example1:
+                          value:
+                            message: Hello World!
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: "#/components/headers/Access-Control-Allow-Origin"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunction.Arn}/invocations
+                httpMethod: POST
+        components:
+          headers:
+            Access-Control-Allow-Origin:
+              description: CORS header
+              schema:
+                type: string
+          schemas:
+            HelloWorldResponse:
+              description: Response body for GET /
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+
+  LambdaFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-LambdaFunctionRole-${AWS::Region}
+      Description: Service role for LambdaFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  LambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-LambdaFunction
+      Description: HelloWorld function
+      Role:
+        Fn::GetAtt: LambdaFunctionRole.Arn
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /
+            RestApiId:
+              Ref: RestApi
+      InlineCode: |
+        exports.handler = async () => {
+          const body = { message: "My child hosted zone!" };
+          const response = {
+            statusCode: 200,
+            headers: { "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify(body, null, 2),
+          };
+          return response;
+        };
+
+  LambdaFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${LambdaFunction}

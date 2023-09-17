@@ -4,8 +4,8 @@ import { CloudFormationWrapper } from ".";
 import type { Parameter } from "@aws-sdk/client-cloudformation";
 import type { Action } from "../utils";
 
-const stackName = "nat-gateway";
-const templateDir = `${__dirname}/../../src/vpc/templates`;
+const stackName = "child-hosted-zone";
+const templateDir = `${__dirname}/../../src/route53/templates`;
 const templatePath = `${templateDir}/${stackName}.yml`;
 const parameters: Parameter[] = [
   // {

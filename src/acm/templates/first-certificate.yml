@@ -6,7 +6,7 @@ Parameters:
   HostedZoneId:
     Type: AWS::Route53::HostedZone::Id
     Description: Hosted zone ID
-    Default: Z066591138RXWJLQXUCQK
+    Default: Z09445683VNYYIVGA22CI
 
   DomainName:
     Type: String

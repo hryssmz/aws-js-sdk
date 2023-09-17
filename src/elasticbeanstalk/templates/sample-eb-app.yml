@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Sample AWS Elastic Beanstalk app
+
+Parameters:
+  PublicKeyBody:
+    Type: String
+    Description: EC2 public key
+    AllowedPattern: ssh-rsa .*
+
+  InstanceTypes:
+    Type: String
+    Description: Instance types
+    Default: t2.micro,t3.micro
+
+Resources:
+  ElasticBeanstalkRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ElasticBeanstalkRole-${AWS::Region}
+      Description: Service role for Elastic Beanstalk
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: elasticbeanstalk.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: elasticbeanstalk
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkService
+        - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2KeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName:
+        Fn::Sub: ${AWS::StackName}-keypair
+      PublicKeyMaterial:
+        Ref: PublicKeyBody
+
+  Application:
+    Type: AWS::ElasticBeanstalk::Application
+    Properties:
+      ApplicationName:
+        Fn::Sub: ${AWS::StackName}-Application
+      Description: Elastic Beanstalk application
+      ResourceLifecycleConfig:
+        ServiceRole:
+          Fn::GetAtt: ElasticBeanstalkRole.Arn
+        VersionLifecycleConfig:
+          MaxCountRule:
+            Enabled: true
+            MaxCount: 5
+            DeleteSourceFromS3: true
+
+  Environment:
+    Type: AWS::ElasticBeanstalk::Environment
+    Properties:
+      EnvironmentName:
+        Fn::Sub: ${AWS::StackName}-Environment
+      Description: Elastic Beanstalk environment
+      ApplicationName:
+        Ref: Application
+      CNAMEPrefix:
+        Ref: AWS::StackName
+      SolutionStackName: 64bit Amazon Linux 2023 v6.0.0 running Node.js 18
+      Tier:
+        Name: WebServer
+        Type: Standard
+      OptionSettings:
+        - Namespace: aws:autoscaling:asg
+          OptionName: Availability Zones
+          Value: Any 2
+        - Namespace: aws:autoscaling:asg
+          OptionName: MinSize
+          Value: 2
+        - Namespace: aws:autoscaling:asg
+          OptionName: MaxSize
+          Value: 4
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: EC2KeyName
+          Value:
+            Ref: EC2KeyPair
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: IamInstanceProfile
+          Value:
+            Ref: EC2InstanceProfile
+        - Namespace: aws:ec2:instances
+          OptionName: InstanceTypes
+          Value:
+            Ref: InstanceTypes

@@ -1,12 +1,17 @@
-# rds/templates/postgresql-tutorial.yml
+# elasticache/templates/first-redis-cluster.yml
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Aurora PostgreSQL tutorial
+Description: First ElastiCache cluster for Redis
 
 Parameters:
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: VPC ID
     Default: vpc-01d5cfd2cad5314f1
+
+  VpcCidr:
+    Type: String
+    Description: VPC Cidr block
+    Default: 172.31.0.0/16
 
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
@@ -27,6 +32,11 @@ Parameters:
     Type: String
     Description: EC2 instance type
     Default: t2.micro
+
+  CacheNodeType:
+    Type: String
+    Description: Cache node type
+    Default: cache.t2.micro
 
 Resources:
   # VPC
@@ -139,17 +149,11 @@ Resources:
       AWS::CloudFormation::Init:
         config:
           files:
-            /usr/local/bin/db-login.sh:
+            /usr/local/bin/connect-redis-cluster.sh:
               content:
                 Fn::Sub: |
                   #!/bin/sh
-                  psql -d postgresql://postgres:postgres@${AuroraCluster.Endpoint.Address}:${AuroraCluster.Endpoint.Port}/$1
-              mode: "000755"
-            /usr/local/bin/ro-db-login.sh:
-              content:
-                Fn::Sub: |
-                  #!/bin/sh
-                  psql -d postgresql://postgres:postgres@${AuroraCluster.ReadEndpoint.Address}:${AuroraCluster.Endpoint.Port}/$1
+                  redis-cli -h ${RedisCluster.RedisEndpoint.Address} -p ${RedisCluster.RedisEndpoint.Port}
               mode: "000755"
     Properties:
       LaunchTemplateName:
@@ -180,7 +184,12 @@ Resources:
             Fn::Sub: |
               #!/bin/sh
               dnf update -y
-              dnf install -y postgresql15
+              dnf install -y gcc openssl-devel jemalloc-devel
+
+              wget https://download.redis.io/redis-stable.tar.gz
+              tar xf redis-stable.tar.gz
+              cd redis-stable
+              make BUILD_TLS=yes && make install
               /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
 
   EC2Instance:
@@ -192,79 +201,49 @@ Resources:
         Version:
           Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
 
-  # RDS
-  DBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
+  # ElastiCache
+  CacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
     Properties:
-      GroupName:
-        Fn::Sub: ${AWS::StackName}-DBSecurityGroup
-      GroupDescription: DB security group
-      VpcId:
-        Ref: VpcId
-      SecurityGroupIngress:
-        - Description: DB inbound rule
-          IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          SourceSecurityGroupId:
-            Ref: EC2SecurityGroup
-      Tags:
-        - Key: Name
-          Value: DBSecurityGroup
-
-  DBSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupName:
-        Fn::Sub: ${AWS::StackName}-DBSubnetGroup
-      DBSubnetGroupDescription: DB subnet group
+      CacheSubnetGroupName:
+        Fn::Sub: ${AWS::StackName}-CacheSubnetGroup
+      Description: Cache subnet group
       SubnetIds:
         - Ref: PrivateSubnet0
         - Ref: PrivateSubnet1
 
-  AuroraCluster:
-    Type: AWS::RDS::DBCluster
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      DBClusterIdentifier:
-        Fn::Sub: ${AWS::StackName}-AuroraCluster
-      Engine: aurora-postgresql
-      EngineVersion: 15.2
-      MasterUsername: postgres
-      MasterUserPassword: postgres
-      Port: 5432
-      DatabaseName: postgres
-      StorageType: aurora
-      StorageEncrypted: true
-      NetworkType: IPV4
-      DBSubnetGroupName:
-        Ref: DBSubnetGroup
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-RedisSecurityGroup
+      GroupDescription: Redis node security group
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        - Description: Redis inbound rule
+          IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          CidrIp:
+            Ref: VpcCidr
+      Tags:
+        - Key: Name
+          Value: RedisSecurityGroup
+
+  RedisCluster:
+    Type: AWS::ElastiCache::CacheCluster
+    Properties:
+      ClusterName:
+        Fn::Sub: ${AWS::StackName}-RedisCluster
+      Engine: redis
+      EngineVersion: 7.0
+      CacheNodeType:
+        Ref: CacheNodeType
+      NumCacheNodes: 1
+      CacheSubnetGroupName:
+        Ref: CacheSubnetGroup
       VpcSecurityGroupIds:
-        - Ref: DBSecurityGroup
-
-  AuroraInstance:
-    Type: AWS::RDS::DBInstance
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      DBClusterIdentifier:
-        Ref: AuroraCluster
-      DBInstanceIdentifier:
-        Fn::Sub: ${AWS::StackName}-AuroraInstance
-      Engine: aurora-postgresql
-      DBInstanceClass: db.t3.medium
-      CACertificateIdentifier: rds-ca-rsa4096-g1
-
-  AuroraInstance2:
-    Type: AWS::RDS::DBInstance
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      DBClusterIdentifier:
-        Ref: AuroraCluster
-      DBInstanceIdentifier:
-        Fn::Sub: ${AWS::StackName}-AuroraInstance2
-      Engine: aurora-postgresql
-      DBInstanceClass: db.t3.medium
-      CACertificateIdentifier: rds-ca-rsa4096-g1
+        - Ref: RedisSecurityGroup
+      NetworkType: ipv4
+      Port: 6379

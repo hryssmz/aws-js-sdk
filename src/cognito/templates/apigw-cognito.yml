@@ -75,17 +75,6 @@ Resources:
         AllowHeaders: "'*'"
         AllowMethods: "'*'"
         AllowOrigin: "'*'"
-      Auth:
-        Authorizers:
-          CognitoAuth:
-            UserPoolArn:
-              Fn::GetAtt: UserPool.Arn
-            Identity:
-              Header: Authorization
-            AuthorizationScopes:
-              - aws.cognito.signin.user.admin
-        DefaultAuthorizer: CognitoAuth
-        AddDefaultAuthorizerToCorsPreflight: false
       OpenApiVersion: "3.0.1"
       DefinitionBody:
         openapi: "3.0.1"
@@ -96,51 +85,91 @@ Resources:
           - url: https://{restApiId}.execute-api.{region}.amazonaws.com/{basePath}
             variables:
               restApiId:
-                default: example123
+                default: 5yxgxm5x00
               region:
                 default: ap-northeast-1
               basePath:
                 default: dev
-        security:
-          - CognitoAuthorizer:
-              - aws.cognito.signin.user.admin
         paths:
-          /:
+          /access:
             get:
-              operationId: GetRoot
+              operationId: GetAuthAccess
               tags:
-                - GetRoot
+                - GetAuthAccess
               responses:
                 "200":
                   description: 200 OK
                   content:
                     application/json:
                       schema:
-                        $ref: "#/components/schemas/GetRootResponse"
+                        $ref: "#/components/schemas/GetAuthAccessResponse"
                       examples:
                         example1:
                           value:
-                            origin_jti: ab1aaac1-c343-4e71-9901-30b6381a5d0a
-                            sub: 17740ae8-7081-70b2-93a0-1577f2e611ab
-                            event_id: 5befc155-f385-49f6-9e5f-cad3f9884d43
+                            origin_jti: 792116d6-02b9-4021-83f9-e5e14f3eb4c8
+                            sub: b771dac0-aa13-4207-a8e2-3bf2326ba8db
+                            event_id: 41b4d820-5656-4bb4-b6a9-a9af94dd6872
                             token_use: access
                             scope: aws.cognito.signin.user.admin
-                            auth_time: "1693502522"
-                            iss: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_yNbC6Cny6
-                            exp: Thu Aug 31 18:22:02 UTC 2023
-                            iat: Thu Aug 31 17:22:02 UTC 2023
-                            client_id: 4dvqs9hmkv74cs6upkhshr598a
-                            jti: de4befe6-6ef4-4b60-8f0a-f6b89f36e4f6
+                            auth_time: "1694790140"
+                            iss: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_WL4lJfCBP
+                            exp: Fri Sep 15 16:02:20 UTC 2023
+                            iat: Fri Sep 15 15:02:20 UTC 2023
+                            client_id: 1atr7b11nk6q2m1qhnfbs8086i
+                            jti: 01453155-c34d-4221-82d2-623f5c4ee76d
                             username: hryssmz
                   headers:
                     Access-Control-Allow-Origin:
                       description: Response header for CORS support
                       schema:
                         type: string
+              security:
+                - CognitoAuthorizer:
+                    - aws.cognito.signin.user.admin
               x-amazon-apigateway-integration:
                 type: aws_proxy
                 uri:
-                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetRootFunction.Arn}/invocations
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetAuthAccessFunction.Arn}/invocations
+                httpMethod: POST
+          /id:
+            get:
+              operationId: GetAuthId
+              tags:
+                - GetAuthId
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/GetAuthIdResponse"
+                      examples:
+                        example1:
+                          value:
+                            sub: b771dac0-aa13-4207-a8e2-3bf2326ba8db
+                            email_verified: "true"
+                            iss: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_WL4lJfCBP
+                            cognito:username: hryssmz
+                            origin_jti: 792116d6-02b9-4021-83f9-e5e14f3eb4c8
+                            aud: 1atr7b11nk6q2m1qhnfbs8086i
+                            event_id: 41b4d820-5656-4bb4-b6a9-a9af94dd6872
+                            token_use: id
+                            auth_time: "1694790140"
+                            exp: Fri Sep 15 16:02:20 UTC 2023
+                            iat: Fri Sep 15 15:02:20 UTC 2023
+                            jti: "08d67f1e-75ff-4452-a6d3-2e8c46a83ff1"
+                            email: hryssmz@yahoo.com
+                  headers:
+                    Access-Control-Allow-Origin:
+                      description: Response header for CORS support
+                      schema:
+                        type: string
+              security:
+                - CognitoAuthorizer: []
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetAuthIdFunction.Arn}/invocations
                 httpMethod: POST
         components:
           securitySchemes:
@@ -154,16 +183,19 @@ Resources:
                 providerARNs:
                   - Fn::GetAtt: UserPool.Arn
           schemas:
-            GetRootResponse:
-              description: Response body for GET /
+            GetAuthAccessResponse:
+              description: Response body for GET /access
+              type: object
+            GetAuthIdResponse:
+              description: Response body for GET /id
               type: object
 
-  GetRootFunctionRole:
+  GetAuthAccessFunctionRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName:
-        Fn::Sub: ${AWS::StackName}-GetRootFunctionRole-${AWS::Region}
-      Description: Service role for GetRootFunction
+        Fn::Sub: ${AWS::StackName}-GetAuthAccessFunctionRole-${AWS::Region}
+      Description: Service role for GetAuthAccessFunction
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -175,14 +207,14 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
-  GetRootFunction:
+  GetAuthAccessFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName:
-        Fn::Sub: ${AWS::StackName}-GetRootFunction
-      Description: GetRoot function
+        Fn::Sub: ${AWS::StackName}-GetAuthAccessFunction
+      Description: Get auth access function
       Role:
-        Fn::GetAtt: GetRootFunctionRole.Arn
+        Fn::GetAtt: GetAuthAccessFunctionRole.Arn
       Runtime: nodejs18.x
       Handler: index.handler
       Architectures:
@@ -192,7 +224,7 @@ Resources:
           Type: Api
           Properties:
             Method: GET
-            Path: /
+            Path: /access
             RestApiId:
               Ref: RestApi
       InlineCode: |
@@ -205,11 +237,64 @@ Resources:
           };
         };
 
-  GetRootFunctionLogGroup:
+  GetAuthAccessFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName:
-        Fn::Sub: /aws/lambda/${GetRootFunction}
+        Fn::Sub: /aws/lambda/${GetAuthAccessFunction}
+
+  GetAuthIdFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-GetAuthIdFunctionRole-${AWS::Region}
+      Description: Service role for GetAuthIdFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  GetAuthIdFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-GetAuthIdFunction
+      Description: Get auth ID function
+      Role:
+        Fn::GetAtt: GetAuthIdFunctionRole.Arn
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /id
+            RestApiId:
+              Ref: RestApi
+      InlineCode: |
+        exports.handler = async event => {
+          const body = event.requestContext.authorizer.claims;
+          return {
+            statusCode: 200,
+            headers: { "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify(body, null, 2),
+          };
+        };
+
+  GetAuthIdFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${GetAuthIdFunction}
 
   # Lambda
   CreateUserFunctionPolicy:
@@ -470,7 +555,7 @@ Resources:
           API_HOST:
             Fn::Sub: ${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
           API_PATH:
-            Fn::Sub: /${RestApi.Stage}/
+            Fn::Sub: /${RestApi.Stage}/access/
       InlineCode: |
         const https = require("https");
         const {

@@ -136,6 +136,16 @@ Resources:
 
   EC2LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /usr/local/bin/db-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  psql -d postgresql://postgres:postgres@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/$1
+              mode: "000755"
     Properties:
       LaunchTemplateName:
         Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
@@ -166,6 +176,7 @@ Resources:
               #!/bin/sh
               dnf update -y
               dnf install -y postgresql15
+              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
 
   EC2Instance:
     Type: AWS::EC2::Instance
@@ -203,7 +214,7 @@ Resources:
         Fn::Sub: ${AWS::StackName}-DBSubnetGroup
       DBSubnetGroupDescription: DB subnet group
       SubnetIds:
-        - Ref: PrivateSubnet
+        - Ref: PrivateSubnet0
         - Ref: PrivateSubnet1
 
   DBInstance:
@@ -230,6 +241,7 @@ Resources:
         Ref: DBSubnetGroup
       VPCSecurityGroups:
         - Ref: DBSecurityGroup
+      CACertificateIdentifier: rds-ca-rsa4096-g1
 
 Outputs:
   DBHost:

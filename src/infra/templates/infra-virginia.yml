@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Virginia infra stack
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: Hosted zone domain name
+    Default: hryssmz.click
+
+Rules:
+  TestVirginia:
+    Assertions:
+      - AssertDescription: Only us-east-1 is allowed
+        Assert:
+          Fn::Equals:
+            - us-east-1
+            - Ref: AWS::Region
+
+Resources:
+  # Route 53
+  HostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name:
+        Ref: DomainName
+      HostedZoneConfig:
+        Comment: My root hosted zone
+
+  # ACM
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName:
+        Ref: DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName:
+            Ref: DomainName
+          HostedZoneId:
+            Ref: HostedZone
+
+Outputs:
+  NameServers:
+    Description: Name servers for the hosted zone
+    Value:
+      Fn::Join:
+        - "\n"
+        - Fn::GetAtt: HostedZone.NameServers
+
+  HostedZoneId:
+    Description: Hosted zone ID
+    Value:
+      Ref: HostedZone
