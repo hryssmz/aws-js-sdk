@@ -33,7 +33,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
   GraphQLApiLoggingRole:
     Type: AWS::IAM::Role
@@ -50,7 +50,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
 
   LambdaDataSourceRole:
     Type: AWS::IAM::Role

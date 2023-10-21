@@ -65,8 +65,8 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
-        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
 
   BackupSelection:
     Type: AWS::Backup::BackupSelection
@@ -80,7 +80,6 @@ Resources:
           - Fn::GetAtt: SimpleTable.Arn
         IamRoleArn:
           Fn::GetAtt: BackupRole.Arn
-
 # Outputs:
 #   SimpleTableArn:
 #     Description: SimpleTable ARN

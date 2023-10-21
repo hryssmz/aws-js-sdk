@@ -13,10 +13,6 @@ Resources:
       Description:
         Fn::Sub: ${AWS::StackName} REST API
       StageName: dev
-      Cors:
-        AllowHeaders: "'*'"
-        AllowMethods: "'*'"
-        AllowOrigin: "'*'"
       OpenApiVersion: "3.0.1"
       DefinitionBody:
         openapi: "3.0.1"
@@ -25,96 +21,26 @@ Resources:
           version: "1.0"
         paths:
           /:
-            get:
-              operationId: HelloWorld
-              tags:
-                - HelloWorld
+            post:
               responses:
                 "200":
                   description: 200 OK
-                  content:
-                    application/json:
-                      schema:
-                        $ref: "#/components/schemas/HelloWorldResponse"
-                  headers:
-                    Access-Control-Allow-Origin:
-                      $ref: "#/components/headers/Access-Control-Allow-Origin"
+                "500":
+                  description: 500 Internal Server Error
               x-amazon-apigateway-integration:
-                type: aws_proxy
-                uri:
-                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${HelloWorldFunction.Arn}/invocations
-                httpMethod: POST
-        components:
-          schemas:
-            HelloWorldResponse:
-              description: Response body for GET /
-              type: object
-              required:
-                - message
-              properties:
-                message:
-                  type: string
-              example:
-                message: Hello World!
-          headers:
-            Access-Control-Allow-Origin:
-              description: Response header for CORS support
-              schema:
-                type: string
-                example: "*"
-
-  HelloWorldFunctionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName:
-        Fn::Sub: ${AWS::StackName}-HelloWorldFunctionRole-${AWS::Region}
-      Description: Service role for HelloWorldFunction
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-
-  HelloWorldFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName:
-        Fn::Sub: ${AWS::StackName}-HelloWorldFunction
-      Description: HelloWorld function
-      Role:
-        Fn::GetAtt: HelloWorldFunctionRole.Arn
-      Runtime: nodejs18.x
-      Handler: index.handler
-      Architectures:
-        - arm64
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            Method: GET
-            Path: /
-            RestApiId:
-              Ref: RestApi
-      InlineCode: |
-        exports.handler = async event => {
-          console.log(JSON.stringify(event, null, 2));
-          return {
-            statusCode: 200,
-            headers: { "Access-Control-Allow-Origin": "*" },
-            body: JSON.stringify({ message: "Hello World" }),
-          };
-        };
-
-  HelloWorldFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${HelloWorldFunction}
+                type: mock
+                requestTemplates:
+                  application/json: '{ "statusCode": 200 }'
+                responses:
+                  "2\\d{2}":
+                    statusCode: 200
+                    responseTemplates:
+                      application/json: '{ "message": "OK" }'
+                  default:
+                    statusCode: 500
+                    responseTemplates:
+                      application/json: '{ "message": "Internal Server Error" }'
+                passthroughBehavior: when_no_match
 
   # WAF
   WebACL:
@@ -122,7 +48,7 @@ Resources:
     Properties:
       Name:
         Fn::Sub: ${AWS::StackName}-WebACL
-      Description: My first Web ACL
+      Description: My REST API Web ACL
       DefaultAction:
         Allow: {}
       VisibilityConfig:
@@ -131,12 +57,20 @@ Resources:
         MetricName:
           Fn::Sub: ${AWS::StackName}-WebACL
       Scope: REGIONAL
+      CustomResponseBodies:
+        Forbidden:
+          ContentType: APPLICATION_JSON
+          Content: |
+            { "message": "403 Forbidden" }
       Rules:
         - Name:
             Fn::Sub: ${AWS::StackName}-WebACL-Rule1
-          Priority: 0
+          Priority: 1
           Action:
-            Count: {}
+            Block:
+              CustomResponse:
+                ResponseCode: 403
+                CustomResponseBodyKey: Forbidden
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
@@ -148,13 +82,13 @@ Resources:
                 SingleHeader:
                   Name: User-Agent
               PositionalConstraint: EXACTLY
-              SearchString: MyAgent
+              SearchString: BotAgent
               TextTransformations:
                 - Priority: 0
                   Type: NONE
         - Name:
             Fn::Sub: ${AWS::StackName}-WebACL-Rule2
-          Priority: 1
+          Priority: 2
           OverrideAction:
             Count: {}
           VisibilityConfig:
@@ -164,8 +98,25 @@ Resources:
               Fn::Sub: ${AWS::StackName}-WebACL-Rule2
           Statement:
             ManagedRuleGroupStatement:
-              Name: AWSManagedRulesAnonymousIpList
+              Name: AWSManagedRulesUnixRuleSet
               VendorName: AWS
+        - Name:
+            Fn::Sub: ${AWS::StackName}-WebACL-Rule3
+          Priority: 3
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 403
+                CustomResponseBodyKey: Forbidden
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName:
+              Fn::Sub: ${AWS::StackName}-WebACL-Rule3
+          Statement:
+            LabelMatchStatement:
+              Scope: NAMESPACE
+              Key: "awswaf:managed:aws:posix-os:"
 
   WebACLRestApiAssociation:
     Type: AWS::WAFv2::WebACLAssociation
@@ -177,5 +128,18 @@ Resources:
 
 Outputs:
   RestApiUrl:
+    Description: REST API URL
     Value:
       Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}
+
+  CurlCommand1:
+    Description: Sample curl command 1
+    Value:
+      Fn::Sub: >
+        curl -isSL -X POST -H "User-Agent: BotAgent" -d '{"statusCode": 200, "command": "echo Hello World"}' https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}
+
+  CurlCommand2:
+    Description: Sample curl command 2
+    Value:
+      Fn::Sub: >
+        curl -isSL -X POST -d '{"statusCode": 200, "command": "echo $PATH"}' https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}

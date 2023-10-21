@@ -77,7 +77,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AdministratorAccess
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess
 
   # CodeBuild
   CodeBuildExecutionPolicy:
@@ -538,7 +538,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: StartPipelineFunctionPolicy
 
   StartPipelineFunction:

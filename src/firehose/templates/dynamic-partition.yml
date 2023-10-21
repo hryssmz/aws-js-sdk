@@ -52,7 +52,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: DestinationFunctionPolicy
 
   DestinationFunction:
@@ -144,7 +144,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: ProducerFunctionPolicy
 
   ProducerFunction:
@@ -332,7 +332,7 @@ Resources:
             - Type: MetadataExtraction
               Parameters:
                 - ParameterName: MetadataExtractionQuery
-                  ParameterValue: '{ modulus: (.epochSec % 2) }'
+                  ParameterValue: "{ modulus: (.epochSec % 2) }"
                 - ParameterName: JsonParsingEngine
                   ParameterValue: JQ-1.6
             - Type: AppendDelimiterToRecord

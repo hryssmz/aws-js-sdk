@@ -54,7 +54,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -182,7 +182,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
   EC2MonitorFunction:
     Type: AWS::Serverless::Function
@@ -216,15 +216,8 @@ Resources:
                 state:
                   - stopped
       InlineCode: |
-        exports.handler = async event => {
-          const { Records } = event;
-          const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
-            JSON.parse(Message)
-          );
-          records.forEach(record => {
-            console.log(JSON.stringify(record, null, 2));
-          });
-          return records;
+        exports.handler = async (event, context) => {
+          console.log(JSON.stringify(event, null, 2));
         };
 
   EC2MonitorFunctionLogGroup:

@@ -2,8 +2,10 @@
 import {
   CloudFormationClient,
   CreateStackCommand,
+  CreateStackInstancesCommand,
   CreateStackSetCommand,
   DeleteStackCommand,
+  DeleteStackInstancesCommand,
   DeleteStackSetCommand,
   DescribeStacksCommand,
   UpdateStackCommand,
@@ -14,8 +16,10 @@ import { defaultClientConfig } from "../utils";
 import type {
   CloudFormationClientConfig,
   CreateStackCommandInput,
+  CreateStackInstancesCommandInput,
   CreateStackSetCommandInput,
   DeleteStackCommandInput,
+  DeleteStackInstancesCommandInput,
   DeleteStackSetCommandInput,
   DescribeStacksCommandInput,
   UpdateStackCommandInput,
@@ -43,6 +47,12 @@ export class CloudFormationWrapper {
     return result;
   }
 
+  async createStackInstances(params: CreateStackInstancesCommandInput) {
+    const command = new CreateStackInstancesCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
   async createStackSet(params: CreateStackSetCommandInput) {
     const command = new CreateStackSetCommand(params);
     const result = await this.client.send(command);
@@ -51,6 +61,12 @@ export class CloudFormationWrapper {
 
   async deleteStack(params: DeleteStackCommandInput) {
     const command = new DeleteStackCommand(params);
+    const result = await this.client.send(command);
+    return result;
+  }
+
+  async deleteStackInstances(params: DeleteStackInstancesCommandInput) {
+    const command = new DeleteStackInstancesCommand(params);
     const result = await this.client.send(command);
     return result;
   }

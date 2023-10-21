@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+  HttpRequestFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-HttpRequestFunctionRole-${AWS::Region}
+      Description: Service role for HttpRequestFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  HttpRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-HttpRequestFunction
+      Description: Send an HTTP request
+      Role:
+        Fn::GetAtt: HttpRequestFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      InlineCode: |
+        const http = require("node:http");
+
+        exports.handler = async () => {
+          const globalIpAddress = await new Promise((resolve, reject) => {
+            const req = http.request(
+              { hostname: "ifconfig.me", port: 80, path: "/", method: "GET" },
+              res => {
+                res.on("data", chunk => {
+                  const body = chunk.toString();
+                  resolve(body);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.end();
+          });
+
+          return globalIpAddress;
+        };
+
+  HttpRequestFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${HttpRequestFunction}
+
+  HttpsRequestFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-HttpsRequestFunctionRole-${AWS::Region}
+      Description: Service role for HttpsRequestFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  HttpsRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-HttpsRequestFunction
+      Description: Send an HTTPS request
+      Role:
+        Fn::GetAtt: HttpsRequestFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      InlineCode: |
+        const https = require("node:https");
+
+        exports.handler = async () => {
+          const globalIpAddress = await new Promise((resolve, reject) => {
+            const req = https.request(
+              { hostname: "ifconfig.me", port: 443, path: "/", method: "GET" },
+              res => {
+                res.on("data", chunk => {
+                  const body = chunk.toString();
+                  resolve(body);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.end();
+          });
+
+          return globalIpAddress;
+        };
+
+  HttpsRequestFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${HttpsRequestFunction}

@@ -1,0 +1,502 @@
+# secretsmanager/templates/alt-users-rotation.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::SecretsManager-2020-07-23
+Description: Alternating users rotation
+
+Parameters:
+  SshCidrIp:
+    Type: String
+    Description: SSH CIDR IP block
+    AllowedPattern: \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}
+    ConstraintDescription: must be a valid CIDR block of the form x.x.x.x/x
+
+  PublicKeyBody:
+    Type: String
+    Description: EC2 public key
+    AllowedPattern: ssh-rsa .*
+    ConstraintDescription: must be a valid RSA public key
+
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
+
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
+
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDRs
+    Default: 172.20.0.0/20,172.20.16.0/20
+
+  PrivateSubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Private subnet CIDRs
+    Default: 172.20.128.0/20,172.20.144.0/20
+
+  DBUser:
+    Type: String
+    Description: DB user
+    Default: dbuser
+
+  DBMaster:
+    Type: String
+    Description: DB alternating user
+    Default: master
+
+  DBAdmin:
+    Type: String
+    Description: DB admin
+    Default: postgres
+
+  DefaultDBUserPassword:
+    Type: String
+    Description: Default DB user password
+    Default: password
+
+Resources:
+  # Secrets Manager
+  MasterSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: RDS alternating secret
+      SecretString:
+        Fn::Sub: |
+          {
+            "username": "${DBMaster}",
+            "password": "${DefaultDBUserPassword}"
+          }
+
+  MasterRotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    Properties:
+      SecretId:
+        Ref: MasterSecret
+      RotationRules:
+        AutomaticallyAfterDays: 2
+        Duration: 2h
+      RotateImmediatelyOnUpdate: false
+      HostedRotationLambda:
+        RotationType: PostgreSQLSingleUser
+        RotationLambdaName:
+          Fn::Sub: ${AWS::StackName}-MasterRotationScheduleHostedRotationLambda
+        ExcludeCharacters: "\"'@/\\"
+        VpcSecurityGroupIds:
+          Ref: BastionSecurityGroup
+        VpcSubnetIds:
+          Fn::Join:
+            - ","
+            - - Ref: PrivateSubnet0
+              - Ref: PrivateSubnet1
+
+  MasterRotationScheduleHostedRotationLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-MasterRotationScheduleHostedRotationLambda
+
+  MasterSecretTargetAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      TargetType: AWS::RDS::DBInstance
+      TargetId:
+        Ref: DBInstance
+      SecretId:
+        Ref: MasterSecret
+
+  RDSSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: RDS secret
+      SecretString:
+        Fn::Sub: |
+          {
+            "username": "${DBUser}",
+            "password": "${DefaultDBUserPassword}",
+            "masterarn": "${MasterSecret}"
+          }
+
+  RotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    Properties:
+      SecretId:
+        Ref: RDSSecret
+      RotationRules:
+        AutomaticallyAfterDays: 2
+        Duration: 2h
+      RotateImmediatelyOnUpdate: false
+      HostedRotationLambda:
+        RotationType: PostgreSQLMultiUser
+        RotationLambdaName:
+          Fn::Sub: ${AWS::StackName}-RotationScheduleHostedRotationLambda
+        ExcludeCharacters: "\"'@/\\"
+        MasterSecretArn:
+          Ref: MasterSecret
+        VpcSecurityGroupIds:
+          Ref: BastionSecurityGroup
+        VpcSubnetIds:
+          Fn::Join:
+            - ","
+            - - Ref: PrivateSubnet0
+              - Ref: PrivateSubnet1
+
+  RotationScheduleHostedRotationLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-RotationScheduleHostedRotationLambda
+
+  SecretTargetAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      TargetType: AWS::RDS::DBInstance
+      TargetId:
+        Ref: DBInstance
+      SecretId:
+        Ref: RDSSecret
+
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Ref: VPCCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  Subnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet0
+
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet1
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: RouteTable
+
+  Subnet0RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet0
+      RouteTableId:
+        Ref: RouteTable
+
+  Subnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet1
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  PrivateSubnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: PrivateSubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet0
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: PrivateSubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet1
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable
+
+  PrivateSubnet0PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet0
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  PrivateSubnet1PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet1
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  # EC2
+  SSHKeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName:
+        Fn::Sub: ${AWS::StackName}-SSHKeyPair
+      PublicKeyMaterial:
+        Ref: PublicKeyBody
+
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-BastionSecurityGroup
+      GroupDescription: Bastion instances security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:
+            Ref: SshCidrIp
+      Tags:
+        - Key: Name
+          Value: BastionSecurityGroup
+
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /usr/local/bin/create-db-users.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  PASSWORD=`python3 -c "from urllib.parse import quote; print(quote('$1', safe=''))"`
+                  psql -d postgresql://${DBAdmin}:$PASSWORD@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${DBAdmin} -c "CREATE ROLE ${DBUser} WITH LOGIN CREATEDB CREATEROLE PASSWORD '${DefaultDBUserPassword}';"
+                  psql -d postgresql://${DBAdmin}:$PASSWORD@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${DBAdmin} -c "CREATE ROLE ${DBMaster} WITH LOGIN SUPERUSER PASSWORD '${DefaultDBUserPassword}';"
+              mode: "000755"
+            /usr/local/bin/db-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  PASSWORD=`python3 -c "from urllib.parse import quote; print(quote('$1', safe=''))"`
+                  psql -d postgresql://${DBUser}:$PASSWORD@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${!2:-${DBAdmin}}
+              mode: "000755"
+            /usr/local/bin/clone-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  PASSWORD=`python3 -c "from urllib.parse import quote; print(quote('$1', safe=''))"`
+                  psql -d postgresql://${DBUser}:$PASSWORD@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${!2:-${DBAdmin}}
+              mode: "000755"
+            /usr/local/bin/master-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  PASSWORD=`python3 -c "from urllib.parse import quote; print(quote('$1', safe=''))"`
+                  psql -d postgresql://${DBMaster}:$PASSWORD@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${!2:-${DBAdmin}}
+              mode: "000755"
+            /usr/local/bin/admin-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  PASSWORD=`python3 -c "from urllib.parse import quote; print(quote('$1', safe=''))"`
+                  psql -d postgresql://${DBAdmin}:$PASSWORD@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${!2:-${DBAdmin}}
+              mode: "000755"
+    Properties:
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      KeyName:
+        Ref: SSHKeyPair
+      SecurityGroupIds:
+        - Ref: BastionSecurityGroup
+      SubnetId:
+        Ref: Subnet0
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            dnf update -y
+            dnf install -y postgresql15
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource BastionInstance --region ${AWS::Region}
+      Tags:
+        - Key: Name
+          Value: BastionInstance
+
+  VPCESecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-VPCESecurityGroup
+      GroupDescription: VPC endpoint security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+      Tags:
+        - Key: Name
+          Value: VPCESecurityGroup
+
+  SecretsManagerVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName:
+        Fn::Sub: com.amazonaws.${AWS::Region}.secretsmanager
+      VpcId:
+        Ref: VPC
+      SubnetIds:
+        - Ref: PrivateSubnet0
+        - Ref: PrivateSubnet1
+      SecurityGroupIds:
+        - Ref: VPCESecurityGroup
+      PrivateDnsEnabled: true
+
+  # RDS
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-DBSecurityGroup
+      GroupDescription: DB security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - Description: DB inbound rule
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId:
+            Ref: BastionSecurityGroup
+      Tags:
+        - Key: Name
+          Value: DBSecurityGroup
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName:
+        Fn::Sub: ${AWS::StackName}-DBSubnetGroup
+      DBSubnetGroupDescription: DB subnet group
+      SubnetIds:
+        - Ref: PrivateSubnet0
+        - Ref: PrivateSubnet1
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBInstanceIdentifier:
+        Fn::Sub: ${AWS::StackName}-DBInstance
+      Engine: postgres
+      EngineVersion: 15.3
+      MasterUsername:
+        Ref: DBAdmin
+      ManageMasterUserPassword: true
+      Port: 5432
+      DBName:
+        Ref: DBAdmin
+      DBInstanceClass: db.t3.micro
+      StorageType: gp2
+      AllocatedStorage: 20
+      MaxAllocatedStorage: 100
+      StorageEncrypted: true
+      BackupRetentionPeriod: 0
+      NetworkType: IPV4
+      DBSubnetGroupName:
+        Ref: DBSubnetGroup
+      VPCSecurityGroups:
+        - Ref: DBSecurityGroup
+      CACertificateIdentifier: rds-ca-rsa4096-g1

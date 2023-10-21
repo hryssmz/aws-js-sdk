@@ -105,7 +105,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AWSCodeDeployRoleForECS
 
   CodeDeployApplication:
     Type: AWS::CodeDeploy::Application
@@ -185,7 +185,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: AfterAllowTestTrafficFunctionPolicy
 
   AfterAllowTestTrafficFunction:
@@ -440,7 +440,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: StartPipelineFunctionPolicy
 
   StartPipelineFunction:
@@ -661,7 +661,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
   ECSLogGroup:
     Type: AWS::Logs::LogGroup
@@ -815,7 +815,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
         - Ref: EC2InstancePolicy
 
   EC2InstanceProfile:

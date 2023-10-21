@@ -53,7 +53,7 @@ Resources:
         Fn::Sub: ${AWS::StackName}-HTTP4xxCountMetricFilter
       LogGroupName:
         Ref: ApacheAccessLogGroup
-      FilterPattern: '[ip, id, user, timestamp, request, status_code=4*, size, referer, user_agent]'
+      FilterPattern: "[ip, id, user, timestamp, request, status_code=4*, size, referer, user_agent]"
       MetricTransformations:
         - MetricName: HTTP4xxCount
           MetricNamespace:
@@ -68,7 +68,7 @@ Resources:
         Fn::Sub: ${AWS::StackName}-HTTP2xxCountMetricFilter
       LogGroupName:
         Ref: ApacheAccessLogGroup
-      FilterPattern: '[ip, id, user, timestamp, request, status_code=2*, size, referer, user_agent]'
+      FilterPattern: "[ip, id, user, timestamp, request, status_code=2*, size, referer, user_agent]"
       MetricTransformations:
         - MetricName: HTTP2xxCount
           MetricNamespace:
@@ -83,7 +83,7 @@ Resources:
         Fn::Sub: ${AWS::StackName}-ApacheBytesTransferredMetricFilter
       LogGroupName:
         Ref: ApacheAccessLogGroup
-      FilterPattern: '[ip, id, user, timestamp, request, status_code, size, referer, user_agent]'
+      FilterPattern: "[ip, id, user, timestamp, request, status_code, size, referer, user_agent]"
       MetricTransformations:
         - MetricName: ApacheBytesTransferred
           MetricNamespace:
@@ -134,7 +134,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
   AlarmActionFunction:
     Type: AWS::Serverless::Function
@@ -288,8 +288,8 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile

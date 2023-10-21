@@ -53,6 +53,7 @@ Resources:
         Route53:
           HostedZoneId:
             Ref: HostedZoneId
+          EvaluateTargetHealth: false
       OpenApiVersion: "3.0.1"
       DefinitionBody:
         openapi: "3.0.1"
@@ -118,7 +119,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
   LambdaFunction:
     Type: AWS::Serverless::Function

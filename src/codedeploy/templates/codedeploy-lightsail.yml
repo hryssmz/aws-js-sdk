@@ -1,0 +1,261 @@
+# codedeploy/templates/codedeploy-lightsail.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Deploy Lightsail app from GitHub
+
+Parameters:
+  DeploymentBranch:
+    Type: String
+    Description: Deployment branch
+    Default: master
+
+  LightsailInstanceName:
+    Type: String
+    Description: Lightsail instance name
+    Default: LightsailInstance
+
+  RepositoryId:
+    Type: String
+    Description: Repository ID
+    Default: hryssmz/CodeDeployGitHubDemo
+
+Resources:
+  # S3
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # IAM
+  LightsailUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName:
+        Fn::Sub: ${AWS::StackName}-LightsailUser
+      ManagedPolicyArns:
+        - Ref: LightsailUserPolicy
+
+  LightsailAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName:
+        Ref: LightsailUser
+      Status: Active
+
+  LightsailUserPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-LightsailUserPolicy-${AWS::Region}
+      Description: Managed policy for LightsailUser
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:Get*
+              - s3:List*
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+
+  # CodeStar
+  CodeStarConnection:
+    Type: AWS::CodeStarConnections::Connection
+    Properties:
+      ConnectionName:
+        Ref: AWS::StackName
+      ProviderType: GitHub
+
+  # CodeDeploy
+  CodeDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CodeDeployRole-${AWS::Region}
+      Description: Execution role for AWS CodeDeploy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codedeploy.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSCodeDeployRole
+
+  CodeDeployApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName:
+        Ref: AWS::StackName
+      ComputePlatform: Server
+
+  DeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      ApplicationName:
+        Ref: CodeDeployApplication
+      DeploymentConfigName: CodeDeployDefault.OneAtATime
+      DeploymentGroupName:
+        Fn::Sub: ${AWS::StackName}-DeploymentGroup
+      DeploymentStyle:
+        DeploymentOption: WITHOUT_TRAFFIC_CONTROL
+        DeploymentType: IN_PLACE
+      OnPremisesInstanceTagFilters:
+        - Key: Name
+          Value:
+            Ref: LightsailInstanceName
+          Type: KEY_AND_VALUE
+      ServiceRoleArn:
+        Fn::GetAtt: CodeDeployRole.Arn
+
+  # CodePipeline
+  CodePipelineExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-CodePipelineExecutionPolicy-${AWS::Region}
+      Description: Execution policy for CodePipeline
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3BucketAccess
+            Effect: Allow
+            Action:
+              - s3:GetBucketAcl
+              - s3:GetBucketLocation
+            Resource:
+              - Fn::GetAtt: S3Bucket.Arn
+          - Sid: S3BucketObjectsAccess
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+          - Sid: CodeStarConnectionAccess
+            Effect: Allow
+            Action:
+              - codestar-connections:UseConnection
+            Resource:
+              - Ref: CodeStarConnection
+          - Sid: CodeDeployPermissions
+            Effect: Allow
+            Action:
+              - codedeploy:CreateDeployment
+              - codedeploy:GetApplication
+              - codedeploy:GetApplicationRevision
+              - codedeploy:GetDeployment
+              - codedeploy:GetDeploymentConfig
+              - codedeploy:RegisterApplicationRevision
+            Resource: "*"
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CodePipelineServiceRole-${AWS::Region}
+      Description: Service role for CodePipeline
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: CodePipelineExecutionPolicy
+        # - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name:
+        Ref: AWS::StackName
+      RoleArn:
+        Fn::GetAtt: CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Location:
+          Ref: S3Bucket
+        Type: S3
+      RestartExecutionOnUpdate: true
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: 1
+              Configuration:
+                ConnectionArn:
+                  Ref: CodeStarConnection
+                FullRepositoryId:
+                  Ref: RepositoryId
+                BranchName:
+                  Ref: DeploymentBranch
+                DetectChanges: true
+              OutputArtifacts:
+                - Name: SourceCode
+              RunOrder: 1
+        - Name: Deploy
+          Actions:
+            - Name: Deploy
+              RunOrder: 1
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CodeDeploy
+                Version: 1
+              Configuration:
+                ApplicationName:
+                  Ref: CodeDeployApplication
+                DeploymentGroupName:
+                  Ref: DeploymentGroup
+              InputArtifacts:
+                - Name: SourceCode
+              OutputArtifacts: []
+
+  # Lightsail
+  LightsailInstance:
+    Type: AWS::Lightsail::Instance
+    Properties:
+      BlueprintId: amazon_linux_2023
+      BundleId: nano_3_0
+      InstanceName:
+        Fn::Sub: ${AWS::StackName}-LightsailInstance
+      UserData:
+        Fn::Sub: |
+          dnf install -y ruby
+          mkdir /etc/codedeploy-agent/
+          mkdir /etc/codedeploy-agent/conf
+          cat <<EOT >> /etc/codedeploy-agent/conf/codedeploy.onpremises.yml
+          ---
+          aws_access_key_id: ${LightsailAccessKey}
+          aws_secret_access_key: ${LightsailAccessKey.SecretAccessKey}
+          iam_user_arn: ${LightsailUser.Arn}
+          region: ${AWS::Region}
+          EOT
+          wget https://aws-codedeploy-us-west-2.s3.us-west-2.amazonaws.com/latest/install
+          chmod +x ./install
+          ./install auto
+
+Outputs:
+  RegisterCommand:
+    Description: CodeDeploy on-premises instance register command
+    Value:
+      Fn::Sub: aws deploy register-on-premises-instance --instance-name ${LightsailInstance} --iam-user-arn ${LightsailUser.Arn}; aws deploy add-tags-to-on-premises-instances --instance-names ${LightsailInstance} --tags Key=Name,Value=${LightsailInstanceName} --region ${AWS::Region}
+
+  DeregisterCommand:
+    Description: CodeDeploy on-premises instance unregister command
+    Value:
+      Fn::Sub: aws deploy remove-tags-from-on-premises-instances --instance-names ${LightsailInstance} --tags Key=Name,Value=${LightsailInstanceName}; aws deploy deregister-on-premises-instance --instance-name ${LightsailInstance}

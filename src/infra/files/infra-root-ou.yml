@@ -1,0 +1,241 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Infra StackSet for organization root OU
+
+Parameters:
+  TrustedAccountIds:
+    Type: CommaDelimitedList
+    Description: List of trusted account IDs
+    Default: "512667299293"
+
+Conditions:
+  IsTokyoCondition:
+    Fn::Equals:
+      - Ref: AWS::Region
+      - ap-northeast-1
+
+Resources:
+  # IAM
+  CrossAccountAdminRole:
+    Type: AWS::IAM::Role
+    Condition: IsTokyoCondition
+    Properties:
+      RoleName: CrossAccountAdminRole
+      Description: Service role for cross-account admin access
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Ref: TrustedAccountIds
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess
+
+  # Custom resources
+  ServiceLinkedRoleFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: ServiceLinkedRoleFunctionPolicy
+      Description: Policy for ServiceLinkedRoleFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3AccessPermissions
+            Effect: Allow
+            Action:
+              - iam:CreateServiceLinkedRole
+              - iam:DeleteServiceLinkedRole
+              - iam:GetServiceLinkedRoleDeletionStatus
+              - iam:ListRoles
+              - iam:UpdateRole
+            Resource: "*"
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::GetAtt: ServiceLinkedRoleFunctionLogGroup.Arn
+
+  ServiceLinkedRoleFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ServiceLinkedRoleFunctionRole
+      Description: Service role for ServiceLinkedRoleFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: ServiceLinkedRoleFunctionPolicy
+
+  ServiceLinkedRoleFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ServiceLinkedRoleFunction
+      Description: Service-Linked Role resource function
+      Role:
+        Fn::GetAtt: ServiceLinkedRoleFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Timeout: 900
+      Code:
+        ZipFile: |
+          const https = require("https");
+          const {
+            CreateServiceLinkedRoleCommand,
+            DeleteServiceLinkedRoleCommand,
+            GetServiceLinkedRoleDeletionStatusCommand,
+            IAMClient,
+            ListRolesCommand,
+            UpdateRoleCommand,
+          } = require("@aws-sdk/client-iam");
+
+          const serialize = obj => JSON.stringify(obj, null, 2);
+
+          const sendResponse = async (
+            event,
+            context,
+            status,
+            data,
+            physicalResourceId,
+            noEcho,
+          ) => {
+            const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
+            const body = serialize({
+              Status: status,
+              Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,
+              PhysicalResourceId: physicalResourceId || context.logStreamName,
+              Data: data,
+              StackId,
+              RequestId,
+              LogicalResourceId,
+              NoEcho: noEcho || false,
+            });
+
+            const { hostname, pathname, search } = new URL(ResponseURL);
+            const path = `${pathname}${search}`;
+            const headers = {
+              "Content-Type": "application/json",
+              "Content-Length": body.length,
+            };
+
+            return await new Promise((resolve, reject) => {
+              const req = https.request(
+                { hostname, port: 443, path, method: "PUT", headers },
+                res => {
+                  res.on("data", chunk => {
+                    const body = chunk.toString();
+                    resolve(body);
+                  });
+                },
+              );
+              req.on("error", e => {
+                reject(e.message);
+              });
+              req.write(body);
+              req.end();
+            });
+          };
+
+          exports.handler = async (event, context) => {
+            console.log(serialize(event));
+            const client = new IAMClient({});
+            const { ResourceProperties } = event;
+            const { AWSServiceName, CustomSuffix, Description } = ResourceProperties;
+
+            try {
+              const command = new ListRolesCommand({
+                PathPrefix: `/aws-service-role/${AWSServiceName}/`,
+              });
+              const { Roles } = await client.send(command);
+              const role = Roles[0];
+              if (event.RequestType === "Create" || event.RequestType === "Update") {
+                if (role !== undefined) {
+                  const command = new UpdateRoleCommand({
+                    RoleName: role.RoleName,
+                    Description: Description,
+                  });
+                  await client.send(command);
+                  return await sendResponse(
+                    event,
+                    context,
+                    "SUCCESS",
+                    { Arn: role.Arn },
+                    role.RoleName,
+                  );
+                } else {
+                  const command = new CreateServiceLinkedRoleCommand({
+                    AWSServiceName,
+                    CustomSuffix,
+                    Description,
+                  });
+                  const { Role } = await client.send(command);
+                  return await sendResponse(
+                    event,
+                    context,
+                    "SUCCESS",
+                    { Arn: Role?.Arn },
+                    Role?.RoleName,
+                  );
+                }
+              } else {
+                if (role !== undefined) {
+                  const command = new DeleteServiceLinkedRoleCommand({
+                    RoleName: role.RoleName,
+                  });
+                  await client
+                    .send(command)
+                    .then(async ({ DeletionTaskId }) => {
+                      console.log(DeletionTaskId);
+                      const command = new GetServiceLinkedRoleDeletionStatusCommand({
+                        DeletionTaskId,
+                      });
+                      for (let i = 0; i < 20; i++) {
+                        await new Promise(resolve => setTimeout(resolve, 3000));
+                        const { Status, Reason } = await client.send(command);
+                        if (Status === "SUCCEEDED") {
+                          break;
+                        } else if (Status === "FAILED") {
+                          console.error(Reason?.Reason);
+                          break;
+                        }
+                      }
+                    })
+                    .catch(console.error);
+                }
+                return await sendResponse(event, context, "SUCCESS");
+              }
+            } catch (error) {
+              console.error(error);
+              return await sendResponse(event, context, "FAILED", {});
+            }
+          };
+
+  ServiceLinkedRoleFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/ServiceLinkedRoleFunction
+
+  ConfigServiceLinkedRole:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: ServiceLinkedRoleFunction.Arn
+      AWSServiceName: config.amazonaws.com
+      Description: Service-Linked Role for AWS Config.
+
+Outputs:
+  SwitchRoleURL:
+    Description: Switch role URL
+    Value:
+      Fn::Sub: https://signin.aws.amazon.com/switchrole?roleName=${CrossAccountAdminRole}&account=${AWS::AccountId}

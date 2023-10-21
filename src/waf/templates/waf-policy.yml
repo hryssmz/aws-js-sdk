@@ -1,0 +1,174 @@
+# waf/templates/waf-policy.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: WAF Policy StackSet
+
+Parameters:
+  StackSetName:
+    Type: String
+    Description: Stack set name
+    Default: awsconfig-org
+
+  OrganizationAccountIds:
+    Type: CommaDelimitedList
+    Description: List of account IDs in organization
+    Default: 512667299293,343562251096,196486007951,229660767790,719118049436
+
+  ManagementAccountId:
+    Type: String
+    Description: Management account ID
+    Default: "512667299293"
+
+  DemoOuId:
+    Type: String
+    Description: Demo OU ID
+    Default: ou-o8rb-uo9555wh
+
+  CentralRegion:
+    Type: String
+    Description: Region to deploy central resources
+    Default: ap-northeast-1
+
+Conditions:
+  IsVirginiaCondition:
+    Fn::Equals:
+      - Ref: AWS::Region
+      - us-east-1
+
+  IsManagementAccountCondition:
+    Fn::Equals:
+      - Ref: AWS::AccountId
+      - Ref: ManagementAccountId
+
+  IsMemberAccountCondition:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: AWS::AccountId
+          - Ref: ManagementAccountId
+
+  CreateCenterResourceCondition:
+    Fn::And:
+      - Condition: IsManagementAccountCondition
+      - Fn::Equals:
+          - Ref: AWS::Region
+          - Ref: CentralRegion
+
+Resources:
+  # S3
+  CentralLogBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateCenterResourceCondition
+    Properties:
+      BucketName:
+        Fn::Sub: ${StackSetName}-centrallogbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  CentralLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateCenterResourceCondition
+    Properties:
+      Bucket:
+        Ref: CentralLogBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AWSConfigBucketReadPermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+              - s3:ListBucket
+            Resource:
+              - Fn::GetAtt: CentralLogBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: OrganizationAccountIds
+          - Sid: AWSConfigObjectWritePermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${CentralLogBucket.Arn}/AWSLogs/*/Config/*
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: OrganizationAccountIds
+                s3:x-amz-acl: bucket-owner-full-control
+          - Sid: BucketAccessDeny
+            Action:
+              - s3:*
+            Effect: Deny
+            Principal: "*"
+            Resource:
+              - Fn::GetAtt: CentralLogBucket.Arn
+              - Fn::Sub: ${CentralLogBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  # SNS
+  CentralConfigTopic:
+    Type: AWS::SNS::Topic
+    Condition: CreateCenterResourceCondition
+    Properties:
+      TopicName:
+        Fn::Sub: ${StackSetName}-CentralConfigTopic
+      DisplayName: Central AWS Config Notification Topic
+
+  CentralConfigTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Condition: CreateCenterResourceCondition
+    Properties:
+      Topics:
+        - Ref: CentralConfigTopic
+      PolicyDocument:
+        Statement:
+          - Sid: SNSAccessPermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - sns:Publish
+            Resource:
+              - Ref: CentralConfigTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: OrganizationAccountIds
+
+  # Config
+  DeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    Condition: IsMemberAccountCondition
+    Properties:
+      Name:
+        Ref: StackSetName
+      S3BucketName:
+        Fn::Sub: ${StackSetName}-centrallogbucket-${CentralRegion}
+      SnsTopicARN:
+        Fn::Sub: arn:${AWS::Partition}:sns:${CentralRegion}:${ManagementAccountId}:${StackSetName}-CentralConfigTopic
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: One_Hour
+
+  ConfigurationRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    Condition: IsMemberAccountCondition
+    Properties:
+      Name:
+        Ref: StackSetName
+      RoleARN:
+        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig
+      RecordingGroup:
+        AllSupported: true
+        IncludeGlobalResourceTypes:
+          Fn::If:
+            - IsVirginiaCondition
+            - true
+            - false

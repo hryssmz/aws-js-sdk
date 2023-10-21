@@ -1,4 +1,4 @@
-# route53/templates/new-hosted-zone.yml
+# route53/templates/child-hosted-zone.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: Child Route 53 Hosted Zone
@@ -199,7 +199,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
   LambdaFunction:
     Type: AWS::Serverless::Function

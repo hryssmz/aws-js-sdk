@@ -1,0 +1,637 @@
+# codecommit/templates/first-codecommit.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: First CodeCommit repository
+
+Parameters:
+  DeploymentBranch:
+    Type: String
+    Description: CodeCommit branch to deploy
+    Default: main
+
+Resources:
+  # CodeCommit
+  CodeCommitRepository:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName:
+        Ref: AWS::StackName
+      RepositoryDescription:
+        Fn::Sub: ${AWS::StackName} repository
+      Triggers:
+        - Name: CodeCommitEventTrigger
+          DestinationArn:
+            Ref: CodeCommitEventTopic
+          Branches:
+            - Ref: DeploymentBranch
+          Events:
+            - all
+
+  NotificationRule:
+    Type: AWS::CodeStarNotifications::NotificationRule
+    DependsOn: CodeCommitEventTopicPolicy
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-NotificationRule
+      Status: ENABLED
+      DetailType: FULL
+      Resource:
+        Fn::GetAtt: CodeCommitRepository.Arn
+      EventTypeIds:
+        - codecommit-repository-comments-on-commits
+        - codecommit-repository-approvals-status-changed
+        - codecommit-repository-pull-request-source-updated
+        - codecommit-repository-pull-request-created
+        - codecommit-repository-approvals-rule-override
+        - codecommit-repository-comments-on-pull-requests
+        - codecommit-repository-pull-request-status-changed
+        - codecommit-repository-branches-and-tags-created
+        - codecommit-repository-pull-request-merged
+        - codecommit-repository-branches-and-tags-deleted
+        - codecommit-repository-branches-and-tags-updated
+      Targets:
+        - TargetType: SNS
+          TargetAddress:
+            Ref: CodeCommitEventTopic
+
+  ApproverUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName:
+        Fn::Sub: ${AWS::StackName}-ApproverUser
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AWSCodeCommitPowerUser
+      LoginProfile:
+        Password: P@ssw0rd
+        PasswordResetRequired: false
+
+  ApprovalRuleTemplate:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: ApprovalRuleTemplateFunction.Arn
+      Name:
+        Fn::Sub: ${AWS::StackName}-ApprovalRuleTemplate
+      Description: CodeCommit approval rule template
+      Content:
+        Fn::Sub: |
+          {
+            "Version": "2018-11-08",
+            "DestinationReferences": ["refs/heads/main"],
+            "Statements": [
+              {
+                "Type": "Approvers",
+                "NumberOfApprovalsNeeded": 1,
+                "ApprovalPoolMembers": ["${ApproverUser.Arn}"]
+              }
+            ]
+          }
+
+  ApprovalRuleTemplateAssociation:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: ApprovalRuleAssocFunction.Arn
+      RepositoryName:
+        Fn::GetAtt: CodeCommitRepository.Name
+      ApprovalRuleTemplateName:
+        Ref: ApprovalRuleTemplate
+
+  ApprovalRuleTemplate2:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: ApprovalRuleTemplateFunction.Arn
+      Name:
+        Fn::Sub: ${AWS::StackName}-ApprovalRuleTemplate2
+      Description: CodeCommit approval rule template 2
+      Content:
+        Fn::Sub: |
+          {
+            "Version": "2018-11-08",
+            "DestinationReferences": ["refs/heads/main"],
+            "Statements": [
+              {
+                "Type": "Approvers",
+                "NumberOfApprovalsNeeded": 1,
+                "ApprovalPoolMembers": [
+                  "arn:${AWS::Partition}:sts::${AWS::AccountId}:assumed-role/${ApproverFunctionRole}/*"
+                ]
+              }
+            ]
+          }
+
+  ApprovalRuleTemplateAssociation2:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: ApprovalRuleAssocFunction.Arn
+      RepositoryName:
+        Fn::GetAtt: CodeCommitRepository.Name
+      ApprovalRuleTemplateName:
+        Ref: ApprovalRuleTemplate2
+
+  # Lambda
+  ApproverFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ApproverFunctionRole-${AWS::Region}
+      Description: Service role for ApproverFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AWSCodeCommitPowerUser
+
+  ApproverFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ApproverFunction
+      Description: Approver function for pull requests
+      Role:
+        Fn::GetAtt: ApproverFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Code:
+        ZipFile: |
+          const {
+            CodeCommitClient,
+            GetPullRequestCommand,
+            UpdatePullRequestApprovalStateCommand,
+          } = require("@aws-sdk/client-codecommit");
+
+          exports.handler = async event => {
+            const { approvalState = "APPROVE", pullRequestId } = event;
+            const client = new CodeCommitClient();
+            const { pullRequest } = await client.send(
+              new GetPullRequestCommand({ pullRequestId }),
+            );
+            await client.send(
+              new UpdatePullRequestApprovalStateCommand({
+                pullRequestId,
+                revisionId: pullRequest?.revisionId,
+                approvalState,
+              }),
+            );
+          };
+
+  ApproverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${ApproverFunction}
+
+  # SNS
+  CodeCommitEventTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-CodeCommitEventTopic
+
+  CodeCommitEventTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - Ref: CodeCommitEventTopic
+      PolicyDocument:
+        Statement:
+          - Sid: SNSAccessPermissions
+            Effect: Allow
+            Principal:
+              Service: codestar-notifications.amazonaws.com
+            Action:
+              - sns:Publish
+            Resource:
+              - Ref: CodeCommitEventTopic
+
+  SNSSubscriberFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SNSSubscriberFunctionRole-${AWS::Region}
+      Description: Service role for SNSSubscriberFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SNSSubscriberFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SNSSubscriberFunction
+      Description: Subscriber function for the SNS topic
+      Role:
+        Fn::GetAtt: SNSSubscriberFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Code:
+        ZipFile: |
+          exports.handler = async event => {
+            const { Records } = event;
+            const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
+              JSON.parse(Message)
+            );
+            records.forEach(record => {
+              console.log(JSON.stringify(record, null, 2));
+            });
+            return records;
+          };
+
+  SNSSubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SNSSubscriberFunction}
+
+  SNSSubscriberFunctionSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: lambda
+      Endpoint:
+        Fn::GetAtt: SNSSubscriberFunction.Arn
+      TopicArn:
+        Ref: CodeCommitEventTopic
+
+  SNSSubscriberFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: SNSSubscriberFunction
+      Principal: sns.amazonaws.com
+      SourceArn:
+        Ref: CodeCommitEventTopic
+
+  # Custom resources
+  ApprovalRuleTemplateFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-ApprovalRuleTemplateFunctionPolicy-${AWS::Region}
+      Description: Policy for ApprovalRuleTemplateFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3AccessPermissions
+            Effect: Allow
+            Action:
+              - codecommit:CreateApprovalRuleTemplate
+              - codecommit:DeleteApprovalRuleTemplate
+              - codecommit:GetApprovalRuleTemplate
+              - codecommit:UpdateApprovalRuleTemplateContent
+              - codecommit:UpdateApprovalRuleTemplateDescription
+            Resource: "*"
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::GetAtt: ApprovalRuleTemplateFunctionLogGroup.Arn
+
+  ApprovalRuleTemplateFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ApprovalRuleTemplateFunctionRole-${AWS::Region}
+      Description: Service role for ApprovalRuleTemplateFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: ApprovalRuleTemplateFunctionPolicy
+
+  ApprovalRuleTemplateFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ApprovalRuleTemplateFunction
+      Description: Service-Linked Role resource function
+      Role:
+        Fn::GetAtt: ApprovalRuleTemplateFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Timeout: 900
+      Code:
+        ZipFile: |
+          const https = require("https");
+          const {
+            CodeCommitClient,
+            CreateApprovalRuleTemplateCommand,
+            DeleteApprovalRuleTemplateCommand,
+            GetApprovalRuleTemplateCommand,
+            UpdateApprovalRuleTemplateContentCommand,
+            UpdateApprovalRuleTemplateDescriptionCommand,
+          } = require("@aws-sdk/client-codecommit");
+
+          const serialize = obj => JSON.stringify(obj, null, 2);
+
+          const sendResponse = async (
+            event,
+            context,
+            status,
+            data,
+            physicalResourceId,
+            noEcho,
+          ) => {
+            const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
+            const body = serialize({
+              Status: status,
+              Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,
+              PhysicalResourceId: physicalResourceId || context.logStreamName,
+              Data: data,
+              StackId,
+              RequestId,
+              LogicalResourceId,
+              NoEcho: noEcho || false,
+            });
+
+            const { hostname, pathname, search } = new URL(ResponseURL);
+            const path = `${pathname}${search}`;
+            const headers = {
+              "Content-Type": "application/json",
+              "Content-Length": body.length,
+            };
+
+            return await new Promise((resolve, reject) => {
+              const req = https.request(
+                { hostname, port: 443, path, method: "PUT", headers },
+                res => {
+                  res.on("data", chunk => {
+                    const body = chunk.toString();
+                    resolve(body);
+                  });
+                },
+              );
+              req.on("error", e => {
+                reject(e.message);
+              });
+              req.write(body);
+              req.end();
+            });
+          };
+
+          exports.handler = async (event, context) => {
+            console.log(serialize(event));
+            const client = new CodeCommitClient({});
+            const { ResourceProperties, OldResourceProperties } = event;
+            const { Name, Description, Content } = ResourceProperties;
+
+            try {
+              const command = new GetApprovalRuleTemplateCommand({
+                approvalRuleTemplateName: Name,
+              });
+              const { approvalRuleTemplate } = await client.send(command).catch(error => {
+                if (error.name === "ApprovalRuleTemplateDoesNotExistException") {
+                  return {};
+                }
+                throw error;
+              });
+              if (event.RequestType === "Create" || event.RequestType === "Update") {
+                if (approvalRuleTemplate !== undefined) {
+                  if (Description !== OldResourceProperties?.Description) {
+                    const command = new UpdateApprovalRuleTemplateDescriptionCommand({
+                      approvalRuleTemplateName: Name,
+                      approvalRuleTemplateDescription: Description,
+                    });
+                    await client.send(command);
+                  }
+                  if (Content !== OldResourceProperties?.Content) {
+                    const command = new UpdateApprovalRuleTemplateContentCommand({
+                      approvalRuleTemplateName: Name,
+                      newRuleContent: Content,
+                    });
+                    await client.send(command);
+                  }
+                  return await sendResponse(
+                    event,
+                    context,
+                    "SUCCESS",
+                    {},
+                    Name,
+                  );
+                } else {
+                  const command = new CreateApprovalRuleTemplateCommand({
+                    approvalRuleTemplateName: Name,
+                    approvalRuleTemplateDescription: Description,
+                    approvalRuleTemplateContent: Content,
+                  });
+                  const { approvalRuleTemplate } = await client.send(command);
+                  return await sendResponse(
+                    event,
+                    context,
+                    "SUCCESS",
+                    {},
+                    Name,
+                  );
+                }
+              } else {
+                if (approvalRuleTemplate !== undefined) {
+                  const command = new DeleteApprovalRuleTemplateCommand({
+                    approvalRuleTemplateName:
+                      approvalRuleTemplate.approvalRuleTemplateName,
+                  });
+                  await client.send(command).catch(console.error);
+                }
+                return await sendResponse(event, context, "SUCCESS", {}, Name);
+              }
+            } catch (error) {
+              console.error(error);
+              return await sendResponse(event, context, "FAILED", {}, Name);
+            }
+          };
+
+  ApprovalRuleTemplateFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ApprovalRuleTemplateFunction
+
+  ApprovalRuleAssocFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-ApprovalRuleAssocFunctionPolicy-${AWS::Region}
+      Description: Policy for ApprovalRuleAssocFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3AccessPermissions
+            Effect: Allow
+            Action:
+              - codecommit:AssociateApprovalRuleTemplateWithRepository
+              - codecommit:DisassociateApprovalRuleTemplateFromRepository
+            Resource: "*"
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::GetAtt: ApprovalRuleAssocFunctionLogGroup.Arn
+
+  ApprovalRuleAssocFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ApprovalRuleAssocFunctionRole-${AWS::Region}
+      Description: Service role for ApprovalRuleAssocFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: ApprovalRuleAssocFunctionPolicy
+
+  ApprovalRuleAssocFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ApprovalRuleAssocFunction
+      Description: Service-Linked Role resource function
+      Role:
+        Fn::GetAtt: ApprovalRuleAssocFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Timeout: 900
+      Code:
+        ZipFile: |
+          const https = require("https");
+          const {
+            AssociateApprovalRuleTemplateWithRepositoryCommand,
+            DisassociateApprovalRuleTemplateFromRepositoryCommand,
+            CodeCommitClient,
+          } = require("@aws-sdk/client-codecommit");
+
+          const serialize = obj => JSON.stringify(obj, null, 2);
+
+          const sendResponse = async (
+            event,
+            context,
+            status,
+            data,
+            physicalResourceId,
+            noEcho,
+          ) => {
+            const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
+            const body = serialize({
+              Status: status,
+              Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,
+              PhysicalResourceId: physicalResourceId || context.logStreamName,
+              Data: data,
+              StackId,
+              RequestId,
+              LogicalResourceId,
+              NoEcho: noEcho || false,
+            });
+
+            const { hostname, pathname, search } = new URL(ResponseURL);
+            const path = `${pathname}${search}`;
+            const headers = {
+              "Content-Type": "application/json",
+              "Content-Length": body.length,
+            };
+
+            return await new Promise((resolve, reject) => {
+              const req = https.request(
+                { hostname, port: 443, path, method: "PUT", headers },
+                res => {
+                  res.on("data", chunk => {
+                    const body = chunk.toString();
+                    resolve(body);
+                  });
+                },
+              );
+              req.on("error", e => {
+                reject(e.message);
+              });
+              req.write(body);
+              req.end();
+            });
+          };
+
+          exports.handler = async (event, context) => {
+            console.log(serialize(event));
+            const client = new CodeCommitClient();
+            const { ResourceProperties } = event;
+            const { RepositoryName, ApprovalRuleTemplateName } = ResourceProperties;
+            const physicalResourceId = `${RepositoryName}|${ApprovalRuleTemplateName}`;
+
+            try {
+              if (event.RequestType === "Create" || event.RequestType === "Update") {
+                const command = new AssociateApprovalRuleTemplateWithRepositoryCommand({
+                  approvalRuleTemplateName: ApprovalRuleTemplateName,
+                  repositoryName: RepositoryName,
+                });
+                await client.send(command);
+                return await sendResponse(
+                  event,
+                  context,
+                  "SUCCESS",
+                  {},
+                  physicalResourceId,
+                );
+              } else {
+                const command = new DisassociateApprovalRuleTemplateFromRepositoryCommand(
+                  {
+                    approvalRuleTemplateName: ApprovalRuleTemplateName,
+                    repositoryName: RepositoryName,
+                  },
+                );
+                await client.send(command).catch(console.error);
+                return await sendResponse(
+                  event,
+                  context,
+                  "SUCCESS",
+                  {},
+                  physicalResourceId,
+                );
+              }
+            } catch (error) {
+              console.error(error);
+              return await sendResponse(event, context, "FAILED", {}, physicalResourceId);
+            }
+          };
+
+  ApprovalRuleAssocFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ApprovalRuleAssocFunction
+
+Outputs:
+  CodeCommitRepositoryCloneUrlHttp:
+    Description: CodeCommit clone URL (HTTP)
+    Value:
+      Fn::GetAtt: CodeCommitRepository.CloneUrlHttp

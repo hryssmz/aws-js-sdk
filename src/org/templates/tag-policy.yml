@@ -1,0 +1,158 @@
+# org/templates/tag-policy.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Tag policy StackSet
+
+Parameters:
+  DemoOuId:
+    Type: String
+    Description: Demo OU ID
+    Default: ou-o8rb-uo9555wh
+
+  ManagementAccountId:
+    Type: String
+    Description: Management account ID
+    Default: "512667299293"
+
+  StackSetName:
+    Type: String
+    Description: Stack set name
+    Default: tag-policy
+
+Conditions:
+  IsManagementAccountCondition:
+    Fn::Equals:
+      - Ref: AWS::AccountId
+      - Ref: ManagementAccountId
+
+  IsMemberAccountCondition:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: AWS::AccountId
+          - Ref: ManagementAccountId
+
+Resources:
+  # AWS Organizations
+  TagPolicy:
+    Type: AWS::Organizations::Policy
+    Condition: IsManagementAccountCondition
+    Properties:
+      Name: TagPolicy
+      Description: Tag policy
+      Type: TAG_POLICY
+      TargetIds:
+        - Ref: DemoOuId
+      Content:
+        tags:
+          Stage:
+            tag_key:
+              "@@assign": Stage
+              "@@operators_allowed_for_child_policies":
+                - "@@none"
+            tag_value:
+              "@@assign":
+                - Development
+                - Production
+          Backup:
+            tag_key:
+              "@@assign": Backup
+              "@@operators_allowed_for_child_policies":
+                - "@@none"
+            tag_value:
+              "@@assign":
+                - Enabled
+                - Disabled
+            enforced_for:
+              "@@assign":
+                - dynamodb:table
+
+  # DynamoDB
+  SimpleTable:
+    Type: AWS::DynamoDB::Table
+    Condition: IsMemberAccountCondition
+    Properties:
+      TableName:
+        Fn::Sub: ${StackSetName}-SimpleTable
+      AttributeDefinitions:
+        - AttributeName: Id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: Id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      Tags:
+        - Key: Stage
+          Value: Prod
+        - Key: Backup
+          Value: Enabled
+
+  # EventBridge
+  EventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name:
+        Fn::Sub: ${StackSetName}-EventBridgeRule
+      Description: EventBridge rule
+      EventPattern:
+        detail-type:
+          - Tag Change on Resource
+        detail:
+          tag-policy-compliant:
+            - "false"
+      Targets:
+        - Id:
+            Ref: SubscriberFunction
+          Arn:
+            Fn::GetAtt: SubscriberFunction.Arn
+
+  SubscriberFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${StackSetName}-SubscriberFunctionRole-${AWS::Region}
+      Description: Service role for SubscriberFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SubscriberFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${StackSetName}-SubscriberFunction
+      Description: Subscriber function for EventBridge
+      Role:
+        Fn::GetAtt: SubscriberFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Code:
+        ZipFile: |
+          exports.handler = async event => {
+            console.log(JSON.stringify(event, null, 2));
+          };
+
+  SubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SubscriberFunction}
+
+  SubscriberFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: SubscriberFunction
+      Principal: events.amazonaws.com
+      SourceArn:
+        Fn::GetAtt: EventBridgeRule.Arn

@@ -1,0 +1,415 @@
+# cloudfront/templates/trusted-key-group.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Using trusted key group
+
+Parameters:
+  PublicKeyBody:
+    Type: String
+    Description: Public key body
+    Default: |
+      -----BEGIN PUBLIC KEY-----
+      MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAse8bg8/4bNExvrLB1R2+
+      R7Mgr6rBOyMP95dxsxi+HpcJdd3Y4o5AE60qNAX8d51idPAEIhs/KJyco0OY0RbE
+      +XKbJ+oJw1oqvPy439t/PVPLyz92mJy4To33augQDRGPfcq2kVJ2JycTCXL2CCdI
+      ZQNqsfBcAkegKbOlG5HaGpWMVtoTLeRx25eLgXP6ZsWuE/73syhzmkOkdk4kiz8q
+      4x4mwoa1LQTy5I74AZSi4hnSf6nGT4+93sDGdT9sgUiBP2M04RAx7g/121eJ6aCF
+      qb8jSjmpliu1V1jTV9Tgfv6u4M7FF2K5SjnshSkx5qHPpmu7CP48oALpwo/IKoVM
+      3wIDAQAB
+      -----END PUBLIC KEY-----
+
+  PrivateKeyBody:
+    Type: String
+    Description: Private key body
+    Default: |
+      -----BEGIN RSA PRIVATE KEY-----
+      MIIEpAIBAAKCAQEAse8bg8/4bNExvrLB1R2+R7Mgr6rBOyMP95dxsxi+HpcJdd3Y
+      4o5AE60qNAX8d51idPAEIhs/KJyco0OY0RbE+XKbJ+oJw1oqvPy439t/PVPLyz92
+      mJy4To33augQDRGPfcq2kVJ2JycTCXL2CCdIZQNqsfBcAkegKbOlG5HaGpWMVtoT
+      LeRx25eLgXP6ZsWuE/73syhzmkOkdk4kiz8q4x4mwoa1LQTy5I74AZSi4hnSf6nG
+      T4+93sDGdT9sgUiBP2M04RAx7g/121eJ6aCFqb8jSjmpliu1V1jTV9Tgfv6u4M7F
+      F2K5SjnshSkx5qHPpmu7CP48oALpwo/IKoVM3wIDAQABAoIBAFjjvrcm2lBiYZuG
+      6dZxuXFQR2/6ufW1GnDyM1bpcXEOuycq4QKtVc1+oKrEos+OzHTmwunW+sJrGsVl
+      K56o5VZIrsJN5Pq2vMsU5bbPjM0yY4jx92leQaTcv1GlBP/CWhDZiEMpEuWUW6pI
+      yChil4P/JPonvY9WAOlUWZNgVbkZTudIwzHCn5DFVfS1I26hxEDFg6fUTHr3vKvO
+      oWvLZ/WoM2cmK30t4D2std5PFUngh0Iob+gVl0/8KEbU6FeoKJhisUJgyZsfgz86
+      N4GzdxGbTrqZnBFfYXShj8pKSlqRyoil5iRFojGdhjZ2jsLrP3gc8zJwR4ZWflNO
+      VVsQlUECgYEA5Y0QnTg3EJOjPYSV866kclXfwDa7DfsXdVBVM9PMNRx1ELgvdwmC
+      e+tl1PZNdTK8jWOtfBMf/kgjj4Rcyg/gpVfG5HhpBFk9DRi5wJHTtvqsi7xOXC4S
+      Ed3XKB2p5WfXJ9yl0xenQfGn40UhDqStPYPKVYX2S5VUu056Z+0k+1cCgYEAxm+G
+      YlRWc50tJPfOuxgL0UnCOkpaiOBaAeT8HvS2tRZiNGpJFcP61nbywA+WN8em8vSk
+      StuHjgCddnjN/5SmkR4prAqOgDcUKkt4y8h/hDykzt40MAO0x8FrXYF2ak3DLtv/
+      S07tPU1gJq5+wsHkidoYsPzDnitRSM4/yDFRzbkCgYAk05bAwk4DOMxNiEHOUExN
+      k31MBvvHaGsBBRxGLkpqkuAtCH+E51+ppcA2hDU1AijBviYM67yMPOKHmcKRIC74
+      F7bu3GpsqixjN35FaJ/AkUKxQEqJ+1Imz6I+61NgXGJmIL3xua+5op0+ls6Q3NZ2
+      Mfh58/3pblGjoxl8Js1yDQKBgQCjPv6ECDPy+vw3rHHzMw4NyCs0PxUKA9+oLVRI
+      tzNT+K0jx8iGUmsaYlLENE51ZxduSlqahs2WweTIoQt/VjBNtE2+DhU7X5SEUwB2
+      TWSySh2fXef7FCF2MCX+j9H2FDEdbLkyoCTFyNDwIZ+A43f6/GRRvi/EAIjnZ13L
+      eN9+aQKBgQCXMoCAt7mgAe8MSiJ1BPqDWYkLur113fpZ68gfmNIjq9ZbHhQOvd10
+      vwMJKVOwBltMpcKrcOf/uB2myr+9GJoyhkRr4D24ChhtoB6QLTAhxNosM4YyAchw
+      g0MHM+8WaShA2uH6apUEjH7a4IsZ8+t6r0owtadiK1yE5hLtCX1oJw==
+      -----END RSA PRIVATE KEY-----
+
+Resources:
+  # S3
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: S3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+            Condition:
+              StringEquals:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}
+
+  # CloudFront
+  PublicKey:
+    Type: AWS::CloudFront::PublicKey
+    Properties:
+      PublicKeyConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-PublicKey
+        Comment: Public key
+        CallerReference:
+          Ref: AWS::StackName
+        EncodedKey:
+          Ref: PublicKeyBody
+
+  KeyGroup:
+    Type: AWS::CloudFront::KeyGroup
+    Properties:
+      KeyGroupConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-KeyGroup
+        Comment: Key group
+        Items:
+          - Ref: PublicKey
+
+  NoCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-NoCachePolicy
+        Comment: CloudFront no-cache policy
+        DefaultTTL: 0
+        MinTTL: 0
+        MaxTTL: 0
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingBrotli: false
+          EnableAcceptEncodingGzip: false
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-OriginAccessControl
+        Description: Origin access control for S3
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: CloudFront distribution
+        Enabled: true
+        Origins:
+          - Id:
+              Fn::GetAtt: S3Bucket.RegionalDomainName
+            DomainName:
+              Fn::GetAtt: S3Bucket.RegionalDomainName
+            OriginAccessControlId:
+              Ref: OriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          CachePolicyId:
+            Ref: NoCachePolicy
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          TargetOriginId:
+            Fn::GetAtt: S3Bucket.RegionalDomainName
+          ViewerProtocolPolicy: allow-all
+          TrustedKeyGroups:
+            - Ref: KeyGroup
+        DefaultRootObject: index.html
+
+  # Lambda
+  SignUrlFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SignUrlFunctionRole-${AWS::Region}
+      Description: Service role for SignUrlFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SignUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SignUrlFunction
+      Description: Sign URL function
+      Role:
+        Fn::GetAtt: SignUrlFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          PRIVATE_KEY:
+            Ref: PrivateKeyBody
+          KEY_PAIR_ID:
+            Ref: PublicKey
+      InlineCode: |
+        const crypto = require("node:crypto");
+
+        exports.handler = async event => {
+          const { url: baseUrl } = event;
+          const privateKey = process.env.PRIVATE_KEY;
+          const keyPairId = process.env.KEY_PAIR_ID;
+          const expires = new Date().getTime() + 3600;
+          const policy = {
+            Statement: [
+              {
+                Resource: baseUrl,
+                Condition: { DateLessThan: { "AWS:EpochTime": expires } },
+              },
+            ],
+          };
+          const signature = crypto
+            .createSign("sha1")
+            .end(JSON.stringify(policy).replace(/\s+/g, ""))
+            .sign(privateKey)
+            .toString("base64")
+            .replace(/\+/g, "-")
+            .replace(/=/g, "_")
+            .replace(/\//g, "~");
+
+          const url = new URL(baseUrl);
+          const { searchParams } = url;
+          searchParams.append("Expires", expires.toString());
+          searchParams.append("Signature", signature);
+          searchParams.append("Key-Pair-Id", keyPairId);
+
+          const response = { signedUrl: url.toString() };
+          return response;
+        };
+
+  SignUrlFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SignUrlFunction}
+
+  # Custom resource
+  S3ObjectFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunctionPolicy-${AWS::Region}
+      Description: Policy for S3ObjectFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3AccessPermissions
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource: "*"
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: ${S3ObjectFunctionLogGroup.Arn}
+
+  S3ObjectFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunctionRole-${AWS::Region}
+      Description: Service role for S3ObjectFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: S3ObjectFunctionPolicy
+
+  S3ObjectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunction
+      Description: AMI lookup function
+      Role:
+        Fn::GetAtt: S3ObjectFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Timeout: 30
+      InlineCode: |
+        const https = require("https");
+        const {
+          DeleteObjectCommand,
+          PutObjectCommand,
+          S3Client,
+        } = require("@aws-sdk/client-s3");
+
+        const serialize = obj => JSON.stringify(obj, null, 2);
+
+        const sendResponse = async (
+          event,
+          context,
+          status,
+          data,
+          physicalResourceId,
+          noEcho,
+        ) => {
+          const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
+          const body = serialize({
+            Status: status,
+            Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,
+            PhysicalResourceId: physicalResourceId || context.logStreamName,
+            Data: data,
+            StackId,
+            RequestId,
+            LogicalResourceId,
+            NoEcho: noEcho || false,
+          });
+
+          const { hostname, pathname, search } = new URL(ResponseURL);
+          const path = `${pathname}${search}`;
+          const headers = {
+            "Content-Type": "application/json",
+            "Content-Length": body.length,
+          };
+
+          return await new Promise((resolve, reject) => {
+            const req = https.request(
+              { hostname, port: 443, path, method: "PUT", headers },
+              res => {
+                res.on("data", chunk => {
+                  const body = chunk.toString();
+                  resolve(body);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(body);
+            req.end();
+          });
+        };
+
+        exports.handler = async (event, context) => {
+          console.log(serialize(event));
+          const client = new S3Client({});
+          const { ResourceProperties } = event;
+          const { Bucket, Key, Body, ContentType, Base64 } = ResourceProperties;
+
+          try {
+            if (event.RequestType === "Create" || event.RequestType === "Update") {
+              const command = new PutObjectCommand({
+                Bucket,
+                Key,
+                Body: Base64 ? Buffer.from(Body, "base64") : Body,
+                ContentType,
+              });
+              await client.send(command);
+              return await sendResponse(
+                event,
+                context,
+                "SUCCESS",
+                { Bucket, Key },
+                `s3://${Bucket}/${Key}`,
+              );
+            } else if (event.RequestType === "Delete") {
+              const command = new DeleteObjectCommand({ Bucket, Key });
+              await client.send(command).catch(console.error);
+              return await sendResponse(event, context, "SUCCESS");
+            } else {
+              throw new Error(`Invalid RequestType: ${event.RequestType}`);
+            }
+          } catch (error) {
+            console.error(error);
+            return await sendResponse(event, context, "FAILED", {});
+          }
+        };
+
+  S3ObjectFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-S3ObjectFunction
+
+  IndexHtmlObject:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: S3ObjectFunction.Arn
+      Bucket:
+        Ref: S3Bucket
+      Key: index.html
+      ContentType: text/html
+      Body: |
+        <h1>Hello World!</h1>
+
+Outputs:
+  DistributionDnsName:
+    Description: Distribution domain name
+    Value:
+      Fn::GetAtt: Distribution.DomainName

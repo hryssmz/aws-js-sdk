@@ -18,8 +18,8 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
-        - arn:aws:iam::aws:policy/AmazonKinesisFullAccess
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonKinesisFullAccess
 
   KinesisProxyApi:
     Type: AWS::ApiGateway::RestApi

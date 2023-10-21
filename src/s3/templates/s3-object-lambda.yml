@@ -50,7 +50,7 @@ Resources:
       Architectures:
         - arm64
       Policies:
-        - arn:aws:iam::aws:policy/service-role/AmazonS3ObjectLambdaExecutionRolePolicy
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonS3ObjectLambdaExecutionRolePolicy
       InlineCode: |
         from http.client import HTTPResponse
         from typing import Any

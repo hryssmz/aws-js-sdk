@@ -99,7 +99,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
   SubscriberFunction:
     Type: AWS::Serverless::Function
@@ -225,8 +225,8 @@ Resources:
                 aws:SourceArn:
                   Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-execution/*
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole
-        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonSSMAutomationRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonS3FullAccess
 
   S3BucketPublicAccessBlockRemediationConfiguration:
     Type: AWS::Config::RemediationConfiguration

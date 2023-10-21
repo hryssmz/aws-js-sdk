@@ -1,0 +1,414 @@
+Parameters:
+  SSOInstanceArn:
+    Type: String
+    Description: SSO Instance ARN
+    Default: arn:aws:sso:::instance/ssoins-775850417ae45fb7
+
+  OrganizationAccountIds:
+    Type: CommaDelimitedList
+    Description: List of account IDs in organization
+    Default: 512667299293,343562251096,196486007951,229660767790,719118049436
+
+  OrganizationId:
+    Type: String
+    Description: Organization ID
+    Default: o-wz1cmd48gp
+
+Resources:
+  CentralLogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AccountAlias}-log
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  CentralLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: CentralLogBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AWSConfigBucketReadPermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+              - s3:ListBucket
+            Resource:
+              - Fn::GetAtt: CentralLogBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: OrganizationAccountIds
+          - Sid: AWSConfigObjectWritePermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${CentralLogBucket.Arn}/AWSLogs/*/Config/*
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: OrganizationAccountIds
+                s3:x-amz-acl: bucket-owner-full-control
+          - Sid: BucketAccessDeny
+            Action:
+              - s3:*
+            Effect: Deny
+            Principal: "*"
+            Resource:
+              - Fn::GetAtt: CentralLogBucket.Arn
+              - Fn::Sub: ${CentralLogBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Sid: CloudTrailBucketReadPermissions
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+            Resource:
+              - Fn::GetAtt: CentralLogBucket.Arn
+            Condition:
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/OrganizationTrail
+          - Sid: CloudTrailObjectWritePermissions
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${CentralLogBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+              - Fn::Sub: ${CentralLogBucket.Arn}/AWSLogs/${OrganizationId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/OrganizationTrail
+
+  # SNS
+  CentralConfigTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: CentralConfigTopicPolicy
+      DisplayName: Central AWS Config Notification Topic
+
+  CentralConfigTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - Ref: CentralConfigTopic
+      PolicyDocument:
+        Statement:
+          - Sid: SNSAccessPermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - sns:Publish
+            Resource:
+              - Ref: CentralConfigTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: OrganizationAccountIds
+
+  CentralConfigTopicSubscriberFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CentralConfigTopicSubscriberFunctionRole
+      Description: Service role for CentralConfigTopicSubscriberFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  CentralConfigTopicSubscriberFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: CentralConfigTopicSubscriberFunction
+      Description: Subscriber function for the central Config topic
+      Role:
+        Fn::GetAtt: CentralConfigTopicSubscriberFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Code:
+        ZipFile: |
+          exports.handler = async event => {
+            const { Records } = event;
+            const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
+              JSON.parse(Message)
+            );
+            records.forEach(record => {
+              console.log(JSON.stringify(record, null, 2));
+            });
+            return records;
+          };
+
+  CentralConfigTopicSubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${CentralConfigTopicSubscriberFunction}
+
+  CentralConfigTopicSubscriberFunctionSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: lambda
+      Endpoint:
+        Fn::GetAtt: CentralConfigTopicSubscriberFunction.Arn
+      TopicArn:
+        Ref: CentralConfigTopic
+
+  CentralConfigTopicSubscriberFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: CentralConfigTopicSubscriberFunction
+      Principal: sns.amazonaws.com
+      SourceArn:
+        Ref: CentralConfigTopic
+
+  # EventBridge
+  CentralEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: CentralEventBus
+
+  CentralEventBusPolicy:
+    Type: AWS::Events::EventBusPolicy
+    Properties:
+      EventBusName:
+        Ref: CentralEventBus
+      StatementId: EventBusWritePermissions
+      Statement:
+        Effect: Allow
+        Principal: "*"
+        Action:
+          - events:PutEvents
+        Resource:
+          Fn::GetAtt: CentralEventBus.Arn
+        Condition:
+          StringEquals:
+            aws:PrincipalOrgId:
+              Ref: OrganizationId
+
+  CentralEventBusRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: CentralEventBusRule
+      Description: Central Event Bus rule
+      EventBusName:
+        Ref: CentralEventBus
+      EventPattern:
+        source:
+          - prefix: aws
+          - prefix: com
+      Targets:
+        - Id:
+            Ref: CentralEventBusSubscriberFunction
+          Arn:
+            Fn::GetAtt: CentralEventBusSubscriberFunction.Arn
+
+  CentralEventBusSubscriberFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CentralEventBusSubscriberFunctionRole
+      Description: Service role for CentralEventBusSubscriberFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  CentralEventBusSubscriberFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: CentralEventBusSubscriberFunction
+      Description: Subscriber function for the central event bus
+      Role:
+        Fn::GetAtt: CentralEventBusSubscriberFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Code:
+        ZipFile: |
+          exports.handler = async event => {
+            console.log(JSON.stringify(event, null, 2));
+          };
+
+  CentralEventBusSubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${CentralEventBusSubscriberFunction}
+
+  CentralEventBusSubscriberFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: CentralEventBusSubscriberFunction
+      Principal: events.amazonaws.com
+      SourceArn:
+        Fn::GetAtt: CentralEventBusRule.Arn
+
+  # CloudTrail resources
+  OrganizationTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: CentralLogBucketPolicy
+    Properties:
+      TrailName: OrganizationTrail
+      IsLogging: false
+      S3BucketName:
+        Ref: CentralLogBucket
+      IncludeGlobalServiceEvents: true
+      EnableLogFileValidation: true
+      EventSelectors:
+        - IncludeManagementEvents: true
+          ExcludeManagementEventSources:
+            - kms.amazonaws.com
+            - rdsdata.amazonaws.com
+        - IncludeManagementEvents: false
+          DataResources:
+            - Type: AWS::Lambda::Function
+              Values:
+                - arn:aws:lambda
+      IsMultiRegionTrail: true
+      IsOrganizationTrail: true
+
+  # Config resources
+  OrganizationConfigRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: OrganizationConfigRole
+      Description: Config role for organization
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSConfigRoleForOrganizations
+
+  ConfigurationAggregator:
+    Type: AWS::Config::ConfigurationAggregator
+    Properties:
+      ConfigurationAggregatorName: ConfigurationAggregator
+      OrganizationAggregationSource:
+        AllAwsRegions: false
+        AwsRegions:
+          - ap-northeast-1
+          - us-east-1
+        RoleArn:
+          Fn::GetAtt: OrganizationConfigRole.Arn
+
+  DeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    Properties:
+      Name: DeliveryChannel
+      S3BucketName:
+        Ref: CentralLogBucket
+      SnsTopicARN:
+        Ref: CentralConfigTopic
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: One_Hour
+
+  ConfigurationRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    Properties:
+      Name: ConfigurationRecorder
+      RoleARN:
+        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig
+      RecordingGroup:
+        AllSupported: true
+        IncludeGlobalResourceTypes: true
+
+  # SSO resources
+  AdminGroup:
+    Type: AWS::IdentityStore::Group
+    Properties:
+      DisplayName: AdminGroup
+      Description: Admin group
+      IdentityStoreId:
+        Ref: IdentityStoreId
+
+  AdminPermissionSet:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      Name: AdminPermissionSet
+      Description: Admin permission set
+      InstanceArn:
+        Ref: SSOInstanceArn
+      SessionDuration: PT12H
+      ManagedPolicies:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess
+
+  AdminGroupAssignment0:
+    Type: AWS::SSO::Assignment
+    Properties:
+      InstanceArn:
+        Ref: SSOInstanceArn
+      PermissionSetArn:
+        Fn::GetAtt: AdminPermissionSet.PermissionSetArn
+      PrincipalId:
+        Fn::GetAtt: AdminGroup.GroupId
+      PrincipalType: GROUP
+      TargetId:
+        Fn::Select:
+          - 0
+          - Ref: OrganizationAccountIds
+      TargetType: AWS_ACCOUNT
+
+  AdminGroupAssignment1:
+    Type: AWS::SSO::Assignment
+    Properties:
+      InstanceArn:
+        Ref: SSOInstanceArn
+      PermissionSetArn:
+        Fn::GetAtt: AdminPermissionSet.PermissionSetArn
+      PrincipalId:
+        Fn::GetAtt: AdminGroup.GroupId
+      PrincipalType: GROUP
+      TargetId:
+        Fn::Select:
+          - 1
+          - Ref: OrganizationAccountIds
+      TargetType: AWS_ACCOUNT
+
+Outputs:
+  CentralEventBusArn:
+    Description: Central Event Bus ARN
+    Value:
+      Fn::GetAtt: CentralEventBus.Arn

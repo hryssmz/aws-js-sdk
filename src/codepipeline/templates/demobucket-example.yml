@@ -138,7 +138,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSCodeDeployRole
 
   CodeDeployApplication:
     Type: AWS::CodeDeploy::Application
@@ -450,8 +450,8 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforAWSCodeDeploy
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonEC2RoleforAWSCodeDeploy
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile

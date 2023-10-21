@@ -16,23 +16,6 @@ Resources:
             ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
 
-  # S3BucketPolicy:
-  #   Type: AWS::S3::BucketPolicy
-  #   Properties:
-  #     Bucket:
-  #       Ref: S3Bucket
-  #     PolicyDocument:
-  #       Version: "2012-10-17"
-  #       Statement:
-  #         - Sid: S3BucketAccessDeny
-  #           Effect: Deny
-  #           Principal: "*"
-  #           Action:
-  #             - s3:PutObject
-  #             - s3:DeleteObject
-  #           Resource:
-  #             - Fn::Sub: ${S3Bucket.Arn}/*
-
   S3Bucket2:
     Type: AWS::S3::Bucket
     Properties:
@@ -60,6 +43,13 @@ Resources:
               - s3:PutObject
               - s3:DeleteObject
             Resource: "*"
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: ${S3ObjectFunctionLogGroup.Arn}
 
   S3ObjectFunctionRole:
     Type: AWS::IAM::Role
@@ -76,7 +66,6 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: S3ObjectFunctionPolicy
 
   S3ObjectFunction:
@@ -84,7 +73,7 @@ Resources:
     Properties:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-S3ObjectFunction
-      Description: AMI lookup function
+      Description: S3 object function
       Role:
         Fn::GetAtt: S3ObjectFunctionRole.Arn
       Architectures:
@@ -152,7 +141,6 @@ Resources:
                 */
             - |
               const https = require("https");
-              const url = require("url");
               const {
                 DeleteObjectCommand,
                 PutObjectCommand,
@@ -167,7 +155,7 @@ Resources:
                 status,
                 data,
                 physicalResourceId,
-                noEcho
+                noEcho,
               ) => {
                 const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
                 const body = serialize({
@@ -180,30 +168,25 @@ Resources:
                   LogicalResourceId,
                   NoEcho: noEcho || false,
                 });
-                console.log(`RESPONSE BODY: ${body}`);
 
-                const { hostname, path } = url.parse(ResponseURL);
+                const { hostname, pathname, search } = new URL(ResponseURL);
+                const path = `${pathname}${search}`;
                 const headers = {
                   "Content-Type": "application/json",
                   "Content-Length": body.length,
                 };
-                console.log("SENDING RESPONSE...");
 
                 return await new Promise((resolve, reject) => {
                   const req = https.request(
                     { hostname, port: 443, path, method: "PUT", headers },
                     res => {
-                      console.log(`STATUS: ${res.statusCode}`);
-                      console.log(`HEADERS: ${serialize(res.headers)}`);
                       res.on("data", chunk => {
-                        const body = JSON.parse(chunk.toString());
-                        console.log(`BODY: ${serialize(body)}`);
+                        const body = chunk.toString();
                         resolve(body);
                       });
-                    }
+                    },
                   );
                   req.on("error", e => {
-                    console.log(`problem with request: ${e.message}`);
                     reject(e.message);
                   });
                   req.write(body);
@@ -211,35 +194,31 @@ Resources:
                 });
               };
 
-              const putObject = async (Bucket, Key, Body) => {
-                const client = new S3Client({});
-                const command = new PutObjectCommand({ Bucket, Key, Body });
-                return await client.send(command);
-              };
-
-              const deleteObject = async (Bucket, Key) => {
-                const client = new S3Client({});
-                const command = new DeleteObjectCommand({ Bucket, Key });
-                return await client.send(command);
-              };
-
               exports.handler = async (event, context) => {
-                console.log(`REQUEST RECEIVED: ${serialize(event)}`);
+                console.log(serialize(event));
+                const client = new S3Client({});
                 const { ResourceProperties } = event;
-                const { Bucket, Key, Body } = ResourceProperties;
+                const { Bucket, Key, Body, ContentType, Base64 } = ResourceProperties;
 
                 try {
                   if (event.RequestType === "Create" || event.RequestType === "Update") {
-                    await putObject(Bucket, Key, Body);
+                    const command = new PutObjectCommand({
+                      Bucket,
+                      Key,
+                      Body: Base64 ? Buffer.from(Body, "base64") : Body,
+                      ContentType,
+                    });
+                    await client.send(command);
                     return await sendResponse(
                       event,
                       context,
                       "SUCCESS",
-                      { Bucket, Key, Body },
-                      `s3://${Bucket}/${Key}`
+                      { Bucket, Key },
+                      `s3://${Bucket}/${Key}`,
                     );
                   } else if (event.RequestType === "Delete") {
-                    await deleteObject(Bucket, Key).catch(console.error);
+                    const command = new DeleteObjectCommand({ Bucket, Key });
+                    await client.send(command).catch(console.error);
                     return await sendResponse(event, context, "SUCCESS");
                   } else {
                     throw new Error(`Invalid RequestType: ${event.RequestType}`);
@@ -254,7 +233,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName:
-        Fn::Sub: /aws/lambda/${S3ObjectFunction}
+        Fn::Sub: /aws/lambda/${AWS::StackName}-S3ObjectFunction
 
   IndexHtmlObject:
     Type: AWS::CloudFormation::CustomResource
@@ -264,6 +243,7 @@ Resources:
       Bucket:
         Ref: S3Bucket
       Key: index.html
+      ContentType: text/html
       Body: <h1>Hello World</h1>
 
   # REST API
@@ -459,7 +439,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
   PutRootFunction:
     Type: AWS::Serverless::Function
@@ -496,24 +476,3 @@ Resources:
     Properties:
       LogGroupName:
         Fn::Sub: /aws/lambda/${PutRootFunction}
-
-# Outputs:
-#   IndexHtmlObjectUri:
-#     Description: URI for IndexHtmlObject
-#     Value:
-#       Ref: IndexHtmlObject
-
-#   IndexHtmlObjectBucket:
-#     Description: Bucket for IndexHtmlObject
-#     Value:
-#       Fn::GetAtt: IndexHtmlObject.Bucket
-
-#   IndexHtmlObjectKey:
-#     Description: Key for IndexHtmlObject
-#     Value:
-#       Fn::GetAtt: IndexHtmlObject.Key
-
-#   IndexHtmlObjectBody:
-#     Description: Body for IndexHtmlObject
-#     Value:
-#       Fn::GetAtt: IndexHtmlObject.Body

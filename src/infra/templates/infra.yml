@@ -1,41 +1,51 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Transform: AWS::Serverless-2016-10-31
 Description: Infra stack
 
 Parameters:
-  # IAM parameters
+  # Generic parameters
   AccountAlias:
     Type: String
     Description: Account alias name
     Default: hryssmz
 
-  # SSO parameters (require SSO to be enabled)
-  SSOInstanceArn:
+  ManagementAccountId:
     Type: String
-    Description: SSO Instance ARN
-    Default: arn:aws:sso:::instance/ssoins-775850417ae45fb7
+    Description: Management account ID
+    Default: "512667299293"
 
+  # SSO parameters
   IdentityStoreId:
     Type: String
     Description: Identity store ID
     Default: d-95676dc1f8
 
-  SSOAccountIds:
+  # Organizations parameters
+  DelegatedAdminAccountIds:
     Type: CommaDelimitedList
-    Description: List of SSO target account IDs
-    Default: 512667299293,343562251096,,229660767790,719118049436
+    Description: List of delegated admin account IDs
+    Default: "343562251096"
 
-Conditions:
-  IsHomeRegion:
-    Fn::Equals:
-      - Ref: AWS::Region
-      - ap-northeast-1
+Rules:
+  TestTokyo:
+    Assertions:
+      - AssertDescription: Only ap-northeast-1 is allowed
+        Assert:
+          Fn::Equals:
+            - ap-northeast-1
+            - Ref: AWS::Region
+
+  TestManagementAccount:
+    Assertions:
+      - AssertDescription: Only management account is allowed
+        Assert:
+          Fn::Equals:
+            - Ref: ManagementAccountId
+            - Ref: AWS::AccountId
 
 Resources:
   # S3 resources
   Bucket:
     Type: AWS::S3::Bucket
-    Condition: IsHomeRegion
     Properties:
       BucketName:
         Ref: AccountAlias
@@ -45,92 +55,46 @@ Resources:
             ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
 
-  SamCliSourceBucket:
-    Type: AWS::S3::Bucket
+  # IAM resources
+  CodeCommitUser:
+    Type: AWS::IAM::User
     Properties:
-      BucketName:
-        Fn::Sub: sam-cli-source-${AccountAlias}-${AWS::Region}
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - BucketKeyEnabled: true
-            ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+      UserName: CodeCommitUser
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AWSCodeCommitPowerUser
 
-  SamCliSourceBucketPolicy:
-    Type: AWS::S3::BucketPolicy
+  # Organizations resources
+  OrganizationsResourcePolicy:
+    Type: AWS::Organizations::ResourcePolicy
     Properties:
-      Bucket:
-        Ref: SamCliSourceBucket
-      PolicyDocument:
+      Content:
         Version: "2012-10-17"
         Statement:
-          - Effect: Allow
+          - Sid: OrganizationsReadPermissions
+            Effect: Allow
             Principal:
-              Service: serverlessrepo.amazonaws.com
+              AWS:
+                Ref: DelegatedAdminAccountIds
             Action:
-              - s3:GetObject
-            Resource:
-              - Fn::Sub: ${SamCliSourceBucket.Arn}/*
-            Condition:
-              StringEquals:
-                aws:SourceAccount:
-                  Ref: AWS::AccountId
-
-  # SSO resources
-  AdminGroup:
-    Type: AWS::IdentityStore::Group
-    Condition: IsHomeRegion
-    Properties:
-      DisplayName: AdminGroup
-      Description: Admin group
-      IdentityStoreId:
-        Ref: IdentityStoreId
-
-  AdminPermissionSet:
-    Type: AWS::SSO::PermissionSet
-    Condition: IsHomeRegion
-    Properties:
-      Name: AdminPermissionSet
-      Description: Admin permission set
-      InstanceArn:
-        Ref: SSOInstanceArn
-      SessionDuration: PT12H
-      ManagedPolicies:
-        - arn:aws:iam::aws:policy/AdministratorAccess
-
-  AdminGroupAssignment:
-    Type: AWS::SSO::Assignment
-    Condition: IsHomeRegion
-    Properties:
-      InstanceArn:
-        Ref: SSOInstanceArn
-      PermissionSetArn:
-        Fn::GetAtt: AdminPermissionSet.PermissionSetArn
-      PrincipalId:
-        Fn::GetAtt: AdminGroup.GroupId
-      PrincipalType: GROUP
-      TargetId:
-        Fn::Select:
-          - 0
-          - Ref: SSOAccountIds
-      TargetType: AWS_ACCOUNT
-
-  AdminGroupAssignment2:
-    Type: AWS::SSO::Assignment
-    Condition: IsHomeRegion
-    Properties:
-      InstanceArn:
-        Ref: SSOInstanceArn
-      PermissionSetArn:
-        Fn::GetAtt: AdminPermissionSet.PermissionSetArn
-      PrincipalId:
-        Fn::GetAtt: AdminGroup.GroupId
-      PrincipalType: GROUP
-      TargetId:
-        Fn::Select:
-          - 1
-          - Ref: SSOAccountIds
-      TargetType: AWS_ACCOUNT
+              - organizations:Describe*
+              - organizations:List*
+            Resource: "*"
+          - Sid: OrganizationsWritePermissions
+            Effect: Allow
+            Principal:
+              AWS:
+                Ref: DelegatedAdminAccountIds
+            Action:
+              - organizations:AttachPolicy
+              - organizations:CreatePolicy
+              - organizations:DeletePolicy
+              - organizations:DetachPolicy
+              - organizations:DisablePolicyType
+              - organizations:EnablePolicyType
+              - organizations:TagResource
+              - organizations:UntagResource
+              - organizations:UpdatePolicy
+            Resource: "*"
 
 Outputs:
   # SSO outputs

@@ -79,7 +79,7 @@ Resources:
       GroupName:
         Fn::Sub: ${AWS::StackName}-EndUserGroup-${AWS::Region}
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AWSServiceCatalogEndUserFullAccess
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AWSServiceCatalogEndUserFullAccess
 
   EndUser:
     Type: AWS::IAM::User

@@ -1,0 +1,366 @@
+# cloudfront/templates/cloudfront-waf.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Using WAF with CloudFront distribution
+
+Rules:
+  TestVirginia:
+    Assertions:
+      - AssertDescription: Only us-east-1 is allowed
+        Assert:
+          Fn::Equals:
+            - us-east-1
+            - Ref: AWS::Region
+
+Resources:
+  # S3
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: S3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+            Condition:
+              StringEquals:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}
+
+  # WAF
+  WebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-WebACL
+      Description: My CloudFront Web ACL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName:
+          Fn::Sub: ${AWS::StackName}-WebACL
+      Scope: CLOUDFRONT
+      CustomResponseBodies:
+        Forbidden:
+          ContentType: APPLICATION_JSON
+          Content: |
+            { "message": "403 Forbidden" }
+      Rules:
+        - Name:
+            Fn::Sub: ${AWS::StackName}-WebACL-Rule1
+          Priority: 1
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 403
+                CustomResponseBodyKey: Forbidden
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName:
+              Fn::Sub: ${AWS::StackName}-WebACL-Rule1
+          Statement:
+            ByteMatchStatement:
+              FieldToMatch:
+                SingleHeader:
+                  Name: User-Agent
+              PositionalConstraint: EXACTLY
+              SearchString: BotAgent
+              TextTransformations:
+                - Priority: 0
+                  Type: NONE
+        - Name:
+            Fn::Sub: ${AWS::StackName}-WebACL-Rule2
+          Priority: 2
+          OverrideAction:
+            Count: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName:
+              Fn::Sub: ${AWS::StackName}-WebACL-Rule2
+          Statement:
+            ManagedRuleGroupStatement:
+              Name: AWSManagedRulesAnonymousIpList
+              VendorName: AWS
+        - Name:
+            Fn::Sub: ${AWS::StackName}-WebACL-Rule3
+          Priority: 3
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 403
+                CustomResponseBodyKey: Forbidden
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName:
+              Fn::Sub: ${AWS::StackName}-WebACL-Rule3
+          Statement:
+            LabelMatchStatement:
+              Scope: NAMESPACE
+              Key: "awswaf:managed:aws:anonymous-ip-list:"
+
+  # CloudFront
+  NoCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-NoCachePolicy
+        Comment: CloudFront no-cache policy
+        DefaultTTL: 0
+        MinTTL: 0
+        MaxTTL: 0
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingBrotli: false
+          EnableAcceptEncodingGzip: false
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-OriginAccessControl
+        Description: Origin access control for S3
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: CloudFront distribution
+        Enabled: true
+        Origins:
+          - Id:
+              Fn::GetAtt: S3Bucket.RegionalDomainName
+            DomainName:
+              Fn::GetAtt: S3Bucket.RegionalDomainName
+            OriginAccessControlId:
+              Ref: OriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          CachePolicyId:
+            Ref: NoCachePolicy
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          TargetOriginId:
+            Fn::GetAtt: S3Bucket.RegionalDomainName
+          ViewerProtocolPolicy: allow-all
+        DefaultRootObject: index.html
+        WebACLId:
+          Fn::GetAtt: WebACL.Arn
+
+  # Custom resource
+  S3ObjectFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunctionPolicy-${AWS::Region}
+      Description: Policy for S3ObjectFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3AccessPermissions
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource: "*"
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: ${S3ObjectFunctionLogGroup.Arn}
+
+  S3ObjectFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunctionRole-${AWS::Region}
+      Description: Service role for S3ObjectFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: S3ObjectFunctionPolicy
+
+  S3ObjectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunction
+      Description: AMI lookup function
+      Role:
+        Fn::GetAtt: S3ObjectFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Timeout: 30
+      InlineCode: |
+        const https = require("https");
+        const {
+          DeleteObjectCommand,
+          PutObjectCommand,
+          S3Client,
+        } = require("@aws-sdk/client-s3");
+
+        const serialize = obj => JSON.stringify(obj, null, 2);
+
+        const sendResponse = async (
+          event,
+          context,
+          status,
+          data,
+          physicalResourceId,
+          noEcho,
+        ) => {
+          const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
+          const body = serialize({
+            Status: status,
+            Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,
+            PhysicalResourceId: physicalResourceId || context.logStreamName,
+            Data: data,
+            StackId,
+            RequestId,
+            LogicalResourceId,
+            NoEcho: noEcho || false,
+          });
+
+          const { hostname, pathname, search } = new URL(ResponseURL);
+          const path = `${pathname}${search}`;
+          const headers = {
+            "Content-Type": "application/json",
+            "Content-Length": body.length,
+          };
+
+          return await new Promise((resolve, reject) => {
+            const req = https.request(
+              { hostname, port: 443, path, method: "PUT", headers },
+              res => {
+                res.on("data", chunk => {
+                  const body = chunk.toString();
+                  resolve(body);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(body);
+            req.end();
+          });
+        };
+
+        exports.handler = async (event, context) => {
+          console.log(serialize(event));
+          const client = new S3Client({});
+          const { ResourceProperties } = event;
+          const { Bucket, Key, Body, ContentType, Base64 } = ResourceProperties;
+
+          try {
+            if (event.RequestType === "Create" || event.RequestType === "Update") {
+              const command = new PutObjectCommand({
+                Bucket,
+                Key,
+                Body: Base64 ? Buffer.from(Body, "base64") : Body,
+                ContentType,
+              });
+              await client.send(command);
+              return await sendResponse(
+                event,
+                context,
+                "SUCCESS",
+                { Bucket, Key },
+                `s3://${Bucket}/${Key}`,
+              );
+            } else if (event.RequestType === "Delete") {
+              const command = new DeleteObjectCommand({ Bucket, Key });
+              await client.send(command).catch(console.error);
+              return await sendResponse(event, context, "SUCCESS");
+            } else {
+              throw new Error(`Invalid RequestType: ${event.RequestType}`);
+            }
+          } catch (error) {
+            console.error(error);
+            return await sendResponse(event, context, "FAILED", {});
+          }
+        };
+
+  S3ObjectFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-S3ObjectFunction
+
+  IndexHtmlObject:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: S3ObjectFunction.Arn
+      Bucket:
+        Ref: S3Bucket
+      Key: index.html
+      ContentType: text/html
+      Body: |
+        <h1>Hello World!</h1>
+
+Outputs:
+  DistributionDnsName:
+    Description: Distribution domain name
+    Value:
+      Fn::GetAtt: Distribution.DomainName
+
+  CurlCommand1:
+    Description: Sample curl command 1
+    Value:
+      Fn::Sub: >
+        curl -isSL -H "User-Agent: BotAgent" https://${Distribution.DomainName}/index.html
+
+  CurlCommand2:
+    Description: Sample curl command 2
+    Value:
+      Fn::Sub: >
+        curl -isSL https://${Distribution.DomainName}/index.html

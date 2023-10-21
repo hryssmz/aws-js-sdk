@@ -31,8 +31,8 @@ Resources:
               StringEquals:
                 sts:ExternalId: elasticbeanstalk
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkService
-        - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSElasticBeanstalkService
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth
 
   EC2InstanceRole:
     Type: AWS::IAM::Role
@@ -49,9 +49,9 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
-        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier
-        - arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AWSElasticBeanstalkWebTier
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AWSElasticBeanstalkWorkerTier
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -99,6 +99,9 @@ Resources:
         Name: WebServer
         Type: Standard
       OptionSettings:
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: EnvironmentType
+          Value: LoadBalanced
         - Namespace: aws:autoscaling:asg
           OptionName: Availability Zones
           Value: Any 2

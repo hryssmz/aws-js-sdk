@@ -1,0 +1,315 @@
+# awsconfig/templates/awsconfig-org.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Enable AWS Config for Organizations
+
+Parameters:
+  StackSetName:
+    Type: String
+    Description: Stack set name
+    Default: awsconfig-org
+
+  OrganizationAccountIds:
+    Type: CommaDelimitedList
+    Description: List of account IDs in organization
+    Default: 512667299293,343562251096,196486007951,229660767790,719118049436
+
+  ManagementAccountId:
+    Type: String
+    Description: Management account ID
+    Default: "512667299293"
+
+  CentralRegion:
+    Type: String
+    Description: Region to deploy central resources
+    Default: ap-northeast-1
+
+Conditions:
+  IsVirginiaCondition:
+    Fn::Equals:
+      - Ref: AWS::Region
+      - us-east-1
+
+  IsManagementAccountCondition:
+    Fn::Equals:
+      - Ref: AWS::AccountId
+      - Ref: ManagementAccountId
+
+  IsMemberAccountCondition:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: AWS::AccountId
+          - Ref: ManagementAccountId
+
+  CreateCenterResourceCondition:
+    Fn::And:
+      - Condition: IsManagementAccountCondition
+      - Fn::Equals:
+          - Ref: AWS::Region
+          - Ref: CentralRegion
+
+Resources:
+  # S3
+  CentralLogBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateCenterResourceCondition
+    Properties:
+      BucketName:
+        Fn::Sub: ${StackSetName}-centrallogbucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  CentralLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateCenterResourceCondition
+    Properties:
+      Bucket:
+        Ref: CentralLogBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AWSConfigBucketReadPermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+              - s3:ListBucket
+            Resource:
+              - Fn::GetAtt: CentralLogBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: OrganizationAccountIds
+          - Sid: AWSConfigObjectWritePermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${CentralLogBucket.Arn}/AWSLogs/*/Config/*
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: OrganizationAccountIds
+                s3:x-amz-acl: bucket-owner-full-control
+          - Sid: BucketAccessDeny
+            Action:
+              - s3:*
+            Effect: Deny
+            Principal: "*"
+            Resource:
+              - Fn::GetAtt: CentralLogBucket.Arn
+              - Fn::Sub: ${CentralLogBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  # SNS
+  CentralConfigTopic:
+    Type: AWS::SNS::Topic
+    Condition: CreateCenterResourceCondition
+    Properties:
+      TopicName:
+        Fn::Sub: ${StackSetName}-CentralConfigTopic
+      DisplayName: Central AWS Config Notification Topic
+
+  CentralConfigTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Condition: CreateCenterResourceCondition
+    Properties:
+      Topics:
+        - Ref: CentralConfigTopic
+      PolicyDocument:
+        Statement:
+          - Sid: SNSAccessPermissions
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - sns:Publish
+            Resource:
+              - Ref: CentralConfigTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: OrganizationAccountIds
+
+  CentralConfigTopicSubscriberFunctionRole:
+    Type: AWS::IAM::Role
+    Condition: CreateCenterResourceCondition
+    Properties:
+      RoleName:
+        Fn::Sub: ${StackSetName}-CentralConfigTopicSubscriberFunctionRole
+      Description: Service role for CentralConfigTopicSubscriberFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  CentralConfigTopicSubscriberFunction:
+    Type: AWS::Lambda::Function
+    Condition: CreateCenterResourceCondition
+    Properties:
+      FunctionName:
+        Fn::Sub: ${StackSetName}-CentralConfigTopicSubscriberFunction
+      Description: Subscriber function for the central Config topic
+      Role:
+        Fn::GetAtt: CentralConfigTopicSubscriberFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Code:
+        ZipFile: |
+          exports.handler = async event => {
+            const { Records } = event;
+            const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
+              JSON.parse(Message)
+            );
+            records.forEach(record => {
+              console.log(JSON.stringify(record, null, 2));
+            });
+            return records;
+          };
+
+  CentralConfigTopicSubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: CreateCenterResourceCondition
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${CentralConfigTopicSubscriberFunction}
+
+  CentralConfigTopicSubscriberFunctionSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: CreateCenterResourceCondition
+    Properties:
+      Protocol: lambda
+      Endpoint:
+        Fn::GetAtt: CentralConfigTopicSubscriberFunction.Arn
+      TopicArn:
+        Ref: CentralConfigTopic
+
+  CentralConfigTopicSubscriberFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Condition: CreateCenterResourceCondition
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: CentralConfigTopicSubscriberFunction
+      Principal: sns.amazonaws.com
+      SourceArn:
+        Ref: CentralConfigTopic
+
+  # Config
+  DeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    Condition: IsMemberAccountCondition
+    Properties:
+      Name:
+        Ref: StackSetName
+      S3BucketName:
+        Fn::Sub: ${StackSetName}-centrallogbucket-${CentralRegion}
+      SnsTopicARN:
+        Fn::Sub: arn:${AWS::Partition}:sns:${CentralRegion}:${ManagementAccountId}:${StackSetName}-CentralConfigTopic
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: One_Hour
+
+  ConfigurationRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    Condition: IsMemberAccountCondition
+    Properties:
+      Name:
+        Ref: StackSetName
+      RoleARN:
+        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig
+      RecordingGroup:
+        AllSupported: true
+        IncludeGlobalResourceTypes:
+          Fn::If:
+            - IsVirginiaCondition
+            - true
+            - false
+
+  S3BucketLevelPublicAccessProhibitedRule:
+    Type: AWS::Config::ConfigRule
+    Condition: IsMemberAccountCondition
+    Properties:
+      ConfigRuleName:
+        Fn::Sub: ${StackSetName}-S3BucketLevelPublicAccessProhibitedRule
+      Description: s3-bucket-level-public-access-prohibited
+      EvaluationModes:
+        - Mode: DETECTIVE
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::S3::Bucket
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_LEVEL_PUBLIC_ACCESS_PROHIBITED
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Condition: IsMemberAccountCondition
+    Properties:
+      BucketName:
+        Fn::Sub: ${StackSetName}-s3bucket-${AWS::Region}-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  AutomationAssumeRole:
+    Type: AWS::IAM::Role
+    Condition: IsMemberAccountCondition
+    Properties:
+      RoleName:
+        Fn::Sub: ${StackSetName}-AutomationAssumeRole-${AWS::Region}
+      Description: Service role for Automation
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ssm.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-execution/*
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonSSMAutomationRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonS3FullAccess
+
+  S3BucketPublicAccessBlockRemediationConfiguration:
+    Type: AWS::Config::RemediationConfiguration
+    Condition: IsMemberAccountCondition
+    Properties:
+      ConfigRuleName:
+        Ref: S3BucketLevelPublicAccessProhibitedRule
+      TargetType: SSM_DOCUMENT
+      TargetId: AWSConfigRemediation-ConfigureS3BucketPublicAccessBlock
+      TargetVersion: 2
+      Parameters:
+        AutomationAssumeRole:
+          StaticValue:
+            Values:
+              - Fn::GetAtt: AutomationAssumeRole.Arn
+        BucketName:
+          ResourceValue:
+            Value: RESOURCE_ID
+      Automatic: true
+      MaximumAutomaticAttempts: 3
+      RetryAttemptSeconds: 20

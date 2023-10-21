@@ -1,0 +1,298 @@
+# resourcegroups/templates/shared-prefixlist.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Shared PrefixList StackSet
+
+Parameters:
+  OrganizationId:
+    Type: String
+    Description: Organization ID
+    Default: o-wz1cmd48gp
+
+  ManagementAccountId:
+    Type: String
+    Description: Management account ID
+    Default: "512667299293"
+
+  StackSetName:
+    Type: String
+    Description: Stack set name
+    Default: shared-prefixlist
+
+  PrefixListCidrs:
+    Type: CommaDelimitedList
+    Description: Prefix list CIDRs
+    Default: 60.87.244.169/32
+
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
+
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDRs
+    Default: 172.20.0.0/20,172.20.16.0/20
+
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
+
+  SharedPrefixListId:
+    Type: String
+    Description: Shared Prefix list ID
+    Default: ""
+
+Conditions:
+  IsManagementAccountCondition:
+    Fn::Equals:
+      - Ref: AWS::AccountId
+      - Ref: ManagementAccountId
+
+  IsMemberAccountCondition:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: AWS::AccountId
+          - Ref: ManagementAccountId
+
+  HasSharedPrefixListCondition:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: SharedPrefixListId
+          - ""
+
+  CreateEC2ResourceCondition:
+    Fn::And:
+      - Condition: IsMemberAccountCondition
+      - Condition: HasSharedPrefixListCondition
+
+Resources:
+  # RAM
+  PrefixList:
+    Type: AWS::EC2::PrefixList
+    Condition: IsManagementAccountCondition
+    Properties:
+      PrefixListName:
+        Fn::Sub: ${StackSetName}-PrefixList
+      MaxEntries: 3
+      AddressFamily: IPv4
+      Entries:
+        - Description: My PrefixList CIDR 0
+          Cidr:
+            Fn::Select:
+              - 0
+              - Ref: PrefixListCidrs
+        - Description: VPC CIDR
+          Cidr:
+            Ref: VPCCidr
+      Tags:
+        - Key: Name
+          Value: PrefixList
+
+  ResourceShare:
+    Type: AWS::RAM::ResourceShare
+    Condition: IsManagementAccountCondition
+    Properties:
+      Name:
+        Fn::Sub: ${StackSetName}-ResourceShare
+      ResourceArns:
+        - Fn::GetAtt: PrefixList.Arn
+      PermissionArns:
+        - arn:aws:ram::aws:permission/AWSRAMDefaultPermissionPrefixList
+      Principals:
+        - Fn::Sub: arn:${AWS::Partition}:organizations::${AWS::AccountId}:organization/${OrganizationId}
+
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Condition: IsMemberAccountCondition
+    Properties:
+      CidrBlock:
+        Ref: VPCCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  Subnet0:
+    Type: AWS::EC2::Subnet
+    Condition: IsMemberAccountCondition
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet0
+
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Condition: IsMemberAccountCondition
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet1
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: IsMemberAccountCondition
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: RouteTable
+
+  Subnet0RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: IsMemberAccountCondition
+    Properties:
+      SubnetId:
+        Ref: Subnet0
+      RouteTableId:
+        Ref: RouteTable
+
+  Subnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: IsMemberAccountCondition
+    Properties:
+      SubnetId:
+        Ref: Subnet1
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Condition: IsMemberAccountCondition
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Condition: IsMemberAccountCondition
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    Condition: IsMemberAccountCondition
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  # EC2
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: CreateEC2ResourceCondition
+    Properties:
+      GroupName:
+        Fn::Sub: ${StackSetName}-EC2SecurityGroup
+      GroupDescription: EC2 security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourcePrefixListId:
+            Ref: SharedPrefixListId
+      Tags:
+        - Key: Name
+          Value: EC2SecurityGroup
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Condition: IsMemberAccountCondition
+    Properties:
+      RoleName:
+        Fn::Sub: ${StackSetName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: IsMemberAccountCondition
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${StackSetName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Condition: CreateEC2ResourceCondition
+    Properties:
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroupIds:
+        - Ref: EC2SecurityGroup
+      SubnetId:
+        Ref: Subnet0
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            dnf update -y
+            dnf install -y httpd
+            echo "<h1>Hello World</h1>" > /var/www/html/index.html
+            TOKEN=`curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
+            INSTANCE_ID=`curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id`
+            echo "<p>Instance ID: $INSTANCE_ID</p>" >> /var/www/html/index.html
+            systemctl start httpd
+            systemctl enable httpd
+            usermod -a -G apache ec2-user
+            chown -R ec2-user:apache /var/www
+            chmod 2775 /var/www
+            find /var/www -type d -exec chmod 2775 {} \;
+            find /var/www -type f -exec chmod 0664 {} \;
+      Tags:
+        - Key: Name
+          Value: EC2Instance

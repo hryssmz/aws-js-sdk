@@ -1,0 +1,245 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  GeneratePresignedUrlFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-GeneratePresignedUrlFunctionPolicy-${AWS::Region}
+      Description: Execution policy for GeneratePresignedUrlFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3AccessPermissions
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+
+  GeneratePresignedUrlFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-GeneratePresignedUrlFunctionRole-${AWS::Region}
+      Description: Service role for GeneratePresignedUrlFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: GeneratePresignedUrlFunctionPolicy
+
+  GeneratePresignedUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-GeneratePresignedUrlFunction
+      Description: Generate presigned URL
+      Role:
+        Fn::GetAtt: GeneratePresignedUrlFunctionRole.Arn
+      Environment:
+        Variables:
+          BUCKET:
+            Ref: S3Bucket
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      InlineCode: |
+        const {
+          GetObjectCommand,
+          PutObjectCommand,
+          S3Client,
+        } = require("@aws-sdk/client-s3");
+        const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+
+        exports.handler = async event => {
+          const bucket = process.env.BUCKET;
+          const { key, uploadKey } = event;
+          const client = new S3Client();
+          const url = await getSignedUrl(
+            client,
+            new GetObjectCommand({ Bucket: bucket, Key: key }),
+            { expiresIn: 3600 },
+          );
+          const uploadUrl = await getSignedUrl(
+            client,
+            new PutObjectCommand({ Bucket: bucket, Key: uploadKey }),
+            { expiresIn: 3600 },
+          );
+          return { url, uploadUrl };
+        };
+
+  GeneratePresignedUrlFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${GeneratePresignedUrlFunction}
+
+  NodejsClientFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-NodejsClientFunctionRole-${AWS::Region}
+      Description: Service role for NodejsClientFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  NodejsClientFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-NodejsClientFunction
+      Description: Node.js client
+      Role:
+        Fn::GetAtt: NodejsClientFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      InlineCode: |
+        const https = require("node:https");
+
+        exports.handler = async event => {
+          const buffer = await new Promise((resolve, reject) => {
+            const url = new URL(event.url);
+            const req = https.request(
+              {
+                hostname: url.hostname,
+                path: url.pathname + url.search,
+                method: "GET",
+              },
+              res => {
+                const chunks = [];
+                res.on("data", chunk => {
+                  chunks.push(chunk);
+                });
+                res.on("error", e => {
+                  reject(e.message);
+                });
+                res.on("end", () => {
+                  resolve(Buffer.concat(chunks));
+                });
+              },
+            );
+            req.end();
+          });
+          const body = await new Promise((resolve, reject) => {
+            const url = new URL(event.uploadUrl);
+            const req = https.request(
+              {
+                hostname: url.hostname,
+                path: url.pathname + url.search,
+                method: "PUT",
+                headers: {
+                  "Content-Type": "application/x-www-form-urlencoded",
+                  "Content-Length": Buffer.byteLength(buffer),
+                },
+              },
+              res => {
+                const chunks = [];
+                res.on("data", chunk => {
+                  chunks.push(chunk);
+                });
+                res.on("error", e => {
+                  reject(e.message);
+                });
+                res.on("end", () => {
+                  resolve(Buffer.concat(chunks).toString());
+                });
+              },
+            );
+            req.write(buffer);
+            req.end();
+          });
+          return { body };
+        };
+
+  NodejsClientFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${NodejsClientFunction}
+
+  PythonClientFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-PythonClientFunctionRole-${AWS::Region}
+      Description: Service role for PythonClientFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  PythonClientFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-PythonClientFunction
+      Description: Python client
+      Role:
+        Fn::GetAtt: PythonClientFunctionRole.Arn
+      Handler: index.handler
+      Runtime: python3.9
+      Architectures:
+        - arm64
+      InlineCode: |
+        from typing import Any
+        from urllib.request import Request, urlopen
+
+
+        def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+            url = event["url"]
+            with urlopen(url) as res:
+                data = res.fp.read()
+
+            req = Request(
+                url=event["uploadUrl"],
+                data=data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                method="PUT",
+            )
+            with urlopen(req) as res:
+                body = res.fp.read()
+
+            return {"body": body}
+
+  PythonClientFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${PythonClientFunction}

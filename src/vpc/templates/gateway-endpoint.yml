@@ -193,7 +193,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/ReadOnlyAccess
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/ReadOnlyAccess
 
   PrivateInstanceProfile:
     Type: AWS::IAM::InstanceProfile

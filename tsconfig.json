@@ -10,6 +10,6 @@
     "rootDir": "./src",
     "outDir": "./dist"
   },
-  "include": ["./src", "main.js", "a.js"],
+  "include": ["./src"],
   "exclude": ["node_modules"]
 }

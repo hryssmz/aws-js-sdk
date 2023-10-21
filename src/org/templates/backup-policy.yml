@@ -1,0 +1,159 @@
+# org/templates/backup-policy.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Backup policy StackSet
+
+Parameters:
+  DemoOuId:
+    Type: String
+    Description: Demo OU ID
+    Default: ou-o8rb-uo9555wh
+
+  BackupVaultName:
+    Type: String
+    Description: Backup vault name
+    Default: DemoBackupVault
+
+  BackupRoleName:
+    Type: String
+    Description: Backup role name
+    Default: DemoBackupRole
+
+  ManagementAccountId:
+    Type: String
+    Description: Management account ID
+    Default: "512667299293"
+
+  StackSetName:
+    Type: String
+    Description: Stack set name
+    Default: backup-policy
+
+Conditions:
+  IsTokyoCondition:
+    Fn::Equals:
+      - Ref: AWS::Region
+      - ap-northeast-1
+
+  IsManagementAccountCondition:
+    Fn::Equals:
+      - Ref: AWS::AccountId
+      - Ref: ManagementAccountId
+
+  IsMemberAccountCondition:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: AWS::AccountId
+          - Ref: ManagementAccountId
+
+  CreateBackupRoleCondition:
+    Fn::And:
+      - Condition: IsTokyoCondition
+      - Condition: IsMemberAccountCondition
+
+Resources:
+  # AWS Organizations
+  BackupPolicy:
+    Type: AWS::Organizations::Policy
+    Condition: IsManagementAccountCondition
+    Properties:
+      Name: BackupPolicy
+      Description: Backup policy
+      Type: BACKUP_POLICY
+      TargetIds:
+        - Ref: DemoOuId
+      Content:
+        plans:
+          DynamoDBBackupPlan:
+            rules:
+              Rule1:
+                schedule_expression:
+                  "@@assign": cron(0 0 * * ? *)
+                target_backup_vault_name:
+                  "@@assign":
+                    Ref: BackupVaultName
+                start_backup_window_minutes:
+                  "@@assign": 60
+                complete_backup_window_minutes:
+                  "@@assign": 120
+                lifecycle:
+                  move_to_cold_storage_after_days:
+                    "@@assign": 30
+                  delete_after_days:
+                    "@@assign": 120
+                # copy_actions: {}
+                # enable_continuous_backup:
+                #   "@@assign": true
+                recovery_point_tags:
+                  Owner:
+                    tag_key:
+                      "@@assign": Owner
+                    tag_value:
+                      "@@assign": Backup
+            regions:
+              "@@append":
+                - ap-northeast-1
+            selections:
+              tags:
+                Backup:
+                  iam_role_arn:
+                    "@@assign":
+                      Fn::Sub: arn:${AWS::Partition}:iam::$account:role/${BackupRoleName}
+                  tag_key:
+                    "@@assign": Backup
+                  tag_value:
+                    "@@assign":
+                      - Enabled
+            # advanced_backup_settings: {}
+            backup_plan_tags:
+              Owner:
+                tag_key:
+                  "@@assign": Owner
+                tag_value:
+                  "@@assign":
+                    Ref: AWS::AccountId
+
+  # AWS Backup
+  BackupVault:
+    Type: AWS::Backup::BackupVault
+    Condition: IsMemberAccountCondition
+    Properties:
+      BackupVaultName:
+        Ref: BackupVaultName
+
+  BackupRole:
+    Type: AWS::IAM::Role
+    Condition: CreateBackupRoleCondition
+    Properties:
+      RoleName:
+        Ref: BackupRoleName
+      Description: Service role for backup selection
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+
+  SimpleTable:
+    Type: AWS::DynamoDB::Table
+    Condition: IsMemberAccountCondition
+    Properties:
+      TableName:
+        Fn::Sub: ${StackSetName}-SimpleTable
+      AttributeDefinitions:
+        - AttributeName: Id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: Id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      Tags:
+        - Key: Backup
+          Value: Enabled

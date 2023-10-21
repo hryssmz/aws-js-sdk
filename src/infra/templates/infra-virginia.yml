@@ -27,27 +27,7 @@ Resources:
       HostedZoneConfig:
         Comment: My root hosted zone
 
-  # ACM
-  Certificate:
-    Type: AWS::CertificateManager::Certificate
-    Properties:
-      DomainName:
-        Ref: DomainName
-      ValidationMethod: DNS
-      DomainValidationOptions:
-        - DomainName:
-            Ref: DomainName
-          HostedZoneId:
-            Ref: HostedZone
-
 Outputs:
-  NameServers:
-    Description: Name servers for the hosted zone
-    Value:
-      Fn::Join:
-        - "\n"
-        - Fn::GetAtt: HostedZone.NameServers
-
   HostedZoneId:
     Description: Hosted zone ID
     Value:

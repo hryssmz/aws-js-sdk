@@ -16,7 +16,7 @@ Resources:
               - sts:AssumeRole
       Description: Logging role for GraphQl API
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
 
   GraphQLApi:
     Type: AWS::AppSync::GraphQLApi

@@ -1,4 +1,4 @@
-# sfn/templates/hello-world-state-machine.yml
+# sfn/templates/hello-world-state.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: HelloWorld State Machine Stack
 
@@ -41,26 +41,22 @@ Resources:
   HelloWorldStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
+      StateMachineName:
+        Fn::Sub: ${AWS::StackName}-HelloWorldStateMachine
+      StateMachineType: STANDARD
       Definition:
         Comment: A Hello World example of the Amazon States Language using Pass states
-        StartAt: Hello
+        StartAt: Intermediate
         States:
-          Hello:
+          Intermediate:
             Type: Pass
-            Next: World
-          World:
+            Parameters:
+              TmpArray.$: States.Array($.a, $.b)
+            Next: MainTask
+          MainTask:
             Type: Pass
-            Result: World
+            Parameters:
+              ForceRun.$: States.ArrayContains($.TmpArray, true)
             End: true
       RoleArn:
         Fn::GetAtt: StateMachineExecutionRole.Arn
-      StateMachineType: STANDARD
-
-Outputs:
-  HelloWorldStateMachineArn:
-    Value:
-      Ref: HelloWorldStateMachine
-
-  StateMachineExecutionRoleArn:
-    Value:
-      Fn::GetAtt: StateMachineExecutionRole.Arn

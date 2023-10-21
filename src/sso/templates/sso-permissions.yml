@@ -23,7 +23,7 @@ Resources:
       InstanceArn:
         Ref: InstanceArn
       ManagedPolicies:
-        - arn:aws:iam::aws:policy/AdministratorAccess
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess
 
   AdminGroup:
     Type: AWS::IdentityStore::Group

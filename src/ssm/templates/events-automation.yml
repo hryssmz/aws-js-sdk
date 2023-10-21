@@ -47,7 +47,7 @@ Resources:
                 aws:SourceArn:
                   Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-execution/*
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonSSMAutomationRole
 
   RunbookDocument:
     Type: AWS::SSM::Document
@@ -102,7 +102,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
   LambdaFunction:
     Type: AWS::Serverless::Function
@@ -145,7 +145,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
         - Ref: EventBridgeRulePolicy
 
   EC2InstanceProfile:
@@ -254,7 +254,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
   SubscriberFunction:
     Type: AWS::Serverless::Function

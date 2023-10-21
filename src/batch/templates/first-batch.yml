@@ -2,6 +2,19 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Getting started batch
 
+Parameters:
+  BatchComputeEnvironmentUuid:
+    Type: String
+    Description: Batch compute environment UUID
+    Default: "6c3d04ea-6a56-3df9-aac9-a564b1438e56"
+
+Conditions:
+  ECSExecShowCommandsCondition:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: BatchComputeEnvironmentUuid
+          - ""
+
 Resources:
   # VPC
   VPC:
@@ -95,7 +108,7 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
   BatchJobExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -106,9 +119,13 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Effect: Allow
+          - Sid: SSMAccessPermissions
+            Effect: Allow
             Action:
-              - s3:ListAllMyBuckets
+              - ssmmessages:CreateControlChannel
+              - ssmmessages:CreateDataChannel
+              - ssmmessages:OpenControlChannel
+              - ssmmessages:OpenDataChannel
             Resource: "*"
 
   BatchJobRole:
@@ -196,3 +213,18 @@ Resources:
             Value: 512
           - Type: VCPU
             Value: 0.25
+
+Outputs:
+  ECSExecRunTaskCommand:
+    Condition: ECSExecShowCommandsCondition
+    Description: Run task command for ECS Exec
+    Value:
+      Fn::Sub: >
+        TASK_ARN=`aws ecs run-task --cluster AWSBatch-${AWS::StackName}-BatchComputeEnvironment-${BatchComputeEnvironmentUuid} --count 1 --enable-execute-command --launch-type FARGATE --task-definition ${AWS::StackName}-JobDefinition --network-configuration '{"awsvpcConfiguration":{"subnets":["${Subnet}"],"securityGroups":["${BatchSecurityGroup}"],"assignPublicIp":"ENABLED"}}' --overrides '{"containerOverrides":[{"name":"default","command":["sleep","infinity"]}]}' --query tasks[0].taskArn --output text`; echo $TASK_ARN
+
+  ECSExecExecuteCommand:
+    Condition: ECSExecShowCommandsCondition
+    Description: Execute command for ECS Exec
+    Value:
+      Fn::Sub: >
+        aws ecs execute-command --container default --cluster AWSBatch-${AWS::StackName}-BatchComputeEnvironment-${BatchComputeEnvironmentUuid} --interactive --command /bin/bash --task "$TASK_ARN"

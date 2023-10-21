@@ -1,0 +1,202 @@
+# eventbridge/templates/event-bus-org.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Enable EventBridge rules for Organizations
+
+Parameters:
+  StackSetName:
+    Type: String
+    Description: Stack set name
+    Default: event-bus-org
+
+  CentralEventBusArn:
+    Type: String
+    Description: Central Event Bus ARN
+    Default: arn:aws:events:ap-northeast-1:512667299293:event-bus/CentralEventBus
+
+Resources:
+  # EventBridge
+  EventBridgeRulePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${StackSetName}-EventBridgeRulePolicy-${AWS::Region}
+      Description: Policy for EventBridgeRule
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - events:PutEvents
+            Resource:
+              - Ref: CentralEventBusArn
+
+  EventBridgeRuleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${StackSetName}-EventBridgeRuleRole-${AWS::Region}
+      Description: Service role for EventBridgeRule
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: EventBridgeRulePolicy
+
+  EventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name:
+        Fn::Sub: ${StackSetName}-EventBridgeRule
+      Description: EventBridge rule
+      EventPattern:
+        source:
+          - prefix: aws
+          - prefix: com
+      Targets:
+        - Id: CentralEventBus
+          Arn:
+            Ref: CentralEventBusArn
+          RoleArn:
+            Fn::GetAtt: EventBridgeRuleRole.Arn
+        - Id:
+            Ref: SubscriberFunction
+          Arn:
+            Fn::GetAtt: SubscriberFunction.Arn
+
+  SubscriberFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${StackSetName}-SubscriberFunctionRole-${AWS::Region}
+      Description: Service role for SubscriberFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SubscriberFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${StackSetName}-SubscriberFunction
+      Description: Subscriber function for EventBridge
+      Role:
+        Fn::GetAtt: SubscriberFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Code:
+        ZipFile: |
+          exports.handler = async event => {
+            console.log(JSON.stringify(event, null, 2));
+          };
+
+  SubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SubscriberFunction}
+
+  SubscriberFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: SubscriberFunction
+      Principal: events.amazonaws.com
+      SourceArn:
+        Fn::GetAtt: EventBridgeRule.Arn
+
+  # Lambda
+  PutEventsFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${StackSetName}-PutEventsFunctionPolicy-${AWS::Region}
+      Description: Policy for PutEventsFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - events:PutEvents
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/default
+
+  PutEventsFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${StackSetName}-PutEventsFunctionRole-${AWS::Region}
+      Description: Service role for PutEventsFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: PutEventsFunctionPolicy
+
+  PutEventsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${StackSetName}-PutEventsFunction
+      Description: Put events function
+      Role:
+        Fn::GetAtt: PutEventsFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Code:
+        ZipFile: |
+          const {
+            EventBridgeClient,
+            PutEventsCommand,
+          } = require("@aws-sdk/client-eventbridge");
+
+          exports.handler = async event=> {
+            const client = new EventBridgeClient();
+            const entries = [
+              {
+                Time: new Date(),
+                Source: "com.mycompany.myapp",
+                Resources: ["resource1", "resource2"],
+                DetailType: "myDetailType",
+                Detail: JSON.stringify(event),
+              },
+              {
+                Time: new Date(),
+                Source: "click.hryssmz",
+                Resources: ["resource1", "resource2"],
+                DetailType: "myDetailType",
+                Detail: JSON.stringify(event),
+              },
+            ];
+            const command = new PutEventsCommand({ Entries: entries });
+            const { Entries } = await client.send(command);
+            return Entries;
+          };
+
+  PutEventsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${PutEventsFunction}
