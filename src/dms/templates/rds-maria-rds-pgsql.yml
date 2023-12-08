@@ -1,0 +1,656 @@
+# dms/templates/rds-maria-rds-pgsql.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Migrate RDS MariaDB to RDS PostgreSQL
+
+Parameters:
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
+
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDRs
+    Default: 172.20.0.0/20,172.20.16.0/20
+
+  PrivateSubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Private subnet CIDRs
+    Default: 172.20.128.0/20,172.20.144.0/20
+
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
+
+  DBUser:
+    Type: String
+    Description: DB user
+    Default: ec2-user
+
+  DBPassword:
+    Type: String
+    Description: DB password
+    Default: password
+
+  DBName:
+    Type: String
+    Description: DB name
+    Default: wordpress-db
+
+  MariaDBAdmin:
+    Type: String
+    Description: MariaDB admin
+    Default: admin
+
+  PgSqlDBAdmin:
+    Type: String
+    Description: PostgreSQL admin
+    Default: postgres
+
+  SshCidrIp:
+    Type: String
+    Description: SSH CIDR IP block
+    AllowedPattern: \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}
+    ConstraintDescription: must be a valid CIDR block of the form x.x.x.x/x
+
+Resources:
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Ref: VPCCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  Subnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet0
+
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet1
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: RouteTable
+
+  Subnet0RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet0
+      RouteTableId:
+        Ref: RouteTable
+
+  Subnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet1
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  PrivateSubnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: PrivateSubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet0
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: PrivateSubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet1
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable
+
+  PrivateSubnet0PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet0
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  PrivateSubnet1PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet1
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  # EC2
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: EC2SecurityGroup
+
+  EC2PrefixList:
+    Type: AWS::EC2::PrefixList
+    Properties:
+      PrefixListName:
+        Fn::Sub: ${AWS::StackName}-EC2PrefixList
+      MaxEntries: 3
+      AddressFamily: IPv4
+      Entries:
+        - Description: SSH CIDR
+          Cidr:
+            Ref: SshCidrIp
+        - Description: VPC CIDR
+          Cidr:
+            Fn::GetAtt: VPC.CidrBlock
+      Tags:
+        - Key: Name
+          Value: EC2PrefixList
+
+  EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT10M
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /usr/local/bin/admin-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  mariadb -u ${MariaDBAdmin} -p'${DBPassword}' -h ${MariaDBInstance.Endpoint.Address} -P ${MariaDBInstance.Endpoint.Port} ${MariaDBAdmin}
+              mode: "000755"
+            /usr/local/bin/db-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  mariadb -u ${DBUser} -p'${DBPassword}' -h ${MariaDBInstance.Endpoint.Address} -P ${MariaDBInstance.Endpoint.Port} ${DBName}
+              mode: "000755"
+            /usr/local/bin/pgsql-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  DB_PASSWORD='${DBPassword}'
+                  PASSWORD=`python3 -c "from urllib.parse import quote; print(quote('$DB_PASSWORD', safe=''))"`
+                  psql -d postgresql://${DBUser}:$PASSWORD@${PgSqlDBInstance.Endpoint.Address}:${PgSqlDBInstance.Endpoint.Port}/${!1:-${DBName}}
+              mode: "000755"
+            /usr/local/bin/pgadmin-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  DB_PASSWORD='${DBPassword}'
+                  PASSWORD=`python3 -c "from urllib.parse import quote; print(quote('$DB_PASSWORD', safe=''))"`
+                  psql -d postgresql://${PgSqlDBAdmin}:$PASSWORD@${PgSqlDBInstance.Endpoint.Address}:${PgSqlDBInstance.Endpoint.Port}/${!1:-${PgSqlDBAdmin}}
+              mode: "000755"
+    Properties:
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroupIds:
+        - Ref: EC2SecurityGroup
+      SubnetId:
+        Ref: Subnet0
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            dnf update -y
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
+
+            dnf install -y httpd mariadb105 postgresql15
+            dnf install -y php php-devel php-fpm php-gd php-json php-mysqli php-mysqlnd
+
+            curl -sSL https://wordpress.org/latest.tar.gz | tar xzf -
+            cat <<\EOF > /tmp/wp-config.sed
+            /\bDB_NAME\b/s/database_name_here/${DBName}/
+            /\bDB_USER\b/s/username_here/${DBUser}/
+            /\bDB_PASSWORD\b/s/password_here/${DBPassword}/
+            /\bDB_HOST\b/s/localhost/${MariaDBInstance.Endpoint.Address}:${MariaDBInstance.Endpoint.Port}/
+            /\bAUTH_KEY\b/s/put your unique phrase here/my_auth_key/
+            /\bSECURE_AUTH_KEY\b/s/put your unique phrase here/my_secret_auth_key/
+            /\bLOGGED_IN_KEY\b/s/put your unique phrase here/my_logged_in_key/
+            /\bNONCE_KEY\b/s/put your unique phrase here/my_nonce_key/
+            /\bAUTH_SALT\b/s/put your unique phrase here/my_auth_salt/
+            /\bSECURE_AUTH_SALT\b/s/put your unique phrase here/my_secure_auth_salt/
+            /\bLOGGED_IN_SALT\b/s/put your unique phrase here/my_logged_in_salt/
+            /\bNONCE_SALT\b/s/put your unique phrase here/my_nonce_salt/
+            EOF
+            cat wordpress/wp-config-sample.php | sed -f /tmp/wp-config.sed > wordpress/wp-config.php
+
+            cp -r wordpress/* /var/www/html/
+            usermod -a -G apache ec2-user
+            chown -R ec2-user:apache /var/www
+            chmod 2775 /var/www
+            find /var/www -type d -exec chmod 2775 {} \;
+            find /var/www -type f -exec chmod 0664 {} \;
+
+            cat <<\EOF > /etc/httpd/conf.d/wordpress.conf
+            <Directory "/var/www/html">
+                AllowOverride All
+            </Directory>
+            EOF
+
+            systemctl enable httpd
+            systemctl start httpd
+
+            mariadb -u ${MariaDBAdmin} -p'${DBPassword}' -h ${MariaDBInstance.Endpoint.Address} -P ${MariaDBInstance.Endpoint.Port} ${MariaDBAdmin} <<\EOF
+            -- DROP DATABASE IF EXISTS `${DBName}`;
+            -- DROP USER IF EXISTS '${DBUser}';
+            CREATE USER '${DBUser}' IDENTIFIED BY '${DBPassword}';
+            CREATE DATABASE `${DBName}`;
+            GRANT ALL PRIVILEGES ON `${DBName}`.* TO '${DBUser}';
+            FLUSH PRIVILEGES;
+            EOF
+
+            DB_PASSWORD='${DBPassword}'
+            PASSWORD=`python3 -c "from urllib.parse import quote; print(quote($DB_PASSWORD, safe=''))"`
+            psql -d postgresql://${PgSqlDBAdmin}:$PASSWORD@${PgSqlDBInstance.Endpoint.Address}:${PgSqlDBInstance.Endpoint.Port} -f - <<\EOF
+            -- DROP DATABASE IF EXISTS "${DBName}";
+            CREATE ROLE "${DBUser}" WITH LOGIN PASSWORD '${DBPassword}';
+            CREATE DATABASE "${DBName}";
+            GRANT ALL PRIVILEGES ON DATABASE "wordpress-db" TO "${DBUser}";
+            EOF
+            psql -d postgresql://${PgSqlDBAdmin}:$PASSWORD@${PgSqlDBInstance.Endpoint.Address}:${PgSqlDBInstance.Endpoint.Port}/${DBName} -f - <<\EOF
+            GRANT ALL PRIVILEGES ON SCHEMA public TO "${DBUser}";
+            EOF
+
+            /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --region ${AWS::Region} --resource EC2Instance
+      Tags:
+        - Key: Name
+          Value: EC2Instance
+
+  EIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId:
+        Fn::GetAtt: EIP.AllocationId
+      InstanceId:
+        Ref: EC2Instance
+
+  # RDS
+  MariaDBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      DBParameterGroupName:
+        Fn::Sub: ${AWS::StackName}-MariaDBParameterGroup
+      Description: MariaDB parameter group
+      Family: mariadb10.6
+      Parameters:
+        binlog_checksum: NONE
+        binlog_format: ROW
+
+  PgSqlDBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      DBParameterGroupName:
+        Fn::Sub: ${AWS::StackName}-PgSqlDBParameterGroup
+      Description: PostgreSQL parameter group
+      Family: postgres13
+      Parameters:
+        session_replication_role: replica
+
+  MariaDBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-MariaDBSecurityGroup
+      GroupDescription: MariaDB security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - Description: MariaDB inbound rule
+          IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourcePrefixListId:
+            Ref: EC2PrefixList
+      Tags:
+        - Key: Name
+          Value: MariaDBSecurityGroup
+
+  PgSqlDBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-PgSqlDBSecurityGroup
+      GroupDescription: PostgreSQL security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - Description: PostgreSQL inbound rule
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourcePrefixListId:
+            Ref: EC2PrefixList
+      Tags:
+        - Key: Name
+          Value: PgSqlDBSecurityGroup
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName:
+        Fn::Sub: ${AWS::StackName}-DBSubnetGroup
+      DBSubnetGroupDescription: DB subnet group
+      SubnetIds:
+        - Ref: Subnet0
+        - Ref: Subnet1
+
+  MariaDBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBInstanceIdentifier:
+        Fn::Sub: ${AWS::StackName}-MariaDBInstance
+      Engine: mariadb
+      EngineVersion: 10.11.5
+      MasterUsername:
+        Ref: MariaDBAdmin
+      MasterUserPassword:
+        Ref: DBPassword
+      Port: 3306
+      DBName:
+        Ref: MariaDBAdmin
+      DBParameterGroupName:
+        Ref: MariaDBParameterGroup
+      DBInstanceClass: db.t3.micro
+      StorageType: gp2
+      AllocatedStorage: 20
+      BackupRetentionPeriod: 1
+      NetworkType: IPV4
+      PubliclyAccessible: true
+      DBSubnetGroupName:
+        Ref: DBSubnetGroup
+      VPCSecurityGroups:
+        - Ref: MariaDBSecurityGroup
+      CACertificateIdentifier: rds-ca-rsa4096-g1
+
+  PgSqlDBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBInstanceIdentifier:
+        Fn::Sub: ${AWS::StackName}-PgSqlDBInstance
+      Engine: postgres
+      EngineVersion: 15.4
+      MasterUsername:
+        Ref: PgSqlDBAdmin
+      MasterUserPassword:
+        Ref: DBPassword
+      Port: 5432
+      DBName:
+        Ref: PgSqlDBAdmin
+      DBParameterGroupName:
+        Ref: PgSqlDBParameterGroup
+      DBInstanceClass: db.t3.micro
+      StorageType: gp2
+      AllocatedStorage: 20
+      BackupRetentionPeriod: 0
+      NetworkType: IPV4
+      PubliclyAccessible: true
+      DBSubnetGroupName:
+        Ref: DBSubnetGroup
+      VPCSecurityGroups:
+        - Ref: PgSqlDBSecurityGroup
+      CACertificateIdentifier: rds-ca-rsa4096-g1
+
+  # DMS
+  ReplicationSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-ReplicationSecurityGroup
+      GroupDescription: DMS Replication security group
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: ReplicationSecurityGroup
+
+  ReplicationSubnetGroup:
+    Type: AWS::DMS::ReplicationSubnetGroup
+    Properties:
+      ReplicationSubnetGroupIdentifier:
+        Fn::Sub: ${AWS::StackName}-ReplicationSubnetGroup
+      ReplicationSubnetGroupDescription: Replication subnet group
+      SubnetIds:
+        - Ref: Subnet0
+        - Ref: Subnet1
+
+  ReplicationInstance:
+    Type: AWS::DMS::ReplicationInstance
+    Properties:
+      ReplicationInstanceIdentifier:
+        Fn::Sub: ${AWS::StackName}-ReplicationInstance
+      ReplicationInstanceClass: dms.t2.micro
+      AllocatedStorage: 20
+      ReplicationSubnetGroupIdentifier:
+        Ref: ReplicationSubnetGroup
+      VpcSecurityGroupIds:
+        - Ref: ReplicationSecurityGroup
+
+  SourceEndpoint:
+    Type: AWS::DMS::Endpoint
+    Properties:
+      EndpointIdentifier:
+        Fn::Sub: ${AWS::StackName}-SourceEndpoint
+      EndpointType: source
+      EngineName: mysql
+      ServerName:
+        Fn::GetAtt: MariaDBInstance.Endpoint.Address
+      Port:
+        Fn::GetAtt: MariaDBInstance.Endpoint.Port
+      Username:
+        Ref: MariaDBAdmin
+      Password:
+        Ref: DBPassword
+      DatabaseName:
+        Ref: DBName
+      SslMode: require
+
+  TargetEndpoint:
+    Type: AWS::DMS::Endpoint
+    Properties:
+      EndpointIdentifier:
+        Fn::Sub: ${AWS::StackName}-TargetEndpoint
+      EndpointType: target
+      EngineName: postgres
+      ServerName:
+        Fn::GetAtt: PgSqlDBInstance.Endpoint.Address
+      Port:
+        Fn::GetAtt: PgSqlDBInstance.Endpoint.Port
+      Username:
+        Ref: PgSqlDBAdmin
+      Password:
+        Ref: DBPassword
+      DatabaseName:
+        Ref: DBName
+      SslMode: require
+
+  ReplicationTask:
+    Type: AWS::DMS::ReplicationTask
+    Properties:
+      ReplicationTaskIdentifier:
+        Fn::Sub: ${AWS::StackName}-ReplicationTask
+      ReplicationInstanceArn:
+        Ref: ReplicationInstance
+      SourceEndpointArn:
+        Ref: SourceEndpoint
+      TargetEndpointArn:
+        Ref: TargetEndpoint
+      MigrationType: full-load-and-cdc
+      ReplicationTaskSettings: |
+        {}
+      TableMappings: |
+        {}
+
+Outputs:
+  WordPressUrl:
+    Description: WordPress URL
+    Value:
+      Fn::Sub: http://${EIP.PublicIp}
+
+  MariaDBHost:
+    Description: MariaDB host
+    Value:
+      Fn::GetAtt: MariaDBInstance.Endpoint.Address
+
+  MariaDBPort:
+    Description: MariaDB port
+    Value:
+      Fn::GetAtt: MariaDBInstance.Endpoint.Port
+
+  PgSqlDBHost:
+    Description: PostgreSQL host
+    Value:
+      Fn::GetAtt: PgSqlDBInstance.Endpoint.Address
+
+  PgSqlDBPort:
+    Description: PostgreSQL port
+    Value:
+      Fn::GetAtt: PgSqlDBInstance.Endpoint.Port

@@ -14,28 +14,10 @@ Conditions:
       - ap-northeast-1
 
 Resources:
-  # IAM
-  CrossAccountAdminRole:
-    Type: AWS::IAM::Role
-    Condition: IsTokyoCondition
-    Properties:
-      RoleName: CrossAccountAdminRole
-      Description: Service role for cross-account admin access
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              AWS:
-                Ref: TrustedAccountIds
-            Action:
-              - sts:AssumeRole
-      ManagedPolicyArns:
-        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess
-
   # Custom resources
   ServiceLinkedRoleFunctionPolicy:
     Type: AWS::IAM::ManagedPolicy
+    Condition: IsTokyoCondition
     Properties:
       ManagedPolicyName: ServiceLinkedRoleFunctionPolicy
       Description: Policy for ServiceLinkedRoleFunction
@@ -61,6 +43,7 @@ Resources:
 
   ServiceLinkedRoleFunctionRole:
     Type: AWS::IAM::Role
+    Condition: IsTokyoCondition
     Properties:
       RoleName: ServiceLinkedRoleFunctionRole
       Description: Service role for ServiceLinkedRoleFunction
@@ -77,6 +60,7 @@ Resources:
 
   ServiceLinkedRoleFunction:
     Type: AWS::Lambda::Function
+    Condition: IsTokyoCondition
     Properties:
       FunctionName: ServiceLinkedRoleFunction
       Description: Service-Linked Role resource function
@@ -222,20 +206,16 @@ Resources:
 
   ServiceLinkedRoleFunctionLogGroup:
     Type: AWS::Logs::LogGroup
+    Condition: IsTokyoCondition
     Properties:
       LogGroupName:
         Fn::Sub: /aws/lambda/ServiceLinkedRoleFunction
 
   ConfigServiceLinkedRole:
     Type: AWS::CloudFormation::CustomResource
+    Condition: IsTokyoCondition
     Properties:
       ServiceToken:
         Fn::GetAtt: ServiceLinkedRoleFunction.Arn
       AWSServiceName: config.amazonaws.com
       Description: Service-Linked Role for AWS Config.
-
-Outputs:
-  SwitchRoleURL:
-    Description: Switch role URL
-    Value:
-      Fn::Sub: https://signin.aws.amazon.com/switchrole?roleName=${CrossAccountAdminRole}&account=${AWS::AccountId}

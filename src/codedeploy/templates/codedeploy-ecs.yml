@@ -1,4 +1,4 @@
-# codepipeline/templates/ecs-sample.yml
+# codepipeline/templates/codedeploy-ecs.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: ECS sample
 

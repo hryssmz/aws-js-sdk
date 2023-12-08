@@ -5,8 +5,8 @@ import { sleep } from "../utils";
 import type { Parameter } from "@aws-sdk/client-cloudformation";
 import type { Action } from "../utils";
 
-const stackName = "lightsail-ssm";
-const templateDir = `${__dirname}/../../src/lightsail/templates`;
+const stackName = "infra-root-ou";
+const templateDir = `${__dirname}/../../src/infra/templates`;
 const templatePath = `${templateDir}/${stackName}.yml`;
 const parameters: Parameter[] = [
   // {
@@ -18,8 +18,8 @@ const parameters: Parameter[] = [
   // { ParameterKey: "InstanceType", ParameterValue: "t3.micro" },
 ];
 const organizationalUnitIds = [
-  // "r-o8rb", // root OU
-  "ou-o8rb-uo9555wh", // Demo OU
+  "r-o8rb", // root OU
+  // "ou-o8rb-uo9555wh", // Demo OU
 ];
 const suspendedAccounts = [
   "196486007951", // hryssmz3

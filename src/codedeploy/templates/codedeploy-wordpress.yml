@@ -1,4 +1,4 @@
-# codedeploy/templates/wordpress-app.yml
+# codedeploy/templates/codedeploy-wordpress.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Deploy WordPress to an Amazon EC2 instance
 

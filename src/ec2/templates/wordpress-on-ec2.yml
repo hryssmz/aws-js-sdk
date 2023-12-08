@@ -1,0 +1,173 @@
+# ec2/templates/wordpress-on-ec2.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Install WordPress on EC2 instance
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+    Default: vpc-01d5cfd2cad5314f1
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs
+    Default: subnet-00ee516fa04d610fe,subnet-0c99e2001f0ae6c0a
+
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
+
+  DBUser:
+    Type: String
+    Description: DB user
+    Default: ec2-user
+
+  DBPassword:
+    Type: String
+    Description: DB password
+    Default: P@ssw0rd
+
+  DBName:
+    Type: String
+    Description: DB name
+    Default: wordpress-db
+
+Resources:
+  # EC2
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 security group
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: EC2SecurityGroup
+
+  EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT5M
+    Properties:
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroupIds:
+        - Ref: EC2SecurityGroup
+      SubnetId:
+        Fn::Select:
+          - 0
+          - Ref: SubnetIds
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            dnf update -y
+            dnf install -y httpd mariadb105-server
+            dnf install -y php php-devel php-fpm php-gd php-json php-mysqli php-mysqlnd
+
+            curl -sSL https://wordpress.org/latest.tar.gz | tar xzf -
+            cat <<\EOF > /tmp/wp-config.sed
+            /\bDB_NAME\b/s/database_name_here/${DBName}/
+            /\bDB_USER\b/s/username_here/${DBUser}/
+            /\bDB_PASSWORD\b/s/password_here/${DBPassword}/
+            /\bAUTH_KEY\b/s/put your unique phrase here/my_auth_key/
+            /\bSECURE_AUTH_KEY\b/s/put your unique phrase here/my_secret_auth_key/
+            /\bLOGGED_IN_KEY\b/s/put your unique phrase here/my_logged_in_key/
+            /\bNONCE_KEY\b/s/put your unique phrase here/my_nonce_key/
+            /\bAUTH_SALT\b/s/put your unique phrase here/my_auth_salt/
+            /\bSECURE_AUTH_SALT\b/s/put your unique phrase here/my_secure_auth_salt/
+            /\bLOGGED_IN_SALT\b/s/put your unique phrase here/my_logged_in_salt/
+            /\bNONCE_SALT\b/s/put your unique phrase here/my_nonce_salt/
+            EOF
+            cat wordpress/wp-config-sample.php | sed -f /tmp/wp-config.sed > wordpress/wp-config.php
+
+            cp -r wordpress/* /var/www/html/
+            usermod -a -G apache ec2-user
+            chown -R ec2-user:apache /var/www
+            chmod 2775 /var/www
+            find /var/www -type d -exec chmod 2775 {} \;
+            find /var/www -type f -exec chmod 0664 {} \;
+
+            cat <<\EOF > /etc/httpd/conf.d/wordpress.conf
+            <Directory "/var/www/html">
+                AllowOverride All
+            </Directory>
+            EOF
+
+            systemctl enable httpd mariadb
+            systemctl start httpd mariadb
+
+            mariadb -u root <<\EOF
+            CREATE USER '${DBUser}'@'localhost' IDENTIFIED BY '${DBPassword}';
+            CREATE DATABASE `${DBName}`;
+            GRANT ALL PRIVILEGES ON `${DBName}`.* TO '${DBUser}'@'localhost';
+            FLUSH PRIVILEGES;
+            EOF
+
+            /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --region ${AWS::Region} --resource EC2Instance
+      Tags:
+        - Key: Name
+          Value: EC2Instance
+
+  EIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId:
+        Fn::GetAtt: EIP.AllocationId
+      InstanceId:
+        Ref: EC2Instance
+
+Outputs:
+  WordPressUrl:
+    Description: WordPress URL
+    Value:
+      Fn::Sub: http://${EIP.PublicIp}
