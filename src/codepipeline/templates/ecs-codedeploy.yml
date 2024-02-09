@@ -842,8 +842,8 @@ Resources:
         - Key: Name
           Value: WebSecurityGroup
 
-  EC2LaunchTemplate:
-    Type: AWS::EC2::LaunchTemplate
+  EC2Instance:
+    Type: AWS::EC2::Instance
     Metadata:
       AWS::CloudFormation::Init:
         config:
@@ -855,47 +855,26 @@ Resources:
                   echo ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
               mode: "000755"
     Properties:
-      LaunchTemplateName:
-        Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
-      VersionDescription: Launch template for EC2 instances
-      TagSpecifications:
-        - ResourceType: launch-template
-          Tags:
-            - Key: Name
-              Value: EC2LaunchTemplate
-      LaunchTemplateData:
-        ImageId:
-          Ref: ImageId
-        InstanceType:
-          Ref: InstanceType
-        IamInstanceProfile:
-          Name:
-            Ref: EC2InstanceProfile
-        SecurityGroups:
-          - Ref: WebSecurityGroup
-        TagSpecifications:
-          - ResourceType: instance
-            Tags:
-              - Key: Name
-                Value: EC2Instance
-        UserData:
-          Fn::Base64:
-            Fn::Sub: |
-              #!/bin/sh
-              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
-              dnf install -y docker
-              systemctl enable docker.service
-              systemctl start docker.service
-              usermod -a -G docker ec2-user
-
-  EC2Instance:
-    Type: AWS::EC2::Instance
-    Properties:
-      LaunchTemplate:
-        LaunchTemplateId:
-          Ref: EC2LaunchTemplate
-        Version:
-          Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroups:
+        - Ref: WebSecurityGroup
+      Tags:
+        - Key: Name
+          Value: EC2Instance
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
+            dnf install -y docker
+            systemctl enable docker
+            systemctl start docker
+            usermod -a -G docker ec2-user
 
 Outputs:
   ALBDNSName:

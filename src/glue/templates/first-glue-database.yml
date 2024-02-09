@@ -1,0 +1,42 @@
+# glue/templates/first-glue-database.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: First Glue database
+
+Resources:
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId:
+        Ref: AWS::AccountId
+      DatabaseInput:
+        Name:
+          Fn::Sub: ${AWS::StackName}-gluedatabase
+        Description: My glue database
+
+  GlueTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId:
+        Ref: AWS::AccountId
+      DatabaseName:
+        Ref: GlueDatabase
+      TableInput:
+        Name:
+          Fn::Sub: ${AWS::StackName}-gluetable
+        Description: My glue table
+        TableType: EXTERNAL_TABLE
+        Parameters:
+          classification: csv
+        StorageDescriptor:
+          Location: s3://crawler-public-us-west-2/flight/2016/csv/
+          InputFormat: org.apache.hadoop.mapred.TextInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
+          SerdeInfo:
+            Name: OpenCSVSerde
+            SerializationLibrary: org.apache.hadoop.hive.serde2.OpenCSVSerde
+            Parameters:
+              separatorChar: ","
+          Columns:
+            - Name: id
+              Type: string
+              Comment: ID

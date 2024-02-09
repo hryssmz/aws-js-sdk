@@ -407,8 +407,8 @@ Resources:
             chown -R ec2-user:ec2-user /home/ec2-user/myapp
             dnf install -y python python3-pip
             su -l ec2-user -c "pip install -r ~/myapp/requirements.txt"
-            systemctl enable myapp.service
-            systemctl start myapp.service
+            systemctl enable myapp
+            systemctl start myapp
 
             MAX_RETRY=20
             RETRY_INTERVAL=5

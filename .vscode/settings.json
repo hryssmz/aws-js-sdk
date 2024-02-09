@@ -1,9 +1,15 @@
 {
-  "[shellscript]": {
-    "editor.tabSize": 4
-  },
   "editor.tabSize": 2,
   "editor.defaultFormatter": "esbenp.prettier-vscode",
   "editor.formatOnSave": true,
+  "files.eol": "\n",
   "prettier.arrowParens": "avoid",
+  "isort.args": ["--settings-path", "pyproject.toml"],
+  "flake8.args": ["--config", "setup.cfg"],
+  "black-formatter.args": ["--config", "pyproject.toml"],
+  "mypy-type-checker.args": ["--config-file", "pyproject.toml"],
+  "[python]": {
+    "editor.tabSize": 2,
+    "editor.defaultFormatter": "ms-python.black-formatter"
+  }
 }

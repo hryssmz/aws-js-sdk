@@ -1,10 +1,10 @@
 #!/bin/bash
 if [ -n "$(pgrep httpd)" ]; then
-    systemctl stop http.service
+    systemctl stop http
 fi
 if [ -n "$(pgrep mysqld)" ]; then
-    systemctl stop mariadb.service
+    systemctl stop mariadb
 fi
 if [ -n "$(pgrep php-fpm)" ]; then
-    systemctl stop php-fpm.service
+    systemctl stop php-fpm
 fi

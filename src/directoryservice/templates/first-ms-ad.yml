@@ -450,47 +450,26 @@ Resources:
       Roles:
         - Ref: EC2InstanceRole
 
-  EC2LaunchTemplate:
-    Type: AWS::EC2::LaunchTemplate
-    Properties:
-      LaunchTemplateName:
-        Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
-      VersionDescription: Launch template for EC2 instances
-      TagSpecifications:
-        - ResourceType: launch-template
-          Tags:
-            - Key: Name
-              Value: EC2LaunchTemplate
-      LaunchTemplateData:
-        ImageId:
-          Ref: WindowsServerAMI
-        InstanceType:
-          Ref: InstanceType
-        KeyName:
-          Ref: KeyPair
-        IamInstanceProfile:
-          Name:
-            Ref: EC2InstanceProfile
-        SecurityGroupIds:
-          - Ref: EC2SecurityGroup
-        TagSpecifications:
-          - ResourceType: instance
-            Tags:
-              - Key: Name
-                Value: EC2Instance
-              - Key: Directory
-                Value: MicrosoftAD
-
   EC2Instance:
     Type: AWS::EC2::Instance
     Properties:
-      LaunchTemplate:
-        LaunchTemplateId:
-          Ref: EC2LaunchTemplate
-        Version:
-          Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
+      ImageId:
+        Ref: WindowsServerAMI
+      InstanceType:
+        Ref: InstanceType
+      KeyName:
+        Ref: KeyPair
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
       SubnetId:
         Ref: Subnet0
+      SecurityGroupIds:
+        - Ref: EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: EC2Instance
+        - Key: Directory
+          Value: MicrosoftAD
 
   # Directory Services
   MicrosoftAD:

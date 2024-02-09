@@ -326,10 +326,10 @@ Resources:
               /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
               dnf install -y python python3-pip
               pip install -r /myapp/requirements.txt
-              systemctl enable myapp.service
-              systemctl start myapp.service
-              systemctl enable cfn-hup.service
-              systemctl start cfn-hup.service
+              systemctl enable myapp
+              systemctl start myapp
+              systemctl enable cfn-hup
+              systemctl start cfn-hup
 
               dnf install -y amazon-cloudwatch-agent
               amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c ssm:${CloudWatchAgentConfigParameter}

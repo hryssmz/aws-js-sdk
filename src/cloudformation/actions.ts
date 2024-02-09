@@ -5,8 +5,8 @@ import { sleep } from "../utils";
 import type { Parameter } from "@aws-sdk/client-cloudformation";
 import type { Action } from "../utils";
 
-const stackName = "infra-root-ou";
-const templateDir = `${__dirname}/../../src/infra/templates`;
+const stackName = "first-glue-job";
+const templateDir = `${__dirname}/../../src/glue/templates`;
 const templatePath = `${templateDir}/${stackName}.yml`;
 const parameters: Parameter[] = [
   // {

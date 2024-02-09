@@ -1,0 +1,179 @@
+openapi: "3.0.1"
+info:
+  title: My REST API
+  version: "1.0"
+servers:
+  - url: https://{restApiId}.execute-api.{region}.amazonaws.com/{basePath}
+    variables:
+      restApiId:
+        default: hxhhn2xxx4
+      region:
+        default: ap-northeast-1
+      basePath:
+        default: dev
+paths:
+  /:
+    post:
+      operationId: StartExecution
+      summary: StartExecution API
+      description: Start execution
+      tags:
+        - StartExecution
+      requestBody:
+        description: StartExecution request body
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartExecutionRequest"
+            examples:
+              example1:
+                value:
+                  records:
+                    - order: 1
+                      id: 1a5de478-ed0e-48c2-a4b4-eaf5fc15018e
+                    - order: 2
+                      id: d73e041d-a746-414e-9f37-86416cbf77dd
+      responses:
+        "200":
+          description: 200 OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartExecutionResponse"
+              examples:
+                example1:
+                  value:
+                    executionId: 1c0a08fa-4229-421b-83d0-a43b6ccd1fa9
+          headers:
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+      x-amazon-apigateway-integration:
+        type: aws_proxy
+        uri:
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${StartExecutionFunction.Arn}/invocations
+        httpMethod: POST
+  /{execution_id}:
+    parameters:
+      - name: execution_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        examples:
+          example1:
+            value: 1c0a08fa-4229-421b-83d0-a43b6ccd1fa9
+    get:
+      operationId: DescribeExecution
+      summary: DescribeExecution API
+      description: Describe execution
+      tags:
+        - DescribeExecution
+      responses:
+        "200":
+          description: 200 OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DescribeExecutionResponse"
+              examples:
+                example1:
+                  value:
+                    status: SUCCEEDED
+                    output:
+                      results:
+                        - order: 1
+                          id: 1a5de478-ed0e-48c2-a4b4-eaf5fc15018e
+                          result: "0"
+                          executionId: 1c0a08fa-4229-421b-83d0-a43b6ccd1fa9
+                        - order: 2
+                          id: d73e041d-a746-414e-9f37-86416cbf77dd
+                          result: "0"
+                          executionId: 1c0a08fa-4229-421b-83d0-a43b6ccd1fa9
+                      executionArn: arn:aws:states:ap-northeast-1:512667299293:execution:sam-statemachine-StateMachine:1c0a08fa-4229-421b-83d0-a43b6ccd1fa9
+          headers:
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+      x-amazon-apigateway-integration:
+        type: aws_proxy
+        uri:
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DescribeExecutionFunction.Arn}/invocations
+        httpMethod: POST
+components:
+  headers:
+    Access-Control-Allow-Origin:
+      description: CORS header
+      schema:
+        type: string
+  schemas:
+    StartExecutionRequest:
+      type: object
+      required:
+        - records
+      properties:
+        records:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - order
+            properties:
+              id:
+                type: string
+                format: uuid
+              order:
+                type: integer
+                minimum: 1
+    StartExecutionResponse:
+      type: object
+      required:
+        - executionId
+      properties:
+        executionId:
+          type: string
+          format: uuid
+    DescribeExecutionResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          enum:
+            - SUCCEEDED
+            - RUNNING
+            - FAILED
+            - TIMED_OUT
+            - ABORTED
+        output:
+          type: object
+          required:
+            - results
+            - executionArn
+          properties:
+            results:
+              type: array
+              items:
+                type: object
+                required:
+                  - id
+                  - order
+                  - result
+                  - executionId
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  order:
+                    type: integer
+                    minimum: 1
+                  result:
+                    enum:
+                      - "0"
+                      - "1"
+                  executionId:
+                    type: string
+                    format: uuid
+            executionArn:
+              type: string

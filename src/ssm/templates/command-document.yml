@@ -129,8 +129,8 @@ Resources:
               #!/bin/sh
               dnf update -y
               /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
-              systemctl enable cfn-hup.service
-              systemctl start cfn-hup.service
+              systemctl enable cfn-hup
+              systemctl start cfn-hup
               /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --region ${AWS::Region} --resource AutoScalingGroup
 
   AutoScalingGroup:

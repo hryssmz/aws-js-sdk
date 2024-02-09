@@ -1,0 +1,565 @@
+# apigateway/templates/lambda-authorizer-oas.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Lambda authorizer OpenAPI specification stack
+
+Parameters:
+  Username:
+    Type: String
+    Description: User name
+    Default: hryssmz@yahoo.com
+
+  Groupname:
+    Type: String
+    Description: Group name
+    Default: admin
+
+  Password:
+    Type: String
+    Description: User password
+    Default: secret
+
+  EmailAddress:
+    Type: String
+    Description: Email address
+    Default: hryssmz@yahoo.com
+
+Resources:
+  # Cognito resources
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName:
+        Fn::Sub: ${AWS::StackName}-UserPool
+      UsernameConfiguration:
+        CaseSensitive: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 6
+          RequireNumbers: false
+          RequireSymbols: false
+          RequireUppercase: false
+          RequireLowercase: false
+      AutoVerifiedAttributes:
+        - email
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate:
+          - email
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName:
+        Fn::Sub: ${AWS::StackName}-UserPoolClient
+      UserPoolId:
+        Ref: UserPool
+      ExplicitAuthFlows:
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      ReadAttributes:
+        - email
+        - email_verified
+      WriteAttributes:
+        - email
+
+  UserPoolGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName:
+        Ref: Groupname
+      Description: User pool group
+      UserPoolId:
+        Ref: UserPool
+
+  # REST API resources
+  LambdaAuthorizerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-LambdaAuthorizerPolicy-${AWS::Region}
+      Description: Execution policy for Lambda authorizer
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - Fn::GetAtt: AuthorizerFunction.Arn
+
+  LambdaAuthorizerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-LambdaAuthorizerRole-${AWS::Region}
+      Description: Execution role for Lambda authorizer
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: LambdaAuthorizerPolicy
+
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RestApi
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      StageName: dev
+      Cors:
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: My REST API
+          version: "1.0"
+        servers:
+          - url: https://{restApiId}.execute-api.{region}.amazonaws.com/{basePath}
+            variables:
+              restApiId:
+                default: example123
+              region:
+                default: ap-northeast-1
+              basePath:
+                default: dev
+        paths:
+          /:
+            get:
+              operationId: GetRoot
+              tags:
+                - Root
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/GetRootResponse"
+                      examples:
+                        example1:
+                          value:
+                            message: Hello world!
+                  headers:
+                    Access-Control-Allow-Origin:
+                      description: Response header for CORS support
+                      schema:
+                        type: string
+              security:
+                - LambdaAuthorizer: []
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: '{ "statusCode": 200 }'
+                responses:
+                  default:
+                    statusCode: 200
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                    responseTemplates:
+                      application/json: '{ "message": "Hello world!" }'
+                passthroughBehavior: when_no_match
+        components:
+          securitySchemes:
+            LambdaAuthorizer:
+              type: apiKey
+              name: Authorization
+              in: header
+              x-amazon-apigateway-authtype: oauth2
+              x-amazon-apigateway-authorizer:
+                type: token
+                authorizerUri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthorizerFunction.Arn}/invocations
+                authorizerCredentials:
+                  Fn::GetAtt: LambdaAuthorizerRole.Arn
+          schemas:
+            GetRootResponse:
+              description: Response body for GET /
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+        x-amazon-apigateway-gateway-responses:
+          DEFAULT_4XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {
+                  "type": "$context.error.responseType",
+                  "message": "$context.error.message"
+                }
+          DEFAULT_5XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {
+                  "type": "$context.error.responseType",
+                  "message": "$context.error.message"
+                }
+
+  # Lambda resources
+  CreateUserFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-CreateUserFunctionPolicy-${AWS::Region}
+      Description: Execution policy for CreateUserFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - cognito-idp:AdminAddUserToGroup
+              - cognito-idp:AdminCreateUser
+              - cognito-idp:AdminInitiateAuth
+              - cognito-idp:AdminRespondToAuthChallenge
+            Resource:
+              - Fn::GetAtt: UserPool.Arn
+
+  CreateUserFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CreateUserFunctionRole-${AWS::Region}
+      Description: Service role for CreateUserFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: CreateUserFunctionPolicy
+
+  CreateUserFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-CreateUserFunction
+
+  CreateUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-CreateUserFunction
+      Description: Create user function
+      Role:
+        Fn::GetAtt: CreateUserFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: CreateUserFunctionLogGroup
+      Environment:
+        Variables:
+          USERNAME:
+            Ref: Username
+          PASSWORD:
+            Ref: Password
+          EMAIL_ADDRESS:
+            Ref: EmailAddress
+          GROUP_NAME:
+            Ref: UserPoolGroup
+          USER_POOL_ID:
+            Ref: UserPool
+          CLIENT_ID:
+            Ref: UserPoolClient
+      InlineCode: |
+        const {
+          AdminAddUserToGroupCommand,
+          AdminCreateUserCommand,
+          AdminInitiateAuthCommand,
+          AdminRespondToAuthChallengeCommand,
+          CognitoIdentityProviderClient,
+        } = require("@aws-sdk/client-cognito-identity-provider");
+
+        exports.handler = async () => {
+          const username = process.env.USERNAME;
+          const password = process.env.PASSWORD;
+          const email = process.env.EMAIL_ADDRESS;
+          const groupName = process.env.GROUP_NAME;
+          const userPoolId = process.env.USER_POOL_ID;
+          const clientId = process.env.CLIENT_ID;
+          const client = new CognitoIdentityProviderClient();
+
+          const adminCreateUserCommand = new AdminCreateUserCommand({
+            UserPoolId: userPoolId,
+            Username: username,
+            UserAttributes: [
+              { Name: "email", Value: email },
+              { Name: "email_verified", Value: "true" },
+            ],
+            TemporaryPassword: `temp-${password}`,
+            DesiredDeliveryMediums: ["EMAIL"],
+          });
+          await client.send(adminCreateUserCommand);
+
+          const adminAddUserToGroupCommand = new AdminAddUserToGroupCommand({
+            UserPoolId: userPoolId,
+            Username: username,
+            GroupName: groupName,
+          });
+          await client.send(adminAddUserToGroupCommand);
+
+          const adminInitiateAuthCommand = new AdminInitiateAuthCommand({
+            UserPoolId: userPoolId,
+            ClientId: clientId,
+            AuthFlow: "ADMIN_USER_PASSWORD_AUTH",
+            AuthParameters: {
+              USERNAME: username,
+              PASSWORD: `temp-${password}`,
+            },
+          });
+          const { Session, ChallengeName } = await client.send(
+            adminInitiateAuthCommand,
+          );
+
+          const adminRespondToAuthChallengeCommand =
+            new AdminRespondToAuthChallengeCommand({
+              UserPoolId: userPoolId,
+              ClientId: clientId,
+              ChallengeName,
+              ChallengeResponses: {
+                USERNAME: username,
+                NEW_PASSWORD: password,
+              },
+              Session,
+            });
+          const { AuthenticationResult } = await client.send(
+            adminRespondToAuthChallengeCommand,
+          );
+
+          const accessToken = AuthenticationResult?.AccessToken;
+          const idToken = AuthenticationResult?.IdToken;
+
+          if (accessToken !== undefined) {
+            const payload = Buffer.from(accessToken.split(".")[1], "base64").toString();
+            console.log(JSON.stringify(JSON.parse(payload), null, 2));
+          }
+
+          if (idToken !== undefined) {
+            const payload = Buffer.from(idToken.split(".")[1], "base64").toString();
+            console.log(JSON.stringify(JSON.parse(payload), null, 2));
+          }
+
+          return AuthenticationResult;
+        };
+
+  InitiateAuthFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-InitiateAuthFunctionPolicy-${AWS::Region}
+      Description: Execution policy for InitiateAuthFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - cognito-idp:AdminInitiateAuth
+            Resource:
+              - Fn::GetAtt: UserPool.Arn
+
+  InitiateAuthFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-InitiateAuthFunctionRole-${AWS::Region}
+      Description: Service role for InitiateAuthFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: InitiateAuthFunctionPolicy
+
+  InitiateAuthFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-InitiateAuthFunction
+
+  InitiateAuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-InitiateAuthFunction
+      Description: Initiate auth function
+      Role:
+        Fn::GetAtt: InitiateAuthFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: InitiateAuthFunctionLogGroup
+      Environment:
+        Variables:
+          USERNAME:
+            Ref: Username
+          PASSWORD:
+            Ref: Password
+          USER_POOL_ID:
+            Ref: UserPool
+          CLIENT_ID:
+            Ref: UserPoolClient
+      InlineCode: |
+        const {
+          AdminInitiateAuthCommand,
+          CognitoIdentityProviderClient,
+        } = require("@aws-sdk/client-cognito-identity-provider");
+
+        exports.handler = async () => {
+          const username = process.env.USERNAME;
+          const password = process.env.PASSWORD;
+          const userPoolId = process.env.USER_POOL_ID;
+          const clientId = process.env.CLIENT_ID;
+          const client = new CognitoIdentityProviderClient();
+
+          const command = new AdminInitiateAuthCommand({
+            UserPoolId: userPoolId,
+            ClientId: clientId,
+            AuthFlow: "ADMIN_USER_PASSWORD_AUTH",
+            AuthParameters: {
+              USERNAME: username,
+              PASSWORD: password,
+            },
+          });
+          const { AuthenticationResult } = await client.send(command);
+
+          const accessToken = AuthenticationResult?.AccessToken;
+          const idToken = AuthenticationResult?.IdToken;
+
+          if (accessToken !== undefined) {
+            const payload = Buffer.from(accessToken.split(".")[1], "base64").toString();
+            console.log(JSON.stringify(JSON.parse(payload), null, 2));
+          }
+
+          if (idToken !== undefined) {
+            const payload = Buffer.from(idToken.split(".")[1], "base64").toString();
+            console.log(JSON.stringify(JSON.parse(payload), null, 2));
+          }
+
+          return AuthenticationResult;
+        };
+
+  AuthorizerFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-AuthorizerFunctionRole-${AWS::Region}
+      Description: Service role for AuthorizerFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  AuthorizerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-AuthorizerFunction
+
+  AuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-AuthorizerFunction
+      Description: Authorizer function
+      Role:
+        Fn::GetAtt: AuthorizerFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: AuthorizerFunctionLogGroup
+      Environment:
+        Variables:
+          GROUP_NAME:
+            Ref: UserPoolGroup
+      InlineCode: |
+        const denyResponse = {
+          principalId: "*",
+          policyDocument: {
+            Version: "2012-10-17",
+            Statement: [{ Action: "*", Effect: "Deny", Resource: "*" }],
+          },
+        };
+
+        exports.handler = async event => {
+          const { authorizationToken, methodArn } = event;
+          const groupName = process.env.GROUP_NAME;
+          console.log(JSON.stringify(event, null, 2));
+
+          try {
+            const payload = Buffer.from(authorizationToken.split(".")[1], "base64");
+            const auth = JSON.parse(payload.toString());
+            console.log(JSON.stringify(auth, null, 2));
+            if (auth["cognito:groups"].indexOf(groupName) > -1) {
+              return {
+                principalId: "*",
+                policyDocument: {
+                  Version: "2012-10-17",
+                  Statement: [
+                    {
+                      Action: "execute-api:Invoke",
+                      Effect: "Allow",
+                      Resource: methodArn,
+                    },
+                  ],
+                },
+              };
+            } else {
+              return denyResponse;
+            }
+          } catch {
+            return denyResponse;
+          }
+        };
+
+Outputs:
+  RestApi:
+    Description: REST API ID
+    Value:
+      Ref: RestApi
+
+  RestApiUrl:
+    Description: REST API URL
+    Value:
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}

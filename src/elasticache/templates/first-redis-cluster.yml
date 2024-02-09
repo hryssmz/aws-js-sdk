@@ -143,8 +143,8 @@ Resources:
       Roles:
         - Ref: EC2InstanceRole
 
-  EC2LaunchTemplate:
-    Type: AWS::EC2::LaunchTemplate
+  EC2Instance:
+    Type: AWS::EC2::Instance
     Metadata:
       AWS::CloudFormation::Init:
         config:
@@ -156,50 +156,29 @@ Resources:
                   redis-cli -h ${RedisCluster.RedisEndpoint.Address} -p ${RedisCluster.RedisEndpoint.Port}
               mode: "000755"
     Properties:
-      LaunchTemplateName:
-        Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
-      VersionDescription: Launch template for EC2 instances
-      TagSpecifications:
-        - ResourceType: launch-template
-          Tags:
-            - Key: Name
-              Value: EC2LaunchTemplate
-      LaunchTemplateData:
-        ImageId:
-          Ref: ImageId
-        InstanceType:
-          Ref: InstanceType
-        IamInstanceProfile:
-          Name:
-            Ref: EC2InstanceProfile
-        SecurityGroupIds:
-          - Ref: EC2SecurityGroup
-        TagSpecifications:
-          - ResourceType: instance
-            Tags:
-              - Key: Name
-                Value: EC2Instance
-        UserData:
-          Fn::Base64:
-            Fn::Sub: |
-              #!/bin/sh
-              dnf update -y
-              dnf install -y gcc openssl-devel jemalloc-devel
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroupIds:
+        - Ref: EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: EC2Instance
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            dnf update -y
+            dnf install -y gcc openssl-devel jemalloc-devel
 
-              wget https://download.redis.io/redis-stable.tar.gz
-              tar xf redis-stable.tar.gz
-              cd redis-stable
-              make BUILD_TLS=yes && make install
-              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
-
-  EC2Instance:
-    Type: AWS::EC2::Instance
-    Properties:
-      LaunchTemplate:
-        LaunchTemplateId:
-          Ref: EC2LaunchTemplate
-        Version:
-          Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
+            wget https://download.redis.io/redis-stable.tar.gz
+            tar xf redis-stable.tar.gz
+            cd redis-stable
+            make BUILD_TLS=yes && make install
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
 
   # ElastiCache
   CacheSubnetGroup:

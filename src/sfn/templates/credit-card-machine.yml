@@ -1,0 +1,725 @@
+# sfn/templates/credit-card-machine.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Credit card state machine
+
+Resources:
+  # SNS resources
+  TaskTokenTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-TaskTokenTopic
+      DisplayName: Task Token Topic
+
+  # DynamoDB resources
+  CreditBureauTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName:
+        Fn::Sub: ${AWS::StackName}-CreditBureauTable
+      PrimaryKey:
+        Name: Name
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 3
+        WriteCapacityUnits: 3
+
+  # Lambda resources
+  GetCreditFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-GetCreditFunctionRole-${AWS::Region}
+      Description: Service role for GetCreditFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  GetCreditFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-GetCreditFunction
+
+  GetCreditFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-GetCreditFunction
+      Description: Get credit function
+      Role:
+        Fn::GetAtt: GetCreditFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: GetCreditFunctionLogGroup
+      InlineCode: |
+        exports.handler = async () => {
+          const credLimit = Math.floor(Math.random() * 10000);
+          return credLimit;
+        };
+
+  TaskTokenSendFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-TaskTokenSendFunctionPolicy-${AWS::Region}
+      Description: Execution policy for TaskTokenSendFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - states:SendTaskSuccess
+            Resource: "*"
+
+  TaskTokenSendFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-TaskTokenSendFunctionRole-${AWS::Region}
+      Description: Service role for TaskTokenSendFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - Ref: TaskTokenSendFunctionPolicy
+
+  TaskTokenSendFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-TaskTokenSendFunction
+
+  TaskTokenSendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-TaskTokenSendFunction
+      Description: Task token send function
+      Role:
+        Fn::GetAtt: TaskTokenSendFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: TaskTokenSendFunctionLogGroup
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: TaskTokenTopic
+      InlineCode: |
+        const { SendTaskSuccessCommand, SFNClient } = require("@aws-sdk/client-sfn");
+
+        exports.handler = async event => {
+          const { Records } = event;
+          const records = Records.map(({ Sns }) => Sns).map(({ Message }) =>
+            JSON.parse(Message)
+          );
+          records.forEach(record => {
+            console.log(JSON.stringify(record, null, 2));
+          });
+          const { TaskToken: taskToken } = records[0];
+          const output = JSON.stringify("Successful");
+
+          const client = new SFNClient();
+          const command = new SendTaskSuccessCommand({ taskToken, output });
+          await client.send(command);
+        };
+
+  CheckIdentityFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CheckIdentityFunctionRole-${AWS::Region}
+      Description: Service role for CheckIdentityFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  CheckIdentityFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-CheckIdentityFunction
+
+  CheckIdentityFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-CheckIdentityFunction
+      Description: Check identity function
+      Role:
+        Fn::GetAtt: CheckIdentityFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: CheckIdentityFunctionLogGroup
+      InlineCode: |
+        const ssnRegex = /^\d{3}-?\d{2}-?\d{4}$/;
+        const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}$/;
+
+        class ValidationError extends Error {
+          name = "CustomValidationError";
+          constructor(message) {
+            super(message);
+          }
+        }
+
+        exports.handler = async event => {
+          const { ssn, email } = event;
+          const approved = ssnRegex.test(ssn) && emailRegex.test(email);
+
+          if (!approved) {
+            throw new ValidationError("Check Identity Validation Failed");
+          }
+
+          return { statusCode: 200, body: "null" };
+        };
+
+  CheckAddressFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CheckAddressFunctionRole-${AWS::Region}
+      Description: Service role for CheckAddressFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  CheckAddressFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-CheckAddressFunction
+
+  CheckAddressFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-CheckAddressFunction
+      Description: Check identity function
+      Role:
+        Fn::GetAtt: CheckAddressFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: CheckAddressFunctionLogGroup
+      InlineCode: |
+        class ValidationError extends Error {
+          name = "CustomAddressValidationError";
+          constructor(message) {
+            super(message);
+          }
+        }
+
+        exports.handler = async event => {
+          const { street, city, state, zip } = event;
+          const approved = [street, city, state, zip].every(i => i);
+
+          if (!approved) {
+            throw new ValidationError("Check Address Validation Failed");
+          }
+
+          return { statusCode: 200, body: "null" };
+        };
+
+  CreditScoreFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-CreditScoreFunctionRole-${AWS::Region}
+      Description: Service role for CreditScoreFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  CreditScoreFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-CreditScoreFunction
+
+  CreditScoreFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-CreditScoreFunction
+      Description: Credit score function
+      Role:
+        Fn::GetAtt: CreditScoreFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: CreditScoreFunctionLogGroup
+      InlineCode: |
+        const arrScores = [700, 820, 640, 460, 726, 850, 694, 721, 556];
+
+        exports.handler = async () => {
+          const i = Math.floor(Math.random() * arrScores.length);
+          const score = arrScores[i];
+          return `Credit score pulled is: ${score}.`;
+        };
+
+  # Step Functions resources
+  StateMachineExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-StateMachineExecutionPolicy-${AWS::Region}
+      Description: Execution policy for StateMachine
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LambdaInvokePermission
+            Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - Fn::GetAtt: GetCreditFunction.Arn
+              - Fn::GetAtt: CheckIdentityFunction.Arn
+              - Fn::GetAtt: CheckAddressFunction.Arn
+              - Fn::GetAtt: CreditScoreFunction.Arn
+          - Sid: SNSPublishPermission
+            Effect: Allow
+            Action:
+              - sns:Publish
+            Resource:
+              - Ref: TaskTokenTopic
+          - Sid: DynamoDBScanPermission
+            Effect: Allow
+            Action:
+              - dynamodb:Scan
+            Resource:
+              - Fn::GetAtt: CreditBureauTable.Arn
+
+  StateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-StateMachineExecutionRole-${AWS::Region}
+      Description: Execution role for StateMachine
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AWSXrayWriteOnlyAccess
+        - Ref: StateMachineExecutionPolicy
+
+  StateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-StateMachine
+      Type: STANDARD
+      Role:
+        Fn::GetAtt: StateMachineExecutionRole.Arn
+      Definition:
+        Comment: My credit card work flow
+        StartAt: Get credit limit
+        States:
+          Get credit limit:
+            Type: Task
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:states:::lambda:invoke
+            Parameters:
+              FunctionName:
+                Fn::GetAtt: GetCreditFunction.Arn
+              Payload.$: $
+            OutputPath: $.Payload
+            Retry:
+              - ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 1
+                MaxAttempts: 3
+                BackoffRate: 2
+            Next: Credit applied >= 5000?
+          Credit applied >= 5000?:
+            Type: Choice
+            Choices:
+              - Variable: $
+                NumericLessThan: 5000
+                Next: Auto-approve limit
+            Default: Wait for human approval
+          Auto-approve limit:
+            Type: Pass
+            Next: Verify applicant's identity and address
+          Wait for human approval:
+            Type: Task
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:states:::sns:publish.waitForTaskToken
+            Parameters:
+              TopicArn:
+                Ref: TaskTokenTopic
+              Message:
+                TaskToken.$: $$.Task.Token
+            Next: Credit limit approved
+          Credit limit approved:
+            Type: Pass
+            Next: Verify applicant's identity and address
+          Verify applicant's identity and address:
+            Type: Parallel
+            Branches:
+              - StartAt: Verify identity
+                States:
+                  Verify identity:
+                    Type: Task
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:states:::lambda:invoke
+                    Parameters:
+                      FunctionName:
+                        Fn::GetAtt: CheckIdentityFunction.Arn
+                      Payload:
+                        email: janedoe@example.com
+                        ssn: 012-00-0000
+                    OutputPath: $.Payload
+                    # Retry: []
+                    End: true
+              - StartAt: Verify address
+                States:
+                  Verify address:
+                    Type: Task
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:states:::lambda:invoke
+                    Parameters:
+                      FunctionName:
+                        Fn::GetAtt: CheckAddressFunction.Arn
+                      Payload:
+                        street: 123 Any St
+                        city: Any Town
+                        state: AT
+                        zip: 01000
+                    OutputPath: $.Payload
+                    # Retry: []
+                    End: true
+            Next: Get list of credit bureaus
+          Get list of credit bureaus:
+            Type: Task
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:states:::aws-sdk:dynamodb:scan
+            Parameters:
+              TableName:
+                Ref: CreditBureauTable
+            Next: Get scores from all credit bureaus
+          Get scores from all credit bureaus:
+            Type: Map
+            ItemsPath: $.Items
+            ItemProcessor:
+              ProcessorConfig:
+                Mode: INLINE
+              StartAt: Get all scores
+              States:
+                Get all scores:
+                  Type: Task
+                  Resource:
+                    Fn::Sub: arn:${AWS::Partition}:states:::lambda:invoke
+                  Parameters:
+                    FunctionName:
+                      Fn::GetAtt: GetCreditFunction.Arn
+                  OutputPath: $.Payload
+                  # Retry: []
+                  End: true
+            End: true
+
+  StateMachine2:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-StateMachine2
+      Type: STANDARD
+      Role:
+        Fn::GetAtt: StateMachineExecutionRole.Arn
+      Definition:
+        Comment: My credit card work flow 2
+        StartAt: Verify applicant's identity and address
+        States:
+          Verify applicant's identity and address:
+            Type: Parallel
+            Branches:
+              - StartAt: Verify identity
+                States:
+                  Verify identity:
+                    Type: Task
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:states:::lambda:invoke
+                    InputPath: $.data.identity
+                    Parameters:
+                      FunctionName:
+                        Fn::GetAtt: CheckIdentityFunction.Arn
+                      Payload.$: $
+                    OutputPath: $.Payload
+                    # Retry: []
+                    End: true
+              - StartAt: Verify address
+                States:
+                  Verify address:
+                    Type: Task
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:states:::lambda:invoke
+                    InputPath: $.data.address
+                    Parameters:
+                      FunctionName:
+                        Fn::GetAtt: CheckAddressFunction.Arn
+                      Payload.$: $
+                    OutputPath: $.Payload
+                    # Retry: []
+                    End: true
+            End: true
+
+  # Custom resources
+  DDBItemFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-DDBItemFunction
+
+  DDBItemFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-DDBItemFunctionPolicy-${AWS::Region}
+      Description: Policy for DDBItemFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DynamoDBAccessPermissions
+            Effect: Allow
+            Action:
+              - dynamodb:DescribeTable
+              - dynamodb:DeleteItem
+              - dynamodb:PutItem
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AWS::StackName}*
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: ${DDBItemFunctionLogGroup.Arn}
+
+  DDBItemFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DDBItemFunctionRole-${AWS::Region}
+      Description: Service role for DDBItemFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: DDBItemFunctionPolicy
+
+  DDBItemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-DDBItemFunction
+      Description: DynamoDB item function
+      Role:
+        Fn::GetAtt: DDBItemFunctionRole.Arn
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Timeout: 30
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: DDBItemFunctionLogGroup
+      InlineCode: |
+        const https = require("https");
+        const {
+          DescribeTableCommand,
+          DynamoDBClient,
+        } = require("@aws-sdk/client-dynamodb");
+        const {
+          DeleteCommand,
+          DynamoDBDocumentClient,
+          PutCommand,
+        } = require("@aws-sdk/lib-dynamodb");
+
+        const serialize = obj => JSON.stringify(obj, null, 2);
+
+        const sendResponse = async (
+          event,
+          context,
+          status,
+          data,
+          physicalResourceId,
+          noEcho,
+        ) => {
+          const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
+          const body = serialize({
+            Status: status,
+            Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,
+            PhysicalResourceId: physicalResourceId || context.logStreamName,
+            Data: data,
+            StackId,
+            RequestId,
+            LogicalResourceId,
+            NoEcho: noEcho || false,
+          });
+
+          const { hostname, pathname, search } = new URL(ResponseURL);
+          const path = `${pathname}${search}`;
+          const headers = {
+            "Content-Type": "application/json",
+            "Content-Length": body.length,
+          };
+
+          return await new Promise((resolve, reject) => {
+            const req = https.request(
+              { hostname, port: 443, path, method: "PUT", headers },
+              res => {
+                res.on("data", chunk => {
+                  const body = chunk.toString();
+                  resolve(body);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(body);
+            req.end();
+          });
+        };
+
+        const main = async (event, context) => {
+          const client = new DynamoDBClient();
+          const docClient = DynamoDBDocumentClient.from(client);
+          const { ResourceProperties } = event;
+          const { TableName, Item } = ResourceProperties;
+          const command = new DescribeTableCommand({ TableName });
+          const { Table } = await client.send(command);
+          const keySchema = Table?.KeySchema ?? [];
+          const partKey =
+            keySchema.find(k => k.KeyType === "HASH")?.AttributeName ?? "";
+          const sortKey = keySchema.find(k => k.KeyType === "RANGE")?.AttributeName;
+
+          if (event.RequestType === "Create" || event.RequestType === "Update") {
+            const command = new PutCommand({ TableName, Item });
+            await docClient.send(command);
+            return await sendResponse(
+              event,
+              context,
+              "SUCCESS",
+              {},
+              [TableName, Item[partKey], ...(sortKey ? [Item[sortKey]] : [])].join("/"),
+            );
+          } else if (event.RequestType === "Delete") {
+            const key = {
+              [partKey]: Item[partKey],
+              ...(sortKey && { [sortKey]: Item[sortKey] }),
+            };
+            const command = new DeleteCommand({ TableName, Key: key });
+            await docClient.send(command).catch(console.error);
+            return await sendResponse(event, context, "SUCCESS");
+          } else {
+            throw new Error(`Invalid RequestType: ${event.RequestType}`);
+          }
+        };
+
+        exports.handler = async (event, context) => {
+          try {
+            console.log(serialize(event));
+            return await main(event, context);
+          } catch (error) {
+            console.error(error);
+            return await sendResponse(event, context, "FAILED", {});
+          }
+        };
+
+  DDBItemCredTrack:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: DDBItemFunction.Arn
+      TableName:
+        Ref: CreditBureauTable
+      Item:
+        Name: CredTrack
+
+  DDBItemKapFinn:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: DDBItemFunction.Arn
+      TableName:
+        Ref: CreditBureauTable
+      Item:
+        Name: KapFinn
+
+  DDBItemCapTrust:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: DDBItemFunction.Arn
+      TableName:
+        Ref: CreditBureauTable
+      Item:
+        Name: CapTrust

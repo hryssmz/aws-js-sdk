@@ -72,87 +72,45 @@ Resources:
       Roles:
         - Ref: EC2InstanceRole
 
-  AL2ARMLaunchTemplate:
-    Type: AWS::EC2::LaunchTemplate
-    Properties:
-      LaunchTemplateName:
-        Fn::Sub: ${AWS::StackName}-AL2ARMLaunchTemplate
-      VersionDescription: Launch template for ARM AL2 EC2 instances
-      TagSpecifications:
-        - ResourceType: launch-template
-          Tags:
-            - Key: Name
-              Value: AL2ARMLaunchTemplate
-      LaunchTemplateData:
-        ImageId:
-          Ref: ImageIdArm
-        InstanceType:
-          Ref: InstanceTypeArm
-        IamInstanceProfile:
-          Name:
-            Ref: EC2InstanceProfile
-        SecurityGroupIds:
-          - Ref: EC2SecurityGroup
-        TagSpecifications:
-          - ResourceType: instance
-            Tags:
-              - Key: Name
-                Value: AL2ARMInstance
-        UserData:
-          Fn::Base64:
-            Fn::Sub: |
-              #!/bin/sh
-              yum update -y
-              amazon-linux-extras install -y postgresql14
-              yum install -y gcc libpq-devel.aarch64 python3-devel
-
   AL2ARMInstance:
     Type: AWS::EC2::Instance
     Properties:
-      LaunchTemplate:
-        LaunchTemplateId:
-          Ref: AL2ARMLaunchTemplate
-        Version:
-          Fn::GetAtt: AL2ARMLaunchTemplate.LatestVersionNumber
-
-  AL2023LaunchTemplate:
-    Type: AWS::EC2::LaunchTemplate
-    Properties:
-      LaunchTemplateName:
-        Fn::Sub: ${AWS::StackName}-AL2023LaunchTemplate
-      VersionDescription: Launch template for X86 AL2023 EC2 instances
-      TagSpecifications:
-        - ResourceType: launch-template
-          Tags:
-            - Key: Name
-              Value: AL2023LaunchTemplate
-      LaunchTemplateData:
-        ImageId:
-          Ref: ImageId
-        InstanceType:
-          Ref: InstanceType
-        IamInstanceProfile:
-          Name:
-            Ref: EC2InstanceProfile
-        SecurityGroupIds:
-          - Ref: EC2SecurityGroup
-        TagSpecifications:
-          - ResourceType: instance
-            Tags:
-              - Key: Name
-                Value: AL2023Instance
-        UserData:
-          Fn::Base64:
-            Fn::Sub: |
-              #!/bin/sh
-              dnf update -y
-              dnf install -y gcc libpq-devel postgresql15 python python-devel python-pip
+      ImageId:
+        Ref: ImageIdArm
+      InstanceType:
+        Ref: InstanceTypeArm
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroupIds:
+        - Ref: EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: AL2ARMInstance
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            yum update -y
+            amazon-linux-extras install -y postgresql14
+            yum install -y gcc libpq-devel.aarch64 python3-devel
 
   AL2023Instance:
     Type: AWS::EC2::Instance
     Properties:
-      LaunchTemplate:
-        LaunchTemplateId:
-          Ref: AL2023LaunchTemplate
-        Version:
-          Fn::GetAtt: AL2023LaunchTemplate.LatestVersionNumber
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroupIds:
+        - Ref: EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: AL2023Instance
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            dnf update -y
+            dnf install -y gcc libpq-devel postgresql15 python python-devel python-pip

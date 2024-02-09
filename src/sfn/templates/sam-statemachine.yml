@@ -4,6 +4,158 @@ Transform: AWS::Serverless-2016-10-31
 Description: State machine with AWS SAM
 
 Resources:
+  # Lambda
+  InitializeFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-InitializeFunctionRole-${AWS::Region}
+      Description: Service role for InitializeFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  InitializeFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-InitializeFunction
+
+  InitializeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-InitializeFunction
+      Description: Initialize function
+      Role:
+        Fn::GetAtt: InitializeFunctionRole.Arn
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: InitializeFunctionLogGroup
+      Environment:
+        Variables:
+          CHUNK_SIZE: "6"
+      InlineCode: |
+        exports.handler = async event => {
+          const chunkSize = Number(process.env.CHUNK_SIZE);
+          const { records, executionArn } = event;
+          const arnSegments = executionArn.split(":");
+          const chunks = Array(Math.ceil(records.length / chunkSize))
+            .fill(0)
+            .map((_, i) => i * chunkSize)
+            .map(i => records.slice(i, i + chunkSize));
+          return {
+            chunks,
+            executionArn,
+            executionId: arnSegments[arnSegments.length - 1],
+          };
+        };
+
+  ProcessItemFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ProcessItemFunctionRole-${AWS::Region}
+      Description: Service role for ProcessItemFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ProcessItemFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ProcessItemFunction
+
+  ProcessItemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ProcessItemFunction
+      Description: Process item function
+      Role:
+        Fn::GetAtt: ProcessItemFunctionRole.Arn
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: ProcessItemFunctionLogGroup
+      InlineCode: |
+        exports.handler = async event => {
+          const { chunk, executionId } = event;
+          return chunk.map(({ order, id }) => ({
+            order,
+            id,
+            result: Math.random() > 0.3 ? "0" : "1",
+            executionId,
+          }));
+        };
+
+  FinalizeFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-FinalizeFunctionRole-${AWS::Region}
+      Description: Service role for FinalizeFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  FinalizeFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-FinalizeFunction
+
+  FinalizeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-FinalizeFunction
+      Description: Finalize function
+      Role:
+        Fn::GetAtt: FinalizeFunctionRole.Arn
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: FinalizeFunctionLogGroup
+      InlineCode: |
+        exports.handler = async event => {
+          const { chunks, executionArn } = event;
+          const results = chunks.reduce((acc, chunk) => [...acc, ...chunk], []);
+          return { results, executionArn };
+        };
+
   # State Machine
   StateMachineExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -14,12 +166,14 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: LambdaAccess
+          - Sid: LambdaInvokePermission
             Effect: Allow
             Action:
               - lambda:InvokeFunction
             Resource:
-              - Fn::Sub: arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-*
+              - Fn::GetAtt: InitializeFunction.Arn
+              - Fn::GetAtt: ProcessItemFunction.Arn
+              - Fn::GetAtt: FinalizeFunction.Arn
 
   StateMachineExecutionRole:
     Type: AWS::IAM::Role
@@ -53,10 +207,14 @@ Resources:
           Initialize:
             Type: Task
             Resource:
-              Fn::GetAtt: InitializeFunction.Arn
+              Fn::Sub: arn:${AWS::Partition}:states:::lambda:invoke
             Parameters:
-              records.$: $.records
-              executionArn.$: $$.Execution.Id
+              FunctionName:
+                Ref: InitializeFunction
+              Payload:
+                records.$: $.records
+                executionArn.$: $$.Execution.Id
+            OutputPath: $.Payload
             Next: Process
           Process:
             Type: Map
@@ -66,166 +224,34 @@ Resources:
               executionId.$: $.executionId
               chunk.$: $$.Map.Item.Value
             ResultPath: $.chunks
-            Iterator:
+            ItemProcessor:
+              ProcessorConfig:
+                Mode: INLINE
               StartAt: ProcessItem
               States:
                 ProcessItem:
                   Type: Task
                   Resource:
-                    Fn::GetAtt: ProcessItemFunction.Arn
+                    Fn::Sub: arn:${AWS::Partition}:states:::lambda:invoke
+                  Parameters:
+                    FunctionName:
+                      Ref: ProcessItemFunction
+                    Payload.$: $
+                  OutputPath: $.Payload
                   End: true
             Next: Finalize
           Finalize:
             Type: Task
             Resource:
-              Fn::GetAtt: FinalizeFunction.Arn
+              Fn::Sub: arn:${AWS::Partition}:states:::lambda:invoke
             Parameters:
-              chunks.$: $.chunks
-              executionArn.$: $.executionArn
+              FunctionName:
+                Ref: FinalizeFunction
+              Payload:
+                chunks.$: $.chunks
+                executionArn.$: $.executionArn
+            OutputPath: $.Payload
             End: true
-
-  # Lambda
-  InitializeFunctionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName:
-        Fn::Sub: ${AWS::StackName}-InitializeFunctionRole-${AWS::Region}
-      Description: Service role for InitializeFunction
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
-      ManagedPolicyArns:
-        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-
-  InitializeFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName:
-        Fn::Sub: ${AWS::StackName}-InitializeFunction
-      Description: Initialize function
-      Role:
-        Fn::GetAtt: InitializeFunctionRole.Arn
-      Runtime: nodejs18.x
-      Handler: index.handler
-      Architectures:
-        - arm64
-      Environment:
-        Variables:
-          CHUNK_SIZE: "6"
-      InlineCode: |
-        exports.handler = async event => {
-          const chunkSize = Number(process.env.CHUNK_SIZE);
-          const { records, executionArn } = event;
-          const arnSegments = executionArn.split(":");
-          const chunks = Array(Math.ceil(records.length / chunkSize))
-            .fill()
-            .map((_, i) => i * chunkSize)
-            .map(i => records.slice(i, i + chunkSize));
-          return {
-            chunks,
-            executionArn,
-            executionId: arnSegments[arnSegments.length - 1],
-          };
-        };
-
-  InitializeFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${InitializeFunction}
-
-  ProcessItemFunctionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName:
-        Fn::Sub: ${AWS::StackName}-ProcessItemFunctionRole-${AWS::Region}
-      Description: Service role for ProcessItemFunction
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
-      ManagedPolicyArns:
-        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-
-  ProcessItemFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName:
-        Fn::Sub: ${AWS::StackName}-ProcessItemFunction
-      Description: Process item function
-      Role:
-        Fn::GetAtt: ProcessItemFunctionRole.Arn
-      Runtime: nodejs18.x
-      Handler: index.handler
-      Architectures:
-        - arm64
-      InlineCode: |
-        exports.handler = async event => {
-          const { chunk, executionId } = event;
-          return chunk.map(({ order, id }) => ({
-            order,
-            id,
-            result: Math.random() > 0.3 ? "0" : "1",
-            executionId,
-          }));
-        };
-
-  ProcessItemFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${ProcessItemFunction}
-
-  FinalizeFunctionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName:
-        Fn::Sub: ${AWS::StackName}-FinalizeFunctionRole-${AWS::Region}
-      Description: Service role for FinalizeFunction
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
-      ManagedPolicyArns:
-        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-
-  FinalizeFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName:
-        Fn::Sub: ${AWS::StackName}-FinalizeFunction
-      Description: Finalize function
-      Role:
-        Fn::GetAtt: FinalizeFunctionRole.Arn
-      Runtime: nodejs18.x
-      Handler: index.handler
-      Architectures:
-        - arm64
-      InlineCode: |
-        exports.handler = async event => {
-          const { chunks, executionArn } = event;
-          const results = chunks.reduce((acc, chunk) => [...acc, ...chunk], []);
-          return { results, executionArn };
-        };
-
-  FinalizeFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${FinalizeFunction}
 
   # REST API
   RestApi:
@@ -456,6 +482,12 @@ Resources:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: StartExecutionFunctionPolicy
 
+  StartExecutionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-StartExecutionFunction
+
   StartExecutionFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -468,6 +500,9 @@ Resources:
       Handler: index.handler
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: StartExecutionFunctionLogGroup
       Environment:
         Variables:
           STATE_MACHINE_ARN:
@@ -498,12 +533,6 @@ Resources:
             body: JSON.stringify(body, null, 2),
           };
         };
-
-  StartExecutionFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${StartExecutionFunction}
 
   DescribeExecutionFunctionPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -539,6 +568,12 @@ Resources:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: DescribeExecutionFunctionPolicy
 
+  DescribeExecutionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-DescribeExecutionFunction
+
   DescribeExecutionFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -551,6 +586,9 @@ Resources:
       Handler: index.handler
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: DescribeExecutionFunctionLogGroup
       Environment:
         Variables:
           EXECUTION_ARN_PREFIX:
@@ -584,12 +622,6 @@ Resources:
             body: JSON.stringify(body, null, 2),
           };
         };
-
-  DescribeExecutionFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${DescribeExecutionFunction}
 
 Outputs:
   RestApiUrl:

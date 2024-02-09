@@ -178,59 +178,38 @@ Resources:
         - Key: Name
           Value: DBSecurityGroup
 
-  DBLaunchTemplate:
-    Type: AWS::EC2::LaunchTemplate
-    Properties:
-      LaunchTemplateName:
-        Fn::Sub: ${AWS::StackName}-DBLaunchTemplate
-      VersionDescription: Launch template for DB instances
-      TagSpecifications:
-        - ResourceType: launch-template
-          Tags:
-            - Key: Name
-              Value: DBLaunchTemplate
-      LaunchTemplateData:
-        ImageId:
-          Ref: ImageId
-        InstanceType:
-          Ref: InstanceType
-        IamInstanceProfile:
-          Name:
-            Ref: EC2InstanceProfile
-        SecurityGroupIds:
-          - Ref: DBSecurityGroup
-        TagSpecifications:
-          - ResourceType: instance
-            Tags:
-              - Key: Name
-                Value: DBInstance
-        UserData:
-          Fn::Base64:
-            Fn::Sub: |
-              #!/bin/sh
-              dnf update -y
-              dnf install -y postgresql15-server
-
-              sudo -i -u postgres /bin/sh - <<\EOF
-              postgresql-setup --initdb
-              echo "local all all peer" > /var/lib/pgsql/data/pg_hba.conf
-              echo "host all all 0.0.0.0/0 md5" >> /var/lib/pgsql/data/pg_hba.conf
-              echo "listen_addresses = '*'" >> /var/lib/pgsql/data/postgresql.conf
-              EOF
-              systemctl enable postgresql.service
-              systemctl start postgresql.service
-              sudo -i -u postgres psql -c "ALTER ROLE postgres WITH PASSWORD 'postgres';"
-
   DBInstance:
     Type: AWS::EC2::Instance
     Properties:
-      LaunchTemplate:
-        LaunchTemplateId:
-          Ref: DBLaunchTemplate
-        Version:
-          Fn::GetAtt: DBLaunchTemplate.LatestVersionNumber
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
       SubnetId:
         Ref: Subnet0
+      SecurityGroupIds:
+        - Ref: DBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: DBInstance
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            dnf update -y
+            dnf install -y postgresql15-server
+
+            sudo -i -u postgres /bin/sh - <<\EOF
+            postgresql-setup --initdb
+            echo "local all all peer" > /var/lib/pgsql/data/pg_hba.conf
+            echo "host all all 0.0.0.0/0 md5" >> /var/lib/pgsql/data/pg_hba.conf
+            echo "listen_addresses = '*'" >> /var/lib/pgsql/data/postgresql.conf
+            EOF
+            systemctl enable postgresql
+            systemctl start postgresql
+            sudo -i -u postgres psql -c "ALTER ROLE postgres WITH PASSWORD 'postgres';"
 
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -244,8 +223,8 @@ Resources:
         - Key: Name
           Value: EC2SecurityGroup
 
-  EC2LaunchTemplate:
-    Type: AWS::EC2::LaunchTemplate
+  EC2Instance:
+    Type: AWS::EC2::Instance
     Metadata:
       AWS::CloudFormation::Init:
         config:
@@ -257,44 +236,23 @@ Resources:
                   psql -d postgresql://postgres:postgres@${DBInstance.PrivateDnsName}/$1
               mode: "000755"
     Properties:
-      LaunchTemplateName:
-        Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
-      VersionDescription: Launch template for EC2 instances
-      TagSpecifications:
-        - ResourceType: launch-template
-          Tags:
-            - Key: Name
-              Value: EC2LaunchTemplate
-      LaunchTemplateData:
-        ImageId:
-          Ref: ImageId
-        InstanceType:
-          Ref: InstanceType
-        IamInstanceProfile:
-          Name:
-            Ref: EC2InstanceProfile
-        SecurityGroupIds:
-          - Ref: EC2SecurityGroup
-        TagSpecifications:
-          - ResourceType: instance
-            Tags:
-              - Key: Name
-                Value: EC2Instance
-        UserData:
-          Fn::Base64:
-            Fn::Sub: |
-              #!/bin/sh
-              dnf update -y
-              dnf install -y postgresql15
-              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2LaunchTemplate --region ${AWS::Region}
-
-  EC2Instance:
-    Type: AWS::EC2::Instance
-    Properties:
-      LaunchTemplate:
-        LaunchTemplateId:
-          Ref: EC2LaunchTemplate
-        Version:
-          Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
       SubnetId:
         Ref: Subnet1
+      SecurityGroupIds:
+        - Ref: EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: EC2Instance
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            dnf update -y
+            dnf install -y postgresql15
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}

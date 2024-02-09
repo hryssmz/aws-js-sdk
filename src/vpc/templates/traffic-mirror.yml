@@ -322,8 +322,8 @@ Resources:
             echo "host all all 0.0.0.0/0 md5" >> /var/lib/pgsql/data/pg_hba.conf
             echo "listen_addresses = '*'" >> /var/lib/pgsql/data/postgresql.conf
             EOF
-            systemctl enable postgresql.service
-            systemctl start postgresql.service
+            systemctl enable postgresql
+            systemctl start postgresql
             sudo -i -u postgres psql -c "ALTER ROLE postgres WITH PASSWORD 'postgres';"
       Tags:
         - Key: Name
@@ -380,8 +380,8 @@ Resources:
             echo "host all all 0.0.0.0/0 md5" >> /var/lib/pgsql/data/pg_hba.conf
             echo "listen_addresses = '*'" >> /var/lib/pgsql/data/postgresql.conf
             EOF
-            systemctl enable postgresql.service
-            systemctl start postgresql.service
+            systemctl enable postgresql
+            systemctl start postgresql
             sudo -i -u postgres psql -c "ALTER ROLE postgres WITH PASSWORD 'postgres';"
       Tags:
         - Key: Name

@@ -1,0 +1,270 @@
+# glue/templates/first-glue-job.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: First Glue job
+
+Resources:
+  # S3 resources
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # Custom resources
+  S3ObjectFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-S3ObjectFunction
+
+  S3ObjectFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunctionPolicy-${AWS::Region}
+      Description: Policy for S3ObjectFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3AccessPermissions
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource: "*"
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: ${S3ObjectFunctionLogGroup.Arn}
+
+  S3ObjectFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunctionRole-${AWS::Region}
+      Description: Service role for S3ObjectFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: S3ObjectFunctionPolicy
+
+  S3ObjectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunction
+      Description: S3 object function
+      Role:
+        Fn::GetAtt: S3ObjectFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Timeout: 30
+      InlineCode: |
+        const https = require("https");
+        const {
+          DeleteObjectCommand,
+          PutObjectCommand,
+          S3Client,
+        } = require("@aws-sdk/client-s3");
+
+        const serialize = obj => JSON.stringify(obj, null, 2);
+
+        const sendResponse = async (
+          event,
+          context,
+          status,
+          data,
+          physicalResourceId,
+          noEcho,
+        ) => {
+          const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
+          const body = serialize({
+            Status: status,
+            Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,
+            PhysicalResourceId: physicalResourceId || context.logStreamName,
+            Data: data,
+            StackId,
+            RequestId,
+            LogicalResourceId,
+            NoEcho: noEcho || false,
+          });
+
+          const { hostname, pathname, search } = new URL(ResponseURL);
+          const path = `${pathname}${search}`;
+          const headers = {
+            "Content-Type": "application/json",
+            "Content-Length": body.length,
+          };
+
+          return await new Promise((resolve, reject) => {
+            const req = https.request(
+              { hostname, port: 443, path, method: "PUT", headers },
+              res => {
+                res.on("data", chunk => {
+                  const body = chunk.toString();
+                  resolve(body);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(body);
+            req.end();
+          });
+        };
+
+        const main = async (event, context) => {
+          const client = new S3Client();
+          const { ResourceProperties } = event;
+          const { Bucket, Key, Body, ContentType, Base64 } = ResourceProperties;
+          if (event.RequestType === "Create" || event.RequestType === "Update") {
+            const command = new PutObjectCommand({
+              Bucket,
+              Key,
+              Body: Base64 ? Buffer.from(Body, "base64") : Body,
+              ContentType,
+            });
+            await client.send(command);
+            return await sendResponse(
+              event,
+              context,
+              "SUCCESS",
+              { Bucket, Key },
+              `s3://${Bucket}/${Key}`,
+            );
+          } else if (event.RequestType === "Delete") {
+            const command = new DeleteObjectCommand({ Bucket, Key });
+            await client.send(command).catch(console.error);
+            return await sendResponse(event, context, "SUCCESS");
+          } else {
+            throw new Error(`Invalid RequestType: ${event.RequestType}`);
+          }
+        };
+
+        exports.handler = async (event, context) => {
+          try {
+            console.log(serialize(event));
+            return await main(event, context);
+          } catch (error) {
+            console.error(error);
+            return await sendResponse(event, context, "FAILED", {});
+          }
+        };
+
+  MainPyObject:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: S3ObjectFunction.Arn
+      Bucket:
+        Ref: S3Bucket
+      Key: main.py
+      ContentType: text/plain
+      Body: |
+        import os
+        import sys
+        from typing import Any
+
+        from awsglue.utils import getResolvedOptions
+
+
+        def main(args: dict[str, str]) -> Any:
+            print(sys.argv)
+            print(args)
+            print(os.environ)
+
+
+        if __name__ == "__main__":
+            arg_keys = ["continuous-log-logGroup", "scriptLocation"]
+            env_keys = ["DB_SECRET_ARN", "DB_NAME"]
+            args = getResolvedOptions(sys.argv, arg_keys)
+            for k, v in getResolvedOptions(sys.argv, env_keys).items():
+                os.environ[k] = v
+            main(args)
+
+  # Glue resources
+  GlueJobLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws-glue/${AWS::StackName}-GlueJobLogGroup
+
+  GlueJobPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-GlueJobPolicy-${AWS::Region}
+      Description: Policy for GlueJob
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3ObjectRead
+            Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+
+  GlueJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-GlueJobRole-${AWS::Region}
+      Description: Service role for GlueJob
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSGlueServiceRole
+        - Ref: GlueJobPolicy
+
+  GlueJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-GlueJob
+      Description: My glue job
+      Role:
+        Fn::GetAtt: GlueJobRole.Arn
+      Command:
+        Name: pythonshell
+        PythonVersion: 3.9
+        ScriptLocation:
+          Ref: MainPyObject
+      DefaultArguments:
+        --job-language: python
+        --enable-job-insights: "true"
+        --enable-continuous-cloudwatch-log: "true"
+        --enable-continuous-log-filter: "false"
+        --extra-py-files:
+          Fn::Join:
+            - ","
+            - - Fn::Sub: s3://${S3Bucket}/mypackage-0.0.1-py3-none-any.whl
+        --continuous-log-logGroup:
+          Ref: GlueJobLogGroup
+        --DB_SECRET_ARN: arn
+        --DB_NAME: postgres
+        library-set: analytics

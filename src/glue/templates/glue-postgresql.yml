@@ -1,0 +1,594 @@
+# glue/templates/glue-postgresql.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Glue job with PostgreSQL
+
+Parameters:
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t3.micro
+
+  DBUser:
+    Type: String
+    Description: DB user
+    Default: postgres
+
+  DBPassword:
+    Type: String
+    Description: DB password
+    Default: postgres
+
+  DBName:
+    Type: String
+    Description: DB name
+    Default: postgres
+
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
+
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDRs
+    Default: 172.20.0.0/20,172.20.16.0/20
+
+  PrivateSubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Private subnet CIDRs
+    Default: 172.20.128.0/20,172.20.144.0/20
+
+  DisableNatGateway:
+    Type: String
+    Description: Disable NAT gateway to reduce cost
+    Default: true
+    AllowedValues:
+      - true
+      - false
+    ConstraintDescription: Must be a boolean value
+
+Conditions:
+  CreateNatGatewayCondition:
+    Fn::Equals:
+      - Ref: DisableNatGateway
+      - false
+
+Resources:
+  # VPC resources
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Ref: VPCCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  Subnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet0
+
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet1
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: RouteTable
+
+  Subnet0RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet0
+      RouteTableId:
+        Ref: RouteTable
+
+  Subnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet1
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  PrivateSubnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: PrivateSubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet0
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: PrivateSubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet1
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable
+
+  PrivateSubnet0PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet0
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  PrivateSubnet1PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet1
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    Condition: CreateNatGatewayCondition
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Condition: CreateNatGatewayCondition
+    Properties:
+      AllocationId:
+        Fn::GetAtt: NatGatewayEIP.AllocationId
+      SubnetId:
+        Ref: Subnet0
+
+  NatGatewayRoute:
+    Type: AWS::EC2::Route
+    Condition: CreateNatGatewayCondition
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NatGateway
+
+  # RDS
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-DBSecurityGroup
+      GroupDescription: DB security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - Description: DB inbound rule
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+      Tags:
+        - Key: Name
+          Value: DBSecurityGroup
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName:
+        Fn::Sub: ${AWS::StackName}-DBSubnetGroup
+      DBSubnetGroupDescription: DB subnet group
+      SubnetIds:
+        - Ref: PrivateSubnet0
+        - Ref: PrivateSubnet1
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBInstanceIdentifier:
+        Fn::Sub: ${AWS::StackName}-DBInstance
+      Engine: postgres
+      EngineVersion: 13.13
+      MasterUsername:
+        Ref: DBUser
+      MasterUserPassword:
+        Ref: DBPassword
+      Port: 5432
+      DBName:
+        Ref: DBName
+      DBInstanceClass: db.t3.micro
+      StorageType: gp2
+      AllocatedStorage: 20
+      MaxAllocatedStorage: 100
+      StorageEncrypted: true
+      BackupRetentionPeriod: 0
+      NetworkType: IPV4
+      DBSubnetGroupName:
+        Ref: DBSubnetGroup
+      VPCSecurityGroups:
+        - Ref: DBSecurityGroup
+      CACertificateIdentifier: rds-ca-2019
+
+  # Secrets Manager resources
+  DBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-DBSecret
+      Description: DB secret
+      SecretString:
+        Fn::Sub: |
+          {
+            "engine": "postgres",
+            "host": "${DBInstance.Endpoint.Address}",
+            "username": "${DBUser}",
+            "password": "${DBPassword}",
+            "dbname": "${DBName}",
+            "port": "${DBInstance.Endpoint.Port}"
+          }
+
+  # S3 resources
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # Custom resources
+  S3ObjectFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-S3ObjectFunction
+
+  S3ObjectFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunctionPolicy-${AWS::Region}
+      Description: Policy for S3ObjectFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3AccessPermissions
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource: "*"
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: ${S3ObjectFunctionLogGroup.Arn}
+
+  S3ObjectFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunctionRole-${AWS::Region}
+      Description: Service role for S3ObjectFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: S3ObjectFunctionPolicy
+
+  S3ObjectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-S3ObjectFunction
+      Description: S3 object function
+      Role:
+        Fn::GetAtt: S3ObjectFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Timeout: 30
+      InlineCode: |
+        const https = require("https");
+        const {
+          DeleteObjectCommand,
+          PutObjectCommand,
+          S3Client,
+        } = require("@aws-sdk/client-s3");
+
+        const serialize = obj => JSON.stringify(obj, null, 2);
+
+        const sendResponse = async (
+          event,
+          context,
+          status,
+          data,
+          physicalResourceId,
+          noEcho,
+        ) => {
+          const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
+          const body = serialize({
+            Status: status,
+            Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,
+            PhysicalResourceId: physicalResourceId || context.logStreamName,
+            Data: data,
+            StackId,
+            RequestId,
+            LogicalResourceId,
+            NoEcho: noEcho || false,
+          });
+
+          const { hostname, pathname, search } = new URL(ResponseURL);
+          const path = `${pathname}${search}`;
+          const headers = {
+            "Content-Type": "application/json",
+            "Content-Length": body.length,
+          };
+
+          return await new Promise((resolve, reject) => {
+            const req = https.request(
+              { hostname, port: 443, path, method: "PUT", headers },
+              res => {
+                res.on("data", chunk => {
+                  const body = chunk.toString();
+                  resolve(body);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(body);
+            req.end();
+          });
+        };
+
+        const main = async (event, context) => {
+          const client = new S3Client();
+          const { ResourceProperties } = event;
+          const { Bucket, Key, Body, ContentType, Base64 } = ResourceProperties;
+          if (event.RequestType === "Create" || event.RequestType === "Update") {
+            const command = new PutObjectCommand({
+              Bucket,
+              Key,
+              Body: Base64 ? Buffer.from(Body, "base64") : Body,
+              ContentType,
+            });
+            await client.send(command);
+            return await sendResponse(
+              event,
+              context,
+              "SUCCESS",
+              { Bucket, Key },
+              `s3://${Bucket}/${Key}`,
+            );
+          } else if (event.RequestType === "Delete") {
+            const command = new DeleteObjectCommand({ Bucket, Key });
+            await client.send(command).catch(console.error);
+            return await sendResponse(event, context, "SUCCESS");
+          } else {
+            throw new Error(`Invalid RequestType: ${event.RequestType}`);
+          }
+        };
+
+        exports.handler = async (event, context) => {
+          try {
+            console.log(serialize(event));
+            return await main(event, context);
+          } catch (error) {
+            console.error(error);
+            return await sendResponse(event, context, "FAILED", {});
+          }
+        };
+
+  MainPyObject:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: S3ObjectFunction.Arn
+      Bucket:
+        Ref: S3Bucket
+      Key: main.py
+      ContentType: text/plain
+      Body: |
+        from typing import Any
+
+
+        def main() -> None:
+            result = {"message": "Hello World!"}
+            print(result)
+
+
+        if __name__ == "__main__":
+            main()
+
+  # Glue resources
+  GlueSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-GlueSecurityGroup
+      GroupDescription: Glue security group
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: GlueSecurityGroup
+
+  GlueSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Self-referencing inbound rule
+      GroupId:
+        Ref: GlueSecurityGroup
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      SourceSecurityGroupId:
+        Ref: GlueSecurityGroup
+
+  GlueDBonnection:
+    Type: AWS::Glue::Connection
+    Properties:
+      CatalogId:
+        Ref: AWS::AccountId
+      ConnectionInput:
+        Name:
+          Fn::Sub: ${AWS::StackName}-GlueDBonnection
+        Description: Glue DB connection
+        ConnectionType: JDBC
+        ConnectionProperties:
+          JDBC_CONNECTION_URL:
+            Fn::Sub: jdbc:postgresql://${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${DBName}
+          SECRET_ID:
+            Fn::Sub: ${AWS::StackName}-DBSecret
+        PhysicalConnectionRequirements:
+          AvailabilityZone:
+            Fn::GetAtt: PrivateSubnet0.AvailabilityZone
+          SubnetId:
+            Ref: PrivateSubnet0
+          SecurityGroupIdList:
+            - Ref: GlueSecurityGroup
+
+  GlueJobPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-GlueJobPolicy-${AWS::Region}
+      Description: Policy for GlueJob
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3ObjectRead
+            Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+          - Sid: SecretsManagerRead
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource:
+              - Ref: DBSecret
+
+  GlueJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-GlueJobRole-${AWS::Region}
+      Description: Service role for GlueJob
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSGlueServiceRole
+        - Ref: GlueJobPolicy

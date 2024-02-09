@@ -1,0 +1,179 @@
+# apigateway/templates/lambda-authorizer.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Lambda authorizer stack
+
+Parameters:
+  Username:
+    Type: String
+    Description: User name
+    Default: hryssmz@yahoo.com
+
+  Password:
+    Type: String
+    Description: User password
+    Default: secret
+
+  EmailAddress:
+    Type: String
+    Description: Email address
+    Default: hryssmz@yahoo.com
+
+Resources:
+  # API Gateway resources
+  LambdaAuthorizerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-LambdaAuthorizerPolicy-${AWS::Region}
+      Description: Execution policy for Lambda authorizer
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - Fn::GetAtt: AuthorizerFunction.Arn
+
+  LambdaAuthorizerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-LambdaAuthorizerRole-${AWS::Region}
+      Description: Execution role for Lambda authorizer
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: LambdaAuthorizerPolicy
+
+  LambdaAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-LambdaAuthorizer
+      RestApiId:
+        Ref: RestApi
+      Type: TOKEN
+      IdentitySource: method.request.header.Authorization
+      AuthorizerUri:
+        Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthorizerFunction.Arn}/invocations
+      AuthorizerCredentials:
+        Fn::GetAtt: LambdaAuthorizerRole.Arn
+
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name:
+        Ref: AWS::StackName
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      EndpointConfiguration:
+        Types:
+          - EDGE
+
+  GetRootMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Ref: RestApi
+      ResourceId:
+        Fn::GetAtt: RestApi.RootResourceId
+      HttpMethod: GET
+      OperationName: GetRoot
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Ref: LambdaAuthorizer
+      Integration:
+        Type: MOCK
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: |
+            {
+              "statusCode": 200
+            }
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: |
+                {
+                  "message": "Hello World!"
+                }
+      MethodResponses:
+        - StatusCode: 200
+
+  RestApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetRootMethod
+    Properties:
+      Description: REST API deployment
+      RestApiId:
+        Ref: RestApi
+      StageName: dev
+      StageDescription:
+        Description: dev stage
+
+  # Lambda resources
+  AuthorizerFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-AuthorizerFunctionRole-${AWS::Region}
+      Description: Service role for AuthorizerFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  AuthorizerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-AuthorizerFunction
+
+  AuthorizerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-AuthorizerFunction
+      Description: Authorizer function
+      Role:
+        Fn::GetAtt: AuthorizerFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: AuthorizerFunctionLogGroup
+      Code:
+        ZipFile: |
+          exports.handler = async event => {
+            const { authorizationToken, methodArn } = event;
+            console.log(JSON.stringify(event, null, 2));
+            return {
+              principalId: "*",
+              policyDocument: {
+                Version: "2012-10-17",
+                Statement: [
+                  {
+                    Action: "execute-api:Invoke",
+                    Effect: authorizationToken?.toLowerCase() === "ok" ? "Allow" : "Deny",
+                    Resource: methodArn,
+                  },
+                ],
+              },
+            };
+          };

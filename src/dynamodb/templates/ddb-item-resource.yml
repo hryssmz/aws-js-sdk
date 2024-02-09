@@ -1,0 +1,197 @@
+# dynamodb/templates/ddb-item-resource.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: DynamoDB item custom resource
+
+Resources:
+  # DynamoDB resources
+  SimpleTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName:
+        Fn::Sub: ${AWS::StackName}-SimpleTable
+      PrimaryKey:
+        Name: Id
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 3
+        WriteCapacityUnits: 3
+
+  # Custom resource
+  DDBItemFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-DDBItemFunction
+
+  DDBItemFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-DDBItemFunctionPolicy-${AWS::Region}
+      Description: Policy for DDBItemFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3AccessPermissions
+            Effect: Allow
+            Action:
+              - dynamodb:DescribeTable
+              - dynamodb:DeleteItem
+              - dynamodb:PutItem
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AWS::StackName}*
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: ${DDBItemFunctionLogGroup.Arn}
+
+  DDBItemFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DDBItemFunctionRole-${AWS::Region}
+      Description: Service role for DDBItemFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: DDBItemFunctionPolicy
+
+  DDBItemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-DDBItemFunction
+      Description: DynamoDB item function
+      Role:
+        Fn::GetAtt: DDBItemFunctionRole.Arn
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Timeout: 30
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: DDBItemFunctionLogGroup
+      InlineCode: |
+        const https = require("https");
+        const {
+          DescribeTableCommand,
+          DynamoDBClient,
+        } = require("@aws-sdk/client-dynamodb");
+        const {
+          DeleteCommand,
+          DynamoDBDocumentClient,
+          PutCommand,
+        } = require("@aws-sdk/lib-dynamodb");
+
+        const serialize = obj => JSON.stringify(obj, null, 2);
+
+        const sendResponse = async (
+          event,
+          context,
+          status,
+          data,
+          physicalResourceId,
+          noEcho,
+        ) => {
+          const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
+          const body = serialize({
+            Status: status,
+            Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,
+            PhysicalResourceId: physicalResourceId || context.logStreamName,
+            Data: data,
+            StackId,
+            RequestId,
+            LogicalResourceId,
+            NoEcho: noEcho || false,
+          });
+
+          const { hostname, pathname, search } = new URL(ResponseURL);
+          const path = `${pathname}${search}`;
+          const headers = {
+            "Content-Type": "application/json",
+            "Content-Length": body.length,
+          };
+
+          return await new Promise((resolve, reject) => {
+            const req = https.request(
+              { hostname, port: 443, path, method: "PUT", headers },
+              res => {
+                res.on("data", chunk => {
+                  const body = chunk.toString();
+                  resolve(body);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(body);
+            req.end();
+          });
+        };
+
+        const main = async (event, context) => {
+          const client = new DynamoDBClient();
+          const docClient = DynamoDBDocumentClient.from(client);
+          const { ResourceProperties } = event;
+          const { TableName, Item } = ResourceProperties;
+          const command = new DescribeTableCommand({ TableName });
+          const { Table } = await client.send(command);
+          const keySchema = Table?.KeySchema ?? [];
+          const partKey =
+            keySchema.find(k => k.KeyType === "HASH")?.AttributeName ?? "";
+          const sortKey = keySchema.find(k => k.KeyType === "RANGE")?.AttributeName;
+
+          if (event.RequestType === "Create" || event.RequestType === "Update") {
+            const command = new PutCommand({ TableName, Item });
+            await docClient.send(command);
+            return await sendResponse(
+              event,
+              context,
+              "SUCCESS",
+              {},
+              [TableName, Item[partKey], ...(sortKey ? [Item[sortKey]] : [])].join("/"),
+            );
+          } else if (event.RequestType === "Delete") {
+            const key = {
+              [partKey]: Item[partKey],
+              ...(sortKey && { [sortKey]: Item[sortKey] }),
+            };
+            const command = new DeleteCommand({ TableName, Key: key });
+            await docClient.send(command).catch(console.error);
+            return await sendResponse(event, context, "SUCCESS");
+          } else {
+            throw new Error(`Invalid RequestType: ${event.RequestType}`);
+          }
+        };
+
+        exports.handler = async (event, context) => {
+          try {
+            console.log(serialize(event));
+            return await main(event, context);
+          } catch (error) {
+            console.error(error);
+            return await sendResponse(event, context, "FAILED", {});
+          }
+        };
+
+  DDBItem1:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: DDBItemFunction.Arn
+      TableName:
+        Ref: SimpleTable
+      Item:
+        Id: 1
