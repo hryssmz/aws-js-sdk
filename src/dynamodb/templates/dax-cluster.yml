@@ -225,7 +225,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: dax.amazonaws.com
+              Service:
+                Fn::Sub: dax.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

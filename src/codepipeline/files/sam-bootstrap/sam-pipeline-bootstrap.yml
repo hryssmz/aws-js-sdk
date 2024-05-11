@@ -411,7 +411,8 @@ Resources:
           - Sid: LambdaECRImageRetrievalPolicy
             Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - ecr:GetDownloadUrlForLayer
               - ecr:BatchGetImage

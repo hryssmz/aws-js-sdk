@@ -91,7 +91,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -393,7 +394,8 @@ Resources:
           - Sid: BucketAccessPermissions
             Effect: Allow
             Principal:
-              Service: delivery.logs.amazonaws.com
+              Service:
+                Fn::Sub: delivery.logs.${AWS::URLSuffix}
             Action:
               - s3:GetBucketAcl
             Resource:
@@ -408,7 +410,8 @@ Resources:
           - Sid: ObjectAccessPermissions
             Effect: Allow
             Principal:
-              Service: delivery.logs.amazonaws.com
+              Service:
+                Fn::Sub: delivery.logs.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:

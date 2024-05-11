@@ -71,7 +71,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: s3.amazonaws.com
+              Service:
+                Fn::Sub: s3.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:
@@ -96,7 +97,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: mediaconvert.amazonaws.com
+              Service:
+                Fn::Sub: mediaconvert.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -140,12 +142,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: TranscodeFunctionPolicy
+
+  TranscodeFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-TranscodeFunction
 
   TranscodeFunction:
     Type: AWS::Serverless::Function
@@ -160,6 +169,9 @@ Resources:
       Runtime: python3.9
       Handler: index.handler
       Timeout: 120
+      LoggingConfig:
+        LogGroup:
+          Ref: TranscodeFunctionLogGroup
       Environment:
         Variables:
           DESTINATION_BUCKET:
@@ -761,9 +773,3 @@ Resources:
                 "invocationId": invocation_id,
                 "results": result_list,
             }
-
-  TranscodeFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${TranscodeFunction}

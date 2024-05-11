@@ -14,17 +14,34 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
+  GreetingFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-GreetingFunction
+
   GreetingFunction:
     Type: AWS::Lambda::Function
     Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-GreetingFunction
+      Description: Greeting Function
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs16.x
       Architectures:
         - x86_64
+      LoggingConfig:
+        LogGroup:
+          Ref: GreetingFunctionLogGroup
       Code:
         ZipFile: |
           "use strict";
@@ -59,11 +76,6 @@ Resources:
             // Return a greeting to the caller
             callback(null, { greeting });
           };
-      Description: Greeting Function
-      Handler: index.handler
-      Role:
-        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
-      Runtime: nodejs16.x
 
   GreetingFunctionPermission:
     Type: AWS::Lambda::Permission
@@ -71,14 +83,16 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: GreetingFunction
-      Principal: apigateway.amazonaws.com
+      Principal:
+        Fn::Sub: apigateway.${AWS::URLSuffix}
 
   NonProxyApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
       Description: Non-proxy API
       EndpointConfiguration:
-        Types: [REGIONAL]
+        Types:
+          - REGIONAL
       Name: NonProxyApi
 
   RequestBodyAndParametersValidator:

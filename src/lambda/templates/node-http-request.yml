@@ -13,11 +13,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  HttpRequestFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-HttpRequestFunction
 
   HttpRequestFunction:
     Type: AWS::Serverless::Function
@@ -31,6 +38,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: HttpRequestFunctionLogGroup
       InlineCode: |
         const http = require("node:http");
 
@@ -54,12 +64,6 @@ Resources:
           return globalIpAddress;
         };
 
-  HttpRequestFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${HttpRequestFunction}
-
   HttpsRequestFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -71,11 +75,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  HttpsRequestFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-HttpsRequestFunction
 
   HttpsRequestFunction:
     Type: AWS::Serverless::Function
@@ -89,6 +100,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: HttpsRequestFunctionLogGroup
       InlineCode: |
         const https = require("node:https");
 
@@ -111,9 +125,3 @@ Resources:
 
           return globalIpAddress;
         };
-
-  HttpsRequestFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${HttpsRequestFunction}

@@ -50,7 +50,7 @@ Resources:
                 "Sid": "Route53CloudWatchLogsAccess",
                 "Effect": "Allow",
                 "Principal": {
-                  "Service": "route53.amazonaws.com"
+                  "Service": "route53.${AWS::URLSuffix}"
                 },
                 "Action": [
                   "logs:CreateLogStream",
@@ -195,11 +195,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  LambdaFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-LambdaFunction
 
   LambdaFunction:
     Type: AWS::Serverless::Function
@@ -213,6 +220,9 @@ Resources:
       Handler: index.handler
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: LambdaFunctionLogGroup
       Events:
         ApiEvent:
           Type: Api
@@ -231,9 +241,3 @@ Resources:
           };
           return response;
         };
-
-  LambdaFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${LambdaFunction}

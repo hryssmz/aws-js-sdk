@@ -73,7 +73,8 @@ Resources:
           - Sid: AWSConfigBucketReadPermissions
             Effect: Allow
             Principal:
-              Service: config.amazonaws.com
+              Service:
+                Fn::Sub: config.${AWS::URLSuffix}
             Action:
               - s3:GetBucketAcl
               - s3:ListBucket
@@ -86,7 +87,8 @@ Resources:
           - Sid: AWSConfigObjectWritePermissions
             Effect: Allow
             Principal:
-              Service: config.amazonaws.com
+              Service:
+                Fn::Sub: config.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:
@@ -128,7 +130,8 @@ Resources:
           - Sid: SNSAccessPermissions
             Effect: Allow
             Principal:
-              Service: config.amazonaws.com
+              Service:
+                Fn::Sub: config.${AWS::URLSuffix}
             Action:
               - sns:Publish
             Resource:
@@ -150,11 +153,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  CentralConfigTopicSubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: CreateCenterResourceCondition
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${StackSetName}-CentralConfigTopicSubscriberFunction
 
   CentralConfigTopicSubscriberFunction:
     Type: AWS::Lambda::Function
@@ -169,6 +180,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: HelloWorldFunctionLogGroup
       Code:
         ZipFile: |
           exports.handler = async event => {
@@ -181,13 +195,6 @@ Resources:
             });
             return records;
           };
-
-  CentralConfigTopicSubscriberFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Condition: CreateCenterResourceCondition
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${CentralConfigTopicSubscriberFunction}
 
   CentralConfigTopicSubscriberFunctionSubscription:
     Type: AWS::SNS::Subscription
@@ -206,7 +213,8 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: CentralConfigTopicSubscriberFunction
-      Principal: sns.amazonaws.com
+      Principal:
+        Fn::Sub: sns.${AWS::URLSuffix}
       SourceArn:
         Ref: CentralConfigTopic
 
@@ -231,7 +239,7 @@ Resources:
       Name:
         Ref: StackSetName
       RoleARN:
-        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig
+        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.${AWS::URLSuffix}/AWSServiceRoleForConfig
       RecordingGroup:
         AllSupported: true
         IncludeGlobalResourceTypes:
@@ -279,7 +287,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ssm.amazonaws.com
+              Service:
+                Fn::Sub: ssm.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
             Condition:

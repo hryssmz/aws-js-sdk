@@ -39,7 +39,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: apigateway.amazonaws.com
+              Service:
+                Fn::Sub: apigateway.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -51,7 +52,8 @@ Resources:
     Properties:
       Description: My demo API
       EndpointConfiguration:
-        Types: [REGIONAL]
+        Types:
+          - REGIONAL
       Name: MyDemoAPI
 
   TopicModel:
@@ -106,7 +108,7 @@ Resources:
             StatusCode: 200
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:sns:action/ListTopics
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:sns:action/ListTopics
       MethodResponses:
         - ResponseModels:
             application/json:

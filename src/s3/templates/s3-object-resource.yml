@@ -62,11 +62,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Ref: S3ObjectFunctionPolicy
+
+  S3ObjectFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-S3ObjectFunction
 
   S3ObjectFunction:
     Type: AWS::Serverless::Function
@@ -81,6 +88,9 @@ Resources:
       Runtime: nodejs18.x
       Handler: index.handler
       Timeout: 30
+      LoggingConfig:
+        LogGroup:
+          Ref: S3ObjectFunctionLogGroup
       InlineCode:
         Fn::Join:
           - "\n"
@@ -228,12 +238,6 @@ Resources:
                   return await sendResponse(event, context, "FAILED", {});
                 }
               };
-
-  S3ObjectFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${AWS::StackName}-S3ObjectFunction
 
   IndexHtmlObject:
     Type: AWS::CloudFormation::CustomResource
@@ -435,11 +439,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  PutRootFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-PutRootFunction
 
   PutRootFunction:
     Type: AWS::Serverless::Function
@@ -453,6 +464,9 @@ Resources:
         - arm64
       Runtime: nodejs18.x
       Handler: index.handler
+      LoggingConfig:
+        LogGroup:
+          Ref: PutRootFunctionLogGroup
       Events:
         ApiEvent:
           Type: Api
@@ -470,9 +484,3 @@ Resources:
             body: JSON.stringify({ message: "Hello World!" }),
           };
         };
-
-  PutRootFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${PutRootFunction}

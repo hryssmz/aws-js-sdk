@@ -91,7 +91,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ssm.amazonaws.com
+              Service:
+                Fn::Sub: ssm.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
             Condition:
@@ -152,11 +153,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  LambdaFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/Automation-${AWS::StackName}-LambdaFunction
 
   LambdaFunction:
     Type: AWS::Serverless::Function
@@ -171,17 +179,14 @@ Resources:
       Runtime: nodejs18.x
       Handler: index.handler
       Timeout: 30
+      LoggingConfig:
+        LogGroup:
+          Ref: LambdaFunctionLogGroup
       InlineCode: |
         exports.handler = async event => {
           console.log(`event: ${JSON.stringify(event, null, 2)}`);
           return { message: "Hello World!" };
         };
-
-  LambdaFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${LambdaFunction}
 
   ParentRunbookDocumentPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -200,7 +205,8 @@ Resources:
               - Fn::GetAtt: ChildRunbookDocumentRole.Arn
             Condition:
               StringLikeIfExists:
-                iam:PassedToService: ssm.amazonaws.com
+                iam:PassedToService:
+                  Fn::Sub: ssm.${AWS::URLSuffix}
 
   ParentRunbookDocumentRole:
     Type: AWS::IAM::Role
@@ -213,7 +219,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ssm.amazonaws.com
+              Service:
+                Fn::Sub: ssm.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
             Condition:

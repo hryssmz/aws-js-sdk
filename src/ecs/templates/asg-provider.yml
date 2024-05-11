@@ -310,7 +310,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ecs-tasks.amazonaws.com
+              Service:
+                Fn::Sub: ecs-tasks.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -358,7 +359,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ecs-tasks.amazonaws.com
+              Service:
+                Fn::Sub: ecs-tasks.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -506,7 +508,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

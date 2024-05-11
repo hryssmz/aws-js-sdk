@@ -14,7 +14,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: apigateway.amazonaws.com
+              Service:
+                Fn::Sub: apigateway.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -26,7 +27,8 @@ Resources:
     Properties:
       Description: Kinesis proxy API
       EndpointConfiguration:
-        Types: [REGIONAL]
+        Types:
+          - REGIONAL
       Name: KinesisProxy
 
   RequestParametersValidator:
@@ -170,7 +172,7 @@ Resources:
           application/json: "{}"
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/ListStreams
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:kinesis:action/ListStreams
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -203,7 +205,7 @@ Resources:
             }
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/DescribeStream
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:kinesis:action/DescribeStream
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -238,7 +240,7 @@ Resources:
             }
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/CreateStream
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:kinesis:action/CreateStream
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -276,7 +278,7 @@ Resources:
             }
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/DeleteStream
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:kinesis:action/DeleteStream
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -311,7 +313,7 @@ Resources:
             }
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/PutRecord
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:kinesis:action/PutRecord
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -358,7 +360,7 @@ Resources:
             }
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/PutRecords
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:kinesis:action/PutRecords
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -398,7 +400,7 @@ Resources:
             }
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/GetShardIterator
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:kinesis:action/GetShardIterator
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -435,7 +437,7 @@ Resources:
             }
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:kinesis:action/GetRecords
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:kinesis:action/GetRecords
       MethodResponses:
         - ResponseModels:
             application/json: Empty

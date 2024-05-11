@@ -62,7 +62,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: cloudfront.amazonaws.com
+              Service:
+                Fn::Sub: cloudfront.${AWS::URLSuffix}
             Action:
               - s3:GetObject
             Resource:
@@ -70,7 +71,7 @@ Resources:
             Condition:
               StringEquals:
                 aws:SourceArn:
-                  Fn::Sub: arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}
+                  Fn::Sub: arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}
 
   WwwBucket:
     Type: AWS::S3::Bucket
@@ -113,7 +114,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: logging.s3.amazonaws.com
+              Service:
+                Fn::Sub: logging.s3.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:

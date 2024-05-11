@@ -39,7 +39,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: cognito-idp.amazonaws.com
+              Service:
+                Fn::Sub: cognito-idp.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
             Condition:

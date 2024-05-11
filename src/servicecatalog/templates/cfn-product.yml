@@ -67,7 +67,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: servicecatalog.amazonaws.com
+              Service:
+                Fn::Sub: servicecatalog.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

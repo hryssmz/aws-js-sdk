@@ -37,7 +37,8 @@ Resources:
           - Sid: AWSConfigBucketReadPermissions
             Effect: Allow
             Principal:
-              Service: config.amazonaws.com
+              Service:
+                Fn::Sub: config.${AWS::URLSuffix}
             Action:
               - s3:GetBucketAcl
               - s3:ListBucket
@@ -50,7 +51,8 @@ Resources:
           - Sid: AWSConfigObjectWritePermissions
             Effect: Allow
             Principal:
-              Service: config.amazonaws.com
+              Service:
+                Fn::Sub: config.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:
@@ -74,7 +76,8 @@ Resources:
           - Sid: CloudTrailBucketReadPermissions
             Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:GetBucketAcl
             Resource:
@@ -86,7 +89,8 @@ Resources:
           - Sid: CloudTrailObjectWritePermissions
             Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:
@@ -116,7 +120,8 @@ Resources:
           - Sid: SNSAccessPermissions
             Effect: Allow
             Principal:
-              Service: config.amazonaws.com
+              Service:
+                Fn::Sub: config.${AWS::URLSuffix}
             Action:
               - sns:Publish
             Resource:
@@ -136,11 +141,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  CentralConfigTopicSubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/CentralConfigTopicSubscriberFunction
 
   CentralConfigTopicSubscriberFunction:
     Type: AWS::Lambda::Function
@@ -153,6 +165,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: CentralConfigTopicSubscriberFunctionLogGroup
       Code:
         ZipFile: |
           exports.handler = async event => {
@@ -165,12 +180,6 @@ Resources:
             });
             return records;
           };
-
-  CentralConfigTopicSubscriberFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${CentralConfigTopicSubscriberFunction}
 
   CentralConfigTopicSubscriberFunctionSubscription:
     Type: AWS::SNS::Subscription
@@ -187,7 +196,8 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: CentralConfigTopicSubscriberFunction
-      Principal: sns.amazonaws.com
+      Principal:
+        Fn::Sub: sns.${AWS::URLSuffix}
       SourceArn:
         Ref: CentralConfigTopic
 
@@ -242,11 +252,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  CentralEventBusSubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/CentralEventBusSubscriberFunction
 
   CentralEventBusSubscriberFunction:
     Type: AWS::Lambda::Function
@@ -259,17 +276,14 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: CentralEventBusSubscriberFunctionLogGroup
       Code:
         ZipFile: |
           exports.handler = async event => {
             console.log(JSON.stringify(event, null, 2));
           };
-
-  CentralEventBusSubscriberFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${CentralEventBusSubscriberFunction}
 
   CentralEventBusSubscriberFunctionPermission:
     Type: AWS::Lambda::Permission
@@ -277,7 +291,8 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: CentralEventBusSubscriberFunction
-      Principal: events.amazonaws.com
+      Principal:
+        Fn::Sub: events.${AWS::URLSuffix}
       SourceArn:
         Fn::GetAtt: CentralEventBusRule.Arn
 
@@ -295,8 +310,8 @@ Resources:
       EventSelectors:
         - IncludeManagementEvents: true
           ExcludeManagementEventSources:
-            - kms.amazonaws.com
-            - rdsdata.amazonaws.com
+            - Fn::Sub: kms.${AWS::URLSuffix}
+            - Fn::Sub: rdsdata.${AWS::URLSuffix}
         - IncludeManagementEvents: false
           DataResources:
             - Type: AWS::Lambda::Function
@@ -316,7 +331,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: config.amazonaws.com
+              Service:
+                Fn::Sub: config.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -350,7 +366,7 @@ Resources:
     Properties:
       Name: ConfigurationRecorder
       RoleARN:
-        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig
+        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.${AWS::URLSuffix}/AWSServiceRoleForConfig
       RecordingGroup:
         AllSupported: true
         IncludeGlobalResourceTypes: true

@@ -35,7 +35,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: apigateway.amazonaws.com
+              Service:
+                Fn::Sub: apigateway.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -150,7 +151,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -197,6 +199,12 @@ Resources:
                 "body": json.dumps({"message": "Hello World"}),
             }
 
+  LoadTestFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-LoadTestFunction
+
   LoadTestFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -208,6 +216,9 @@ Resources:
       Timeout: 60
       Architectures:
         - Ref: Architecture
+      LoggingConfig:
+        LogGroup:
+          Ref: LoadTestFunctionLogGroup
       Environment:
         Variables:
           LOAD_TEST_URL:
@@ -252,11 +263,11 @@ Resources:
           return response;
         };
 
-  LoadTestFunctionLogGroup:
+  LoadTest2FunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName:
-        Fn::Sub: /aws/lambda/${LoadTestFunction}
+        Fn::Sub: /aws/lambda/${AWS::StackName}-LoadTest2Function
 
   LoadTest2Function:
     Type: AWS::Serverless::Function
@@ -271,6 +282,9 @@ Resources:
       Timeout: 60
       Architectures:
         - Ref: Architecture
+      LoggingConfig:
+        LogGroup:
+          Ref: LoadTest2FunctionLogGroup
       Environment:
         Variables:
           LOAD_TEST_URL:
@@ -318,12 +332,6 @@ Resources:
             }
             logger.info(f"Process finished: {response}")
             return response
-
-  LoadTest2FunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${LoadTest2Function}
 
 Outputs:
   RestApiUrl:

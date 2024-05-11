@@ -47,7 +47,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: s3.amazonaws.com
+              Service:
+                Fn::Sub: s3.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

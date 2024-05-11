@@ -20,7 +20,7 @@ Resources:
             Effect: Allow
             Principal:
               AWS:
-                Fn::Sub: arn:aws:iam::${AccountId}:root
+                Fn::Sub: arn:${AWS::Partition}:iam::${AccountId}:root
             Action:
               - organizations:DescribeOrganization
               - organizations:DescribeOrganizationalUnit

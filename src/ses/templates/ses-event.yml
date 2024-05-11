@@ -74,7 +74,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ses.amazonaws.com
+              Service:
+                Fn::Sub: ses.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -171,12 +172,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: SendEmailFunctionPolicy
+
+  SendEmailFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SendEmailFunction
 
   SendEmailFunction:
     Type: AWS::Serverless::Function
@@ -190,6 +198,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SendEmailFunctionLogGroup
       Environment:
         Variables:
           SENDER:
@@ -253,12 +264,6 @@ Resources:
           return messageId;
         };
 
-  SendEmailFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SendEmailFunction}
-
   # SNS
   SESEventTopic:
     Type: AWS::SNS::Topic
@@ -278,7 +283,8 @@ Resources:
             Action:
               - sns:Publish
             Principal:
-              Service: ses.amazonaws.com
+              Service:
+                Fn::Sub: ses.${AWS::URLSuffix}
             Resource:
               - Ref: SESEventTopic
             Condition:
@@ -299,11 +305,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SESEventFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SESEventFunction
 
   SESEventFunction:
     Type: AWS::Serverless::Function
@@ -317,6 +330,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SESEventFunctionLogGroup
       Events:
         SNSEvent:
           Type: SNS
@@ -334,12 +350,6 @@ Resources:
           });
           return records;
         };
-
-  SESEventFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SESEventFunction}
 
   # Kinesis Data Firehose
   DestinationBucket:
@@ -385,12 +395,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: DestinationFunctionPolicy
+
+  DestinationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-DestinationFunction
 
   DestinationFunction:
     Type: AWS::Serverless::Function
@@ -405,6 +422,9 @@ Resources:
       Timeout: 10
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: DestinationFunctionLogGroup
       InlineCode: |
         const { GetObjectCommand, S3Client } = require("@aws-sdk/client-s3");
 
@@ -429,17 +449,12 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: DestinationFunction
-      Principal: s3.amazonaws.com
+      Principal:
+        Fn::Sub: s3.${AWS::URLSuffix}
       SourceArn:
         Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}
       SourceAccount:
         Ref: AWS::AccountId
-
-  DestinationFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${DestinationFunction}
 
   DeliveryStreamS3Policy:
     Type: AWS::IAM::ManagedPolicy
@@ -475,7 +490,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: firehose.amazonaws.com
+              Service:
+                Fn::Sub: firehose.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
 

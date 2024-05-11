@@ -136,7 +136,7 @@ Resources:
               - "*"
 
   # REST API
-  HelloWorldApi:
+  RestApi:
     Type: AWS::Serverless::Api
     Properties:
       Description: Hello World REST API
@@ -432,9 +432,29 @@ Resources:
                   $ref: "#/components/headers/Access-Control-Allow-Origin"
 
   # Lambda functions (REST API)
+  ListBucketsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ListBucketsFunction
+
   ListBucketsFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Description: List buckets function
+      LoggingConfig:
+        LogGroup:
+          Ref: ListBucketsFunctionLogGroup
+      Policies:
+        - Ref: ListBucketsFunctionPolicy
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /buckets
+            RestApiId:
+              Ref: RestApi
       InlineCode: |
         # aws_s3_app/list_buckets/index.py
         import json
@@ -460,21 +480,30 @@ Resources:
                 "isBase64Encoded": False,
             }
             return response
-      Description: List buckets function
-      Policies:
-        - Ref: ListBucketsFunctionPolicy
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            Method: GET
-            Path: /buckets
-            RestApiId:
-              Ref: HelloWorldApi
+
+  CreateBucketFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-CreateBucketFunction
 
   CreateBucketFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Description: Create bucket function
+      Policies:
+        - Ref: CreateBucketFunctionPolicy
+      LoggingConfig:
+        LogGroup:
+          Ref: CreateBucketFunctionLogGroup
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: PUT
+            Path: /buckets/{bucket}
+            RestApiId:
+              Ref: RestApi
       InlineCode: |
         # aws_s3_app/create_bucket/index.py
         import json
@@ -529,21 +558,30 @@ Resources:
                     raise exc
 
             return response
-      Description: Create bucket function
-      Policies:
-        - Ref: CreateBucketFunctionPolicy
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            Method: PUT
-            Path: /buckets/{bucket}
-            RestApiId:
-              Ref: HelloWorldApi
+
+  DeleteBucketFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-DeleteBucketFunction
 
   DeleteBucketFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Description: Delete bucket function
+      LoggingConfig:
+        LogGroup:
+          Ref: DeleteBucketFunctionLogGroup
+      Policies:
+        - Ref: DeleteBucketFunctionPolicy
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: DELETE
+            Path: /buckets/{bucket}
+            RestApiId:
+              Ref: RestApi
       InlineCode: |
         # aws_s3_app/delete_bucket/index.py
         import json
@@ -597,21 +635,30 @@ Resources:
                     raise exc
 
             return response
-      Description: Delete bucket function
-      Policies:
-        - Ref: DeleteBucketFunctionPolicy
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            Method: DELETE
-            Path: /buckets/{bucket}
-            RestApiId:
-              Ref: HelloWorldApi
+
+  ListObjectsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ListObjectsFunction
 
   ListObjectsFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Description: List objects function
+      Policies:
+        - Ref: ListObjectsFunctionPolicy
+      LoggingConfig:
+        LogGroup:
+          Ref: ListObjectsFunctionLogGroup
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /buckets/{bucket}
+            RestApiId:
+              Ref: RestApi
       InlineCode: |
         # aws_s3_app/list_objects/index.py
         import json
@@ -665,21 +712,30 @@ Resources:
                     raise exc
 
             return response
-      Description: List objects function
-      Policies:
-        - Ref: ListObjectsFunctionPolicy
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            Method: GET
-            Path: /buckets/{bucket}
-            RestApiId:
-              Ref: HelloWorldApi
+
+  CreateObjectFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-CreateObjectFunction
 
   CreateObjectFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Description: Create object function
+      Policies:
+        - Ref: CreateObjectFunctionPolicy
+      LoggingConfig:
+        LogGroup:
+          Ref: CreateObjectFunctionLogGroup
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: PUT
+            Path: /buckets/{bucket}/{key}
+            RestApiId:
+              Ref: RestApi
       InlineCode: |
         # aws_s3_app/create_object/index.py
         import json
@@ -745,21 +801,30 @@ Resources:
                     raise exc
 
             return response
-      Description: Create object function
-      Policies:
-        - Ref: CreateObjectFunctionPolicy
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            Method: PUT
-            Path: /buckets/{bucket}/{key}
-            RestApiId:
-              Ref: HelloWorldApi
+
+  GetObjectFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-GetObjectFunction
 
   GetObjectFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Description: Get object function
+      Policies:
+        - Ref: GetObjectFunctionPolicy
+      LoggingConfig:
+        LogGroup:
+          Ref: GetObjectFunctionLogGroup
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /buckets/{bucket}/{key}
+            RestApiId:
+              Ref: RestApi
       InlineCode: |
         # aws_s3_app/get_object/index.py
         import json
@@ -815,21 +880,30 @@ Resources:
                     raise exc
 
             return response
-      Description: Get object function
-      Policies:
-        - Ref: GetObjectFunctionPolicy
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            Method: GET
-            Path: /buckets/{bucket}/{key}
-            RestApiId:
-              Ref: HelloWorldApi
+
+  DeleteObjectFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-DeleteObjectFunction
 
   DeleteObjectFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Description: Delete object function
+      Policies:
+        - Ref: DeleteObjectFunctionPolicy
+      LoggingConfig:
+        LogGroup:
+          Ref: DeleteObjectFunctionLogGroup
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: DELETE
+            Path: /buckets/{bucket}/{key}
+            RestApiId:
+              Ref: RestApi
       InlineCode: |
         # aws_s3_app/delete_object/index.py
         import json
@@ -884,19 +958,8 @@ Resources:
                     raise exc
 
             return response
-      Description: Delete object function
-      Policies:
-        - Ref: DeleteObjectFunctionPolicy
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            Method: DELETE
-            Path: /buckets/{bucket}/{key}
-            RestApiId:
-              Ref: HelloWorldApi
 
 Outputs:
-  HelloWorldApi:
+  RestApiUrl:
     Value:
-      Fn::Sub: https://${HelloWorldApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${HelloWorldApi.Stage}
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}

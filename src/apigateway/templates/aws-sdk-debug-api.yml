@@ -92,11 +92,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  PostRootFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-PostRootFunction
 
   PostRootFunction:
     Type: AWS::Serverless::Function
@@ -110,6 +117,9 @@ Resources:
       Handler: index.handler
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: PostRootFunctionLogGroup
       Events:
         ApiEvent:
           Type: Api
@@ -124,12 +134,6 @@ Resources:
           const body = { message: "Hello World!" };
           return { statusCode: 200, body: JSON.stringify(body, null, 2) };
         };
-
-  PostRootFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${PostRootFunction}
 
 Outputs:
   RestApiUrl:

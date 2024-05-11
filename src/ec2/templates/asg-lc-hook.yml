@@ -69,7 +69,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -260,11 +261,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  LifecycleHookFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-LifecycleHookFunction
 
   LifecycleHookFunction:
     Type: AWS::Serverless::Function
@@ -278,6 +286,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: LifecycleHookFunctionLogGroup
       Events:
         EventBridgeEvent:
           Type: EventBridgeRule
@@ -293,12 +304,6 @@ Resources:
           console.log("Received event:", JSON.stringify(event, null, 2));
           return "Finished";
         };
-
-  LifecycleHookFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${LifecycleHookFunction}
 
   # Elastic Load Balancing
   ALBSecurityGroup:

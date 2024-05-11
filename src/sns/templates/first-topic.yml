@@ -36,12 +36,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: SenderFunctionPolicy
+
+  SenderFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SenderFunction
 
   SenderFunction:
     Type: AWS::Serverless::Function
@@ -55,6 +62,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SenderFunctionLogGroup
       Environment:
         Variables:
           TOPIC_ARN:
@@ -77,12 +87,6 @@ Resources:
           return result;
         };
 
-  SenderFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SenderFunction}
-
   ReceiverFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -94,11 +98,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ReceiverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ReceiverFunction
 
   ReceiverFunction:
     Type: AWS::Serverless::Function
@@ -112,6 +123,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: ReceiverFunctionLogGroup
       Events:
         SNSEvent:
           Type: SNS
@@ -127,9 +141,3 @@ Resources:
           });
           return messages;
         };
-
-  ReceiverFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${ReceiverFunction}

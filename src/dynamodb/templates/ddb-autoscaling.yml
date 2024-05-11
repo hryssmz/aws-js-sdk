@@ -45,12 +45,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: PutItemFunctionPolicy
+
+  PutItemFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-PutItemFunction
 
   PutItemFunction:
     Type: AWS::Serverless::Function
@@ -64,6 +71,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: PutItemFunctionLogGroup
       Environment:
         Variables:
           TABLE_NAME:
@@ -82,12 +92,6 @@ Resources:
           const { Attributes } = await client.send(command);
           return Attributes;
         };
-
-  PutItemFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${PutItemFunction}
 
   ScalableTargetWCU:
     Type: AWS::ApplicationAutoScaling::ScalableTarget

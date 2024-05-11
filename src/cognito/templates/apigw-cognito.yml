@@ -201,11 +201,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  GetAuthAccessFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-GetAuthAccessFunction
 
   GetAuthAccessFunction:
     Type: AWS::Serverless::Function
@@ -219,6 +226,9 @@ Resources:
       Handler: index.handler
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: GetAuthAccessFunctionLogGroup
       Events:
         ApiEvent:
           Type: Api
@@ -237,12 +247,6 @@ Resources:
           };
         };
 
-  GetAuthAccessFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${GetAuthAccessFunction}
-
   GetAuthIdFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -254,11 +258,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  GetAuthIdFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-GetAuthIdFunction
 
   GetAuthIdFunction:
     Type: AWS::Serverless::Function
@@ -272,6 +283,9 @@ Resources:
       Handler: index.handler
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: GetAuthIdFunctionLogGroup
       Events:
         ApiEvent:
           Type: Api
@@ -289,12 +303,6 @@ Resources:
             body: JSON.stringify(body, null, 2),
           };
         };
-
-  GetAuthIdFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${GetAuthIdFunction}
 
   # Lambda
   CreateUserFunctionPolicy:
@@ -325,12 +333,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: CreateUserFunctionPolicy
+
+  CreateUserFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-CreateUserFunction
 
   CreateUserFunction:
     Type: AWS::Serverless::Function
@@ -344,6 +359,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: CreateUserFunctionLogGroup
       Environment:
         Variables:
           USERNAME:
@@ -428,12 +446,6 @@ Resources:
           return AuthenticationResult;
         };
 
-  CreateUserFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${CreateUserFunction}
-
   SignInFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -445,11 +457,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SignInFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SignInFunction
 
   SignInFunction:
     Type: AWS::Serverless::Function
@@ -463,6 +482,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SignInFunctionLogGroup
       Environment:
         Variables:
           USERNAME:
@@ -509,12 +531,6 @@ Resources:
           return AuthenticationResult;
         };
 
-  SignInFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SignInFunction}
-
   ExecuteApiFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -526,11 +542,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ExecuteApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ExecuteApiFunction
 
   ExecuteApiFunction:
     Type: AWS::Serverless::Function
@@ -544,6 +567,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: ExecuteApiFunctionLogGroup
       Environment:
         Variables:
           USERNAME:
@@ -605,12 +631,6 @@ Resources:
           const { AuthenticationResult } = await client.send(initiateAuthCommand);
           return AuthenticationResult?.AccessToken;
         };
-
-  ExecuteApiFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${ExecuteApiFunction}
 
 Outputs:
   UserPool:

@@ -61,7 +61,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: backup.amazonaws.com
+              Service:
+                Fn::Sub: backup.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -80,11 +81,12 @@ Resources:
           - Fn::GetAtt: SimpleTable.Arn
         IamRoleArn:
           Fn::GetAtt: BackupRole.Arn
-# Outputs:
-#   SimpleTableArn:
-#     Description: SimpleTable ARN
-#     Value:
-#       Fn::GetAtt: SimpleTable.Arn
-#     Export:
-#       Name:
-#         Fn::Sub: ${AWS::StackName}-SimpleTableArn
+
+Outputs:
+  SimpleTableArn:
+    Description: SimpleTable ARN
+    Value:
+      Fn::GetAtt: SimpleTable.Arn
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-SimpleTableArn

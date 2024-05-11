@@ -91,7 +91,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: codebuild.amazonaws.com
+              Service:
+                Fn::Sub: codebuild.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

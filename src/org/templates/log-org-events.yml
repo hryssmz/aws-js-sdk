@@ -28,8 +28,8 @@ Resources:
         - IncludeManagementEvents: true
           ReadWriteType: All
           ExcludeManagementEventSources:
-            - kms.amazonaws.com
-            - rdsdata.amazonaws.com
+            - Fn::Sub: kms.${AWS::URLSuffix}
+            - Fn::Sub: rdsdata.${AWS::URLSuffix}
 
   TrailBucket:
     Type: AWS::S3::Bucket
@@ -53,7 +53,8 @@ Resources:
           - Sid: AWSCloudTrailAclCheck
             Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:GetBucketAcl
             Resource:
@@ -65,7 +66,8 @@ Resources:
           - Sid: AWSCloudTrailWrite
             Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:
@@ -75,6 +77,12 @@ Resources:
                 s3:x-amz-acl: bucket-owner-full-control
                 aws:SourceArn:
                   Fn::Sub: arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${AWS::StackName}-Trail
+
+  LogOrgEventsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-LogOrgEventsFunction
 
   LogOrgEventsFunction:
     Type: AWS::Serverless::Function
@@ -86,6 +94,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: LogOrgEventsFunctionLogGroup
       Events:
         EventBridgeEvent:
           Type: EventBridgeRule
@@ -97,16 +108,10 @@ Resources:
                 - AWS API Call via CloudTrail
               detail:
                 eventSource:
-                  - organizations.amazonaws.com
+                  - Fn::Sub: organizations.${AWS::URLSuffix}
       InlineCode: |
         exports.handler = async (event, context) => {
           console.log("LogOrganizationsEvents");
           console.log("Received event:", JSON.stringify(event, null, 2));
           return "Finished";
         };
-
-  LogOrgEventsFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${LogOrgEventsFunction}

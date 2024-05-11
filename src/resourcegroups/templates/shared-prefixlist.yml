@@ -103,7 +103,7 @@ Resources:
       ResourceArns:
         - Fn::GetAtt: PrefixList.Arn
       PermissionArns:
-        - arn:aws:ram::aws:permission/AWSRAMDefaultPermissionPrefixList
+        - Fn::Sub: arn:${AWS::Partition}:ram::aws:permission/AWSRAMDefaultPermissionPrefixList
       Principals:
         - Fn::Sub: arn:${AWS::Partition}:organizations::${AWS::AccountId}:organization/${OrganizationId}
 
@@ -247,7 +247,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

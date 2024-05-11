@@ -93,27 +93,39 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: ExecutePipelineFunctionPolicy
 
+  ExecutePipelineFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ExecutePipelineFunction
+
   ExecutePipelineFunction:
     Type: AWS::Lambda::Function
     Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ExecutePipelineFunction
       Description: Execute pipeline
+      Role:
+        Fn::GetAtt: ExecutePipelineFunctionRole.Arn
       Runtime: nodejs18.x
       Architectures:
         - arm64
       Handler: index.handler
+      LoggingConfig:
+        LogGroup:
+          Ref: ExecutePipelineFunctionLogGroup
       Environment:
         Variables:
           PIPELINE_NAME:
             Ref: PipelineName
-      Role:
-        Fn::GetAtt: ExecutePipelineFunctionRole.Arn
       Code:
         ZipFile: |
           const {
@@ -136,7 +148,8 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: ExecutePipelineFunction
-      Principal: sns.amazonaws.com
+      Principal:
+        Fn::Sub: sns.${AWS::URLSuffix}
       SourceArn:
         Ref: UpdateReferenceTopic
 
@@ -175,7 +188,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: codedeploy.amazonaws.com
+              Service:
+                Fn::Sub: codedeploy.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -278,7 +292,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: codepipeline.amazonaws.com
+              Service:
+                Fn::Sub: codepipeline.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -368,7 +383,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

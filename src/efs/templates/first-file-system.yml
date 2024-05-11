@@ -221,7 +221,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -277,7 +278,7 @@ Resources:
             /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
 
             # echo "${FileSystem}:${MountDir} efs tls,_netdev" >> /etc/fstab
-            # echo "${FileSystem}.efs.${AWS::Region}.amazonaws.com:${MountDir} nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport,_netdev 0 0" >> /etc/fstab
+            # echo "${FileSystem}.efs.${AWS::Region}.${AWS::URLSuffix}:${MountDir} nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport,_netdev 0 0" >> /etc/fstab
             # cat <<EOF >> /etc/amazon/efs/efs-utils.conf
             # [client-info]
             # source=liw

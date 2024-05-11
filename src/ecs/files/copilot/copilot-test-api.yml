@@ -222,7 +222,8 @@ Resources: # If a bucket URL is specified, that means the template exists.
         Statement:
           - Effect: Allow
             Principal:
-              Service: ecs-tasks.amazonaws.com
+              Service:
+                Fn::Sub: ecs-tasks.${AWS::URLSuffix}
             Action: sts:AssumeRole
       Policies:
         - PolicyName:
@@ -302,7 +303,8 @@ Resources: # If a bucket URL is specified, that means the template exists.
         Statement:
           - Effect: Allow
             Principal:
-              Service: ecs-tasks.amazonaws.com
+              Service:
+                Fn::Sub: ecs-tasks.${AWS::URLSuffix}
             Action: sts:AssumeRole
       Policies:
         - PolicyName: DenyIAMExceptTaggedRoles

@@ -59,7 +59,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: vpc-flow-logs.amazonaws.com
+              Service:
+                Fn::Sub: vpc-flow-logs.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
             Condition:
@@ -99,7 +100,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

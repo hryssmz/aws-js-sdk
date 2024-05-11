@@ -267,7 +267,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ecs-tasks.amazonaws.com
+              Service:
+                Fn::Sub: ecs-tasks.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -298,7 +299,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ecs-tasks.amazonaws.com
+              Service:
+                Fn::Sub: ecs-tasks.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -429,7 +431,7 @@ Resources:
       ResourceId:
         Fn::Sub: service/${ECSCluster}/${ECSService.Name}
       RoleARN:
-        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService
+        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.${AWS::URLSuffix}/AWSServiceRoleForApplicationAutoScaling_ECSService
       # SuspendedState:
       #   DynamicScalingInSuspended: true
       #   DynamicScalingOutSuspended: true

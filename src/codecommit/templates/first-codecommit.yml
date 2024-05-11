@@ -142,12 +142,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AWSCodeCommitPowerUser
+
+  ApproverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ApproverFunction
 
   ApproverFunction:
     Type: AWS::Lambda::Function
@@ -161,6 +168,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: ApproverFunctionLogGroup
       Code:
         ZipFile: |
           const {
@@ -184,12 +194,6 @@ Resources:
             );
           };
 
-  ApproverFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${ApproverFunction}
-
   # SNS
   CodeCommitEventTopic:
     Type: AWS::SNS::Topic
@@ -207,7 +211,8 @@ Resources:
           - Sid: SNSAccessPermissions
             Effect: Allow
             Principal:
-              Service: codestar-notifications.amazonaws.com
+              Service:
+                Fn::Sub: codestar-notifications.${AWS::URLSuffix}
             Action:
               - sns:Publish
             Resource:
@@ -224,11 +229,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SNSSubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SNSSubscriberFunction
 
   SNSSubscriberFunction:
     Type: AWS::Lambda::Function
@@ -242,6 +254,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SNSSubscriberFunctionLogGroup
       Code:
         ZipFile: |
           exports.handler = async event => {
@@ -254,12 +269,6 @@ Resources:
             });
             return records;
           };
-
-  SNSSubscriberFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SNSSubscriberFunction}
 
   SNSSubscriberFunctionSubscription:
     Type: AWS::SNS::Subscription
@@ -276,7 +285,8 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: SNSSubscriberFunction
-      Principal: sns.amazonaws.com
+      Principal:
+        Fn::Sub: sns.${AWS::URLSuffix}
       SourceArn:
         Ref: CodeCommitEventTopic
 
@@ -318,11 +328,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Ref: ApprovalRuleTemplateFunctionPolicy
+
+  ApprovalRuleTemplateFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ApprovalRuleTemplateFunction
 
   ApprovalRuleTemplateFunction:
     Type: AWS::Lambda::Function
@@ -337,6 +354,9 @@ Resources:
       Runtime: nodejs18.x
       Handler: index.handler
       Timeout: 900
+      LoggingConfig:
+        LogGroup:
+          Ref: ApprovalRuleTemplateFunction
       Code:
         ZipFile: |
           const https = require("https");
@@ -466,12 +486,6 @@ Resources:
             }
           };
 
-  ApprovalRuleTemplateFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${AWS::StackName}-ApprovalRuleTemplateFunction
-
   ApprovalRuleAssocFunctionPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -506,11 +520,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Ref: ApprovalRuleAssocFunctionPolicy
+
+  ApprovalRuleAssocFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ApprovalRuleAssocFunction
 
   ApprovalRuleAssocFunction:
     Type: AWS::Lambda::Function
@@ -525,6 +546,9 @@ Resources:
       Runtime: nodejs18.x
       Handler: index.handler
       Timeout: 900
+      LoggingConfig:
+        LogGroup:
+          Ref: ApprovalRuleAssocFunctionLogGroup
       Code:
         ZipFile: |
           const https = require("https");
@@ -623,12 +647,6 @@ Resources:
               return await sendResponse(event, context, "FAILED", {}, physicalResourceId);
             }
           };
-
-  ApprovalRuleAssocFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${AWS::StackName}-ApprovalRuleAssocFunction
 
 Outputs:
   CodeCommitRepositoryCloneUrlHttp:

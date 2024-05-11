@@ -166,7 +166,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: cloudfront.amazonaws.com
+              Service:
+                Fn::Sub: cloudfront.${AWS::URLSuffix}
             Action:
               - s3:GetObject
             Resource:
@@ -174,7 +175,7 @@ Resources:
             Condition:
               StringEquals:
                 aws:SourceArn:
-                  Fn::Sub: arn:aws:cloudfront::${AWS::AccountId}:distribution/${WwwDistribution}
+                  Fn::Sub: arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${WwwDistribution}
 
   RootDistribution:
     Type: AWS::CloudFront::Distribution

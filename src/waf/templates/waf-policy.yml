@@ -78,7 +78,8 @@ Resources:
           - Sid: AWSConfigBucketReadPermissions
             Effect: Allow
             Principal:
-              Service: config.amazonaws.com
+              Service:
+                Fn::Sub: config.${AWS::URLSuffix}
             Action:
               - s3:GetBucketAcl
               - s3:ListBucket
@@ -91,7 +92,8 @@ Resources:
           - Sid: AWSConfigObjectWritePermissions
             Effect: Allow
             Principal:
-              Service: config.amazonaws.com
+              Service:
+                Fn::Sub: config.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:
@@ -133,7 +135,8 @@ Resources:
           - Sid: SNSAccessPermissions
             Effect: Allow
             Principal:
-              Service: config.amazonaws.com
+              Service:
+                Fn::Sub: config.${AWS::URLSuffix}
             Action:
               - sns:Publish
             Resource:
@@ -164,7 +167,7 @@ Resources:
       Name:
         Ref: StackSetName
       RoleARN:
-        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig
+        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.${AWS::URLSuffix}/AWSServiceRoleForConfig
       RecordingGroup:
         AllSupported: true
         IncludeGlobalResourceTypes:

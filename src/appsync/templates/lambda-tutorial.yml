@@ -29,7 +29,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -46,7 +47,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: appsync.amazonaws.com
+              Service:
+                Fn::Sub: appsync.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -63,17 +65,34 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: appsync.amazonaws.com
+              Service:
+                Fn::Sub: appsync.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Ref: LambdaDataSourcePolicy
 
+  HandlePostFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-HandlePostFunction
+
   HandlePostFunction:
     Type: AWS::Lambda::Function
     Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-HandlePostFunction
+      Description: Handle post function
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs16.x
       Architectures:
         - x86_64
+      LoggingConfig:
+        LogGroup:
+          Ref: HandlePostFunctionLogGroup
       Code:
         ZipFile: |
           exports.handler = async event => {
@@ -178,11 +197,6 @@ Resources:
                 throw new Error("Unknown field, unable to resolve " + event.field);
             }
           };
-      Description: Handle post function
-      Handler: index.handler
-      Role:
-        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
-      Runtime: nodejs16.x
 
   GraphQLApi:
     Type: AWS::AppSync::GraphQLApi

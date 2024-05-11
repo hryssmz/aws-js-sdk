@@ -34,11 +34,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  AlarmActionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-AlarmActionFunction
 
   AlarmActionFunction:
     Type: AWS::Lambda::Function
@@ -52,18 +59,15 @@ Resources:
         - arm64
       Runtime: nodejs18.x
       Handler: index.handler
+      LoggingConfig:
+        LogGroup:
+          Ref: AlarmActionFunctionLogGroup
       Code:
         ZipFile: |
           exports.handler = async (event) => {
             console.log("Alarm received!");
             console.log("Event: " + JSON.stringify(event, null, 2));
           };
-
-  AlarmActionFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${AlarmActionFunction}
 
   AlarmActionSubscription:
     Type: AWS::SNS::Subscription
@@ -80,7 +84,8 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: AlarmActionFunction
-      Principal: sns.amazonaws.com
+      Principal:
+        Fn::Sub: sns.${AWS::URLSuffix}
       SourceArn:
         Ref: AlarmReceivedTopic
 
@@ -96,7 +101,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

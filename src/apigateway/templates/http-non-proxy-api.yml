@@ -297,7 +297,7 @@ Resources:
             StatusCode: 200
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetPetsInfoFunction.Arn}/invocations
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetPetsInfoFunction.Arn}/invocations
       MethodResponses:
         - ResponseModels:
             application/json:
@@ -391,17 +391,34 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
+  GetPetsInfoFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-GetPetsInfoFunction
+
   GetPetsInfoFunction:
     Type: AWS::Lambda::Function
     Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-GetPetsInfoFunction
+      Description: Get pets info
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Architectures:
         - x86_64
+      Handler: index.handler
+      Runtime: nodejs16.x
+      LoggingConfig:
+        LogGroup:
+          Ref: GetPetsInfoFunctionLogGroup
       Code:
         ZipFile: |
           console.log("Loading event");
@@ -413,11 +430,6 @@ Resources:
               { id: 3, type: "fish", price: 0.99 },
             ]); // SUCCESS with message
           };
-      Description: Get pets info
-      Handler: index.handler
-      Role:
-        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
-      Runtime: nodejs16.x
 
   GetPetsInfoPermission:
     Type: AWS::Lambda::Permission
@@ -425,7 +437,8 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: GetPetsInfoFunction
-      Principal: apigateway.amazonaws.com
+      Principal:
+        Fn::Sub: apigateway.${AWS::URLSuffix}
 
   HttpNonProxyApiDeployment:
     Type: AWS::ApiGateway::Deployment

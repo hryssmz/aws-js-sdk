@@ -50,7 +50,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -153,11 +154,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  TrailAlarmFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-TrailAlarmFunction
 
   TrailAlarmFunction:
     Type: AWS::Serverless::Function
@@ -171,6 +179,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: TrailAlarmFunctionLogGroup
       Events:
         SNSEvent:
           Type: SNS
@@ -188,12 +199,6 @@ Resources:
           });
           return records;
         };
-
-  TrailAlarmFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${TrailAlarmFunction}
 
   # CloudTrail
   TrailPolicy:
@@ -223,7 +228,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -244,8 +250,8 @@ Resources:
         - IncludeManagementEvents: true
           ReadWriteType: All
           ExcludeManagementEventSources:
-            - kms.amazonaws.com
-            - rdsdata.amazonaws.com
+            - Fn::Sub: kms.${AWS::URLSuffix}
+            - Fn::Sub: rdsdata.${AWS::URLSuffix}
       CloudWatchLogsLogGroupArn:
         Fn::GetAtt: TrailLogGroup.Arn
       CloudWatchLogsRoleArn:
@@ -273,7 +279,8 @@ Resources:
           - Sid: AWSCloudTrailAclCheck
             Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:GetBucketAcl
             Resource:
@@ -285,7 +292,8 @@ Resources:
           - Sid: AWSCloudTrailWrite
             Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:

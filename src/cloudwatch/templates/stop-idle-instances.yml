@@ -50,7 +50,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -127,11 +128,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  AlarmActionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-AlarmActionFunction
 
   AlarmActionFunction:
     Type: AWS::Serverless::Function
@@ -151,6 +159,9 @@ Resources:
           Properties:
             Topic:
               Ref: EC2InstanceAlarmTopic
+      LoggingConfig:
+        LogGroup:
+          Ref: AlarmActionFunctionLogGroup
       InlineCode: |
         exports.handler = async event => {
           const { Records } = event;
@@ -162,9 +173,3 @@ Resources:
           });
           return records;
         };
-
-  AlarmActionFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${AlarmActionFunction}

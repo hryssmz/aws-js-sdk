@@ -127,12 +127,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: SendEmailFunctionPolicy
+
+  SendEmailFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SendEmailFunction
 
   SendEmailFunction:
     Type: AWS::Serverless::Function
@@ -146,6 +153,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SendEmailFunctionLogGroup
       Environment:
         Variables:
           SENDER:
@@ -210,12 +220,6 @@ Resources:
           return messageId;
         };
 
-  SendEmailFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SendEmailFunction}
-
   # SNS
   SESEventTopic:
     Type: AWS::SNS::Topic
@@ -235,7 +239,8 @@ Resources:
             Action:
               - sns:Publish
             Principal:
-              Service: ses.amazonaws.com
+              Service:
+                Fn::Sub: ses.${AWS::URLSuffix}
             Resource:
               - Ref: SESEventTopic
             Condition:
@@ -256,11 +261,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SESEventFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SESEventFunction
 
   SESEventFunction:
     Type: AWS::Serverless::Function
@@ -274,6 +286,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SESEventFunctionLogGroup
       Events:
         SNSEvent:
           Type: SNS
@@ -291,9 +306,3 @@ Resources:
           });
           return records;
         };
-
-  SESEventFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SESEventFunction}

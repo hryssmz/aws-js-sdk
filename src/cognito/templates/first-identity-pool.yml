@@ -100,7 +100,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Federated: cognito-identity.amazonaws.com
+              Federated:
+                Fn::Sub: cognito-identity.${AWS::URLSuffix}
             Action:
               - sts:AssumeRoleWithWebIdentity
             Condition:
@@ -137,7 +138,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Federated: cognito-identity.amazonaws.com
+              Federated:
+                Fn::Sub: cognito-identity.${AWS::URLSuffix}
             Action:
               - sts:AssumeRoleWithWebIdentity
             Condition:
@@ -178,7 +180,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Federated: cognito-identity.amazonaws.com
+              Federated:
+                Fn::Sub: cognito-identity.${AWS::URLSuffix}
             Action:
               - sts:AssumeRoleWithWebIdentity
             Condition:
@@ -249,12 +252,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: CreateUserFunctionPolicy
+
+  CreateUserFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-CreateUserFunction
 
   CreateUserFunction:
     Type: AWS::Serverless::Function
@@ -268,6 +278,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: CreateUserFunctionLogGroup
       Environment:
         Variables:
           USERNAME:
@@ -363,12 +376,6 @@ Resources:
           return AuthenticationResult;
         };
 
-  CreateUserFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${CreateUserFunction}
-
   SignInFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -380,11 +387,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SignInFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SignInFunction
 
   SignInFunction:
     Type: AWS::Serverless::Function
@@ -398,6 +412,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SignInFunctionLogGroup
       Environment:
         Variables:
           USERNAME:
@@ -444,12 +461,6 @@ Resources:
           return AuthenticationResult;
         };
 
-  SignInFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SignInFunction}
-
   GetCredentialsFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -461,11 +472,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  GetCredentialsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-GetCredentialsFunction
 
   GetCredentialsFunction:
     Type: AWS::Serverless::Function
@@ -479,6 +497,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: GetCredentialsFunctionLogGroup
       Environment:
         Variables:
           USERNAME:
@@ -490,7 +511,7 @@ Resources:
           IDENTITY_POOL_ID:
             Ref: IdentityPool
           IDENTITY_PROVIDER_NAME:
-            Fn::Sub: cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+            Fn::Sub: cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPool}
       InlineCode: |
         const {
           CognitoIdentityClient,
@@ -559,12 +580,6 @@ Resources:
           const { Credentials } = await client.send(getCredentialsForIdentityCommand);
           return Credentials;
         };
-
-  GetCredentialsFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${GetCredentialsFunction}
 
 Outputs:
   UserPool:

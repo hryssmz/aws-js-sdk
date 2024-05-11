@@ -54,12 +54,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: DeleteObjectFunctionPolicy
+
+  DeleteObjectFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-DeleteObjectFunction
 
   DeleteObjectFunction:
     Type: AWS::Serverless::Function
@@ -73,6 +80,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: DeleteObjectFunctionLogGroup
       Environment:
         Variables:
           BUCKET_NAME:
@@ -106,9 +116,3 @@ Resources:
 
           return Deleted;
         };
-
-  DeleteObjectFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${DeleteObjectFunction}

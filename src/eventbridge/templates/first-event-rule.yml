@@ -50,7 +50,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -138,7 +139,8 @@ Resources:
             Action:
               - sns:Publish
             Principal:
-              Service: events.amazonaws.com
+              Service:
+                Fn::Sub: events.${AWS::URLSuffix}
             Resource:
               - Ref: EC2RunningTopic
             Condition:
@@ -157,11 +159,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  EC2MonitorFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-EC2MonitorFunction
 
   EC2MonitorFunction:
     Type: AWS::Serverless::Function
@@ -175,6 +184,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: EC2MonitorFunctionLogGroup
       Events:
         SNSEvent:
           Type: SNS
@@ -198,9 +210,3 @@ Resources:
         exports.handler = async (event, context) => {
           console.log(JSON.stringify(event, null, 2));
         };
-
-  EC2MonitorFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${EC2MonitorFunction}

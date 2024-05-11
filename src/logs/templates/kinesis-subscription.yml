@@ -44,12 +44,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: ConsumerFunctionPolicy
+
+  ConsumerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ConsumerFunction
 
   ConsumerFunction:
     Type: AWS::Serverless::Function
@@ -63,6 +70,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: ConsumerFunctionLogGroup
       Events:
         KinesisEvent:
           Type: Kinesis
@@ -84,12 +94,6 @@ Resources:
           console.log(JSON.stringify(records, null, 2));
           return records;
         };
-
-  ConsumerFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${ConsumerFunction}
 
   # CloudWatch Logs
   SubscriptionFilterPolicy:
@@ -118,7 +122,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: logs.amazonaws.com
+              Service:
+                Fn::Sub: logs.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
             Condition:
@@ -175,7 +180,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -196,8 +202,8 @@ Resources:
         - IncludeManagementEvents: true
           ReadWriteType: All
           ExcludeManagementEventSources:
-            - kms.amazonaws.com
-            - rdsdata.amazonaws.com
+            - Fn::Sub: kms.${AWS::URLSuffix}
+            - Fn::Sub: rdsdata.${AWS::URLSuffix}
       CloudWatchLogsLogGroupArn:
         Fn::GetAtt: TrailLogGroup.Arn
       CloudWatchLogsRoleArn:
@@ -225,7 +231,8 @@ Resources:
           - Sid: AWSCloudTrailAclCheck
             Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:GetBucketAcl
             Resource:
@@ -237,7 +244,8 @@ Resources:
           - Sid: AWSCloudTrailWrite
             Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:

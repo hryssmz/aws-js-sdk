@@ -60,7 +60,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -101,7 +102,7 @@ Resources:
               content:
                 Fn::Sub: |
                   #!/bin/sh
-                  echo ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+                  echo ${AWS::AccountId}.dkr.ecr.${AWS::Region}.${AWS::URLSuffix}
               mode: "000755"
     Properties:
       ImageId:

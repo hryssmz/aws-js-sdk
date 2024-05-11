@@ -26,6 +26,12 @@ Resources:
         - Key: Name
           Value: EC2Instance
 
+  LogEC2StopFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-LogEC2StopFunction
+
   LogEC2StopFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -36,6 +42,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: LogEC2StopFunctionLogGroup
       Events:
         EventBridgeEvent:
           Type: EventBridgeRule
@@ -47,7 +56,7 @@ Resources:
                 - AWS API Call via CloudTrail
               detail:
                 eventSource:
-                  - ec2.amazonaws.com
+                  - Fn::Sub: ec2.${AWS::URLSuffix}
                 eventName:
                   - StopInstances
       InlineCode: |
@@ -56,12 +65,6 @@ Resources:
           console.log("Received event:", JSON.stringify(event, null, 2));
           return "Finished";
         };
-
-  LogEC2StopFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${LogEC2StopFunction}
 
   Trail:
     Type: AWS::CloudTrail::Trail
@@ -78,8 +81,8 @@ Resources:
         - IncludeManagementEvents: true
           ReadWriteType: All
           ExcludeManagementEventSources:
-            - kms.amazonaws.com
-            - rdsdata.amazonaws.com
+            - Fn::Sub: kms.${AWS::URLSuffix}
+            - Fn::Sub: rdsdata.${AWS::URLSuffix}
 
   TrailBucket:
     Type: AWS::S3::Bucket
@@ -103,7 +106,8 @@ Resources:
           - Sid: AWSCloudTrailAclCheck
             Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:GetBucketAcl
             Resource:
@@ -115,7 +119,8 @@ Resources:
           - Sid: AWSCloudTrailWrite
             Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:

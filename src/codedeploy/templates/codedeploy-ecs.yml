@@ -185,7 +185,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ecs-tasks.amazonaws.com
+              Service:
+                Fn::Sub: ecs-tasks.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -314,7 +315,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: codedeploy.amazonaws.com
+              Service:
+                Fn::Sub: codedeploy.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

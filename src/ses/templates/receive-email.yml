@@ -96,7 +96,7 @@ Resources:
             Ref: RootDomain
           Type: MX
           ResourceRecords:
-            - Fn::Sub: 10 inbound-smtp.${AWS::Region}.amazonaws.com
+            - Fn::Sub: 10 inbound-smtp.${AWS::Region}.${AWS::URLSuffix}
           TTL: 900
 
   ReceiptRuleSet:
@@ -154,12 +154,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: SendEmailFunctionPolicy
+
+  SendEmailFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SendEmailFunction
 
   SendEmailFunction:
     Type: AWS::Serverless::Function
@@ -173,6 +180,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SendEmailFunctionLogGroup
       Environment:
         Variables:
           ROOT_DOMAIN:
@@ -242,12 +252,6 @@ Resources:
           return messageId;
         };
 
-  SendEmailFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SendEmailFunction}
-
   RecipientFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -259,11 +263,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  RecipientFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-RecipientFunction
 
   RecipientFunction:
     Type: AWS::Serverless::Function
@@ -277,6 +288,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: RecipientFunctionLogGroup
       InlineCode: |
         exports.handler = async event => {
           const { Records } = event;
@@ -285,19 +299,14 @@ Resources:
           return messages;
         };
 
-  RecipientFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${RecipientFunction}
-
   RecipientFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: RecipientFunction
-      Principal: ses.amazonaws.com
+      Principal:
+        Fn::Sub: ses.${AWS::URLSuffix}
       SourceArn:
         Fn::Sub: arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:receipt-rule-set/${ReceiptRuleSet}:receipt-rule/${AWS::StackName}-ReceiptRule
 
@@ -320,7 +329,8 @@ Resources:
             Action:
               - sns:Publish
             Principal:
-              Service: ses.amazonaws.com
+              Service:
+                Fn::Sub: ses.${AWS::URLSuffix}
             Resource:
               - Ref: SESEventTopic
             Condition:
@@ -342,11 +352,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SESEventFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SESEventFunction
 
   SESEventFunction:
     Type: AWS::Serverless::Function
@@ -360,6 +377,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SESEventFunctionLogGroup
       Events:
         SNSEvent:
           Type: SNS
@@ -377,9 +397,3 @@ Resources:
           });
           return records;
         };
-
-  SESEventFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SESEventFunction}

@@ -25,7 +25,7 @@ Resources:
           - Effect: Allow
             Principal:
               AWS:
-                Fn::Sub: arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${CloudFrontOAI}
+                Fn::Sub: arn:${AWS::Partition}:iam::cloudfront:user/CloudFront Origin Access Identity ${CloudFrontOAI}
             Action:
               - s3:GetObject
             Resource:

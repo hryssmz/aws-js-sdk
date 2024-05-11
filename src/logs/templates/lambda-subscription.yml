@@ -16,11 +16,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SubscriptionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SubscriptionFunction
 
   SubscriptionFunction:
     Type: AWS::Serverless::Function
@@ -34,6 +41,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SubscriptionFunctionLogGroup
       Events:
         CloudWatchLogsEvent:
           Type: CloudWatchLogs
@@ -50,12 +60,6 @@ Resources:
           console.log(JSON.stringify(data, null, 2));
           return data;
         };
-
-  SubscriptionFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SubscriptionFunction}
 
   # CloudTrail
   TrailLogGroup:
@@ -91,7 +95,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -112,8 +117,8 @@ Resources:
         - IncludeManagementEvents: true
           ReadWriteType: All
           ExcludeManagementEventSources:
-            - kms.amazonaws.com
-            - rdsdata.amazonaws.com
+            - Fn::Sub: kms.${AWS::URLSuffix}
+            - Fn::Sub: rdsdata.${AWS::URLSuffix}
       CloudWatchLogsLogGroupArn:
         Fn::GetAtt: TrailLogGroup.Arn
       CloudWatchLogsRoleArn:
@@ -141,7 +146,8 @@ Resources:
           - Sid: AWSCloudTrailAclCheck
             Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:GetBucketAcl
             Resource:
@@ -153,7 +159,8 @@ Resources:
           - Sid: AWSCloudTrailWrite
             Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:

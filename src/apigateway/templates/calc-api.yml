@@ -14,7 +14,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -46,18 +47,35 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: apigateway.amazonaws.com
+              Service:
+                Fn::Sub: apigateway.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
         - Ref: APIGatewayExecutionPolicy
 
+  CalcFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-CalcFunction
+
   CalcFunction:
     Type: AWS::Lambda::Function
     Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-CalcFunction
+      Description: Calc Function
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs16.x
       Architectures:
         - x86_64
+      LoggingConfig:
+        LogGroup:
+          Ref: CalcFunctionLogGroup
       Code:
         ZipFile: |
           console.log("Loading the Calc function");
@@ -100,11 +118,6 @@ Resources:
             }
             callback(null, res);
           };
-      Description: Calc Function
-      Handler: index.handler
-      Role:
-        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
-      Runtime: nodejs16.x
 
   CalcFunctionPermission:
     Type: AWS::Lambda::Permission
@@ -112,14 +125,16 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: CalcFunction
-      Principal: apigateway.amazonaws.com
+      Principal:
+        Fn::Sub: apigateway.${AWS::URLSuffix}
 
   LambdaCalcApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
       Description: Lambda Calc API
       EndpointConfiguration:
-        Types: [REGIONAL]
+        Types:
+          - REGIONAL
       Name: LambdaCalc
 
   RequestParametersValidator:
@@ -187,10 +202,10 @@ Resources:
         properties:
           input:
             $ref:
-              Fn::Sub: https://apigateway.amazonaws.com/restapis/${LambdaCalcApi}/models/${InputModel}
+              Fn::Sub: https://apigateway.${AWS::URLSuffix}/restapis/${LambdaCalcApi}/models/${InputModel}
           output:
             $ref:
-              Fn::Sub: https://apigateway.amazonaws.com/restapis/${LambdaCalcApi}/models/${OutputModel}
+              Fn::Sub: https://apigateway.${AWS::URLSuffix}/restapis/${LambdaCalcApi}/models/${OutputModel}
 
   CalcResource:
     Type: AWS::ApiGateway::Resource
@@ -223,7 +238,7 @@ Resources:
             }
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CalcFunction.Arn}/invocations
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CalcFunction.Arn}/invocations
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -254,7 +269,7 @@ Resources:
             StatusCode: 200
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CalcFunction.Arn}/invocations
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CalcFunction.Arn}/invocations
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -331,7 +346,7 @@ Resources:
             }
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CalcFunction.Arn}/invocations
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CalcFunction.Arn}/invocations
       MethodResponses:
         - ResponseModels:
             application/json:

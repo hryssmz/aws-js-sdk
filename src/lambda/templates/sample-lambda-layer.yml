@@ -26,17 +26,38 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
+  SampleFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SampleFunction
+
   SampleFunction:
     Type: AWS::Lambda::Function
     Properties:
+      Description: Sample function
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs16.x
+      Timeout: 3
       Architectures:
         - x86_64
+      Layers:
+        - Ref: AxiosLayer
+      LoggingConfig:
+        LogGroup:
+          Ref: SampleFunctionLogGroup
+      Environment:
+        Variables:
+          IS_LOCAL: true
       Code:
         ZipFile: |
           const axios = require("axios");
@@ -65,17 +86,6 @@ Resources:
             };
             return response;
           };
-      Description: Sample function
-      Environment:
-        Variables:
-          IS_LOCAL: true
-      Handler: index.handler
-      Layers:
-        - Ref: AxiosLayer
-      Role:
-        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
-      Runtime: nodejs16.x
-      Timeout: 3
 
   SampleFunctionPermission:
     Type: AWS::Lambda::Permission
@@ -83,14 +93,16 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: SampleFunction
-      Principal: apigateway.amazonaws.com
+      Principal:
+        Fn::Sub: apigateway.${AWS::URLSuffix}
 
   SampleApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
       Description: Sample API
       EndpointConfiguration:
-        Types: [REGIONAL]
+        Types:
+          - REGIONAL
       Name: SampleApi
 
   GetRootMethod:
@@ -102,7 +114,7 @@ Resources:
         IntegrationHttpMethod: POST
         Type: AWS_PROXY
         Uri:
-          Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SampleFunction.Arn}/invocations"
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SampleFunction.Arn}/invocations
       OperationName: GetRootMethod
       ResourceId:
         Fn::GetAtt: SampleApi.RootResourceId

@@ -41,12 +41,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: AmiLookupFunctionPolicy
+
+  AmiLookupFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-AmiLookupFunction
 
   AmiLookupFunction:
     Type: AWS::Serverless::Function
@@ -61,6 +68,9 @@ Resources:
       Runtime: nodejs18.x
       Handler: index.handler
       Timeout: 30
+      LoggingConfig:
+        LogGroup:
+          Ref: AmiLookupFunctionLogGroup
       InlineCode:
         Fn::Join:
           - "\n"
@@ -211,12 +221,6 @@ Resources:
                     return await sendResponse(event, context, "FAILED", { Error: message });
                   });
               };
-
-  AmiLookupFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${AmiLookupFunction}
 
   # REST API
   RestApi:
@@ -401,11 +405,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  PutRootFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-PutRootFunction
 
   PutRootFunction:
     Type: AWS::Serverless::Function
@@ -427,6 +438,9 @@ Resources:
             Path: /
             RestApiId:
               Ref: RestApi
+      LoggingConfig:
+        LogGroup:
+          Ref: PutRootFunctionLogGroup
       InlineCode: |
         exports.handler = async event => {
           console.log(`Event:\n${JSON.stringify(event)}`);
@@ -436,12 +450,6 @@ Resources:
             body: JSON.stringify({ message: "Hello World!" }),
           };
         };
-
-  PutRootFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${PutRootFunction}
 
   # Custom
   AMIInfo:

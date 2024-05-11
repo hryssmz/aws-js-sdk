@@ -14,17 +14,34 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
+  IteratorFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-IteratorFunction
+
   IteratorFunction:
     Type: AWS::Lambda::Function
     Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-IteratorFunction
+      Description: Iteration Lambda function
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
       Architectures:
         - x86_64
+      Handler: index.handler
+      Runtime: nodejs14.x
+      LoggingConfig:
+        LogGroup:
+          Ref: IteratorFunctionLogGroup
       Code:
         ZipFile: |
           exports.handler = function iterator(event, context, callback) {
@@ -40,11 +57,6 @@ Resources:
               continue: newIndex < count,
             });
           };
-      Description: Iteration Lambda function
-      Handler: index.handler
-      Role:
-        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
-      Runtime: nodejs14.x
 
   StateMachineExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -80,7 +92,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: states.amazonaws.com
+              Service:
+                Fn::Sub: states.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

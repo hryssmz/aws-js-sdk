@@ -14,7 +14,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: apigateway.amazonaws.com
+              Service:
+                Fn::Sub: apigateway.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -26,7 +27,8 @@ Resources:
     Properties:
       Description: My S3 proxy API
       EndpointConfiguration:
-        Types: [REGIONAL]
+        Types:
+          - REGIONAL
       Name: MyS3
 
   FolderResource:
@@ -69,7 +71,7 @@ Resources:
             StatusCode: 500
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path//
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:s3:path//
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -106,7 +108,7 @@ Resources:
           integration.request.path.bucket: method.request.path.folder
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path/{bucket}
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:s3:path/{bucket}
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -136,7 +138,7 @@ Resources:
           integration.request.path.bucket: method.request.path.folder
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path/{bucket}
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:s3:path/{bucket}
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -166,7 +168,7 @@ Resources:
           integration.request.path.bucket: method.request.path.folder
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path/{bucket}
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:s3:path/{bucket}
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -197,7 +199,7 @@ Resources:
           integration.request.path.object: method.request.path.item
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path/{bucket}/{object}
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:s3:path/{bucket}/{object}
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -229,7 +231,7 @@ Resources:
           integration.request.path.object: method.request.path.item
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path/{bucket}/{object}
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:s3:path/{bucket}/{object}
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -261,7 +263,7 @@ Resources:
           integration.request.path.object: method.request.path.item
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path/{bucket}/{object}
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:s3:path/{bucket}/{object}
       MethodResponses:
         - ResponseModels:
             application/json: Empty
@@ -293,7 +295,7 @@ Resources:
           integration.request.path.object: method.request.path.item
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:s3:path/{bucket}/{object}
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:s3:path/{bucket}/{object}
       MethodResponses:
         - ResponseModels:
             application/json: Empty

@@ -102,7 +102,8 @@ Resources:
             Action:
               - sns:Publish
             Principal:
-              Service: events.amazonaws.com
+              Service:
+                Fn::Sub: events.${AWS::URLSuffix}
             Resource:
               - Ref: RGTopic
             Condition:
@@ -121,11 +122,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  RGTopicFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-RGTopicFunction
 
   RGTopicFunction:
     Type: AWS::Serverless::Function
@@ -139,6 +147,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: RGTopicFunctionLogGroup
       Events:
         SNSEvent:
           Type: SNS
@@ -156,9 +167,3 @@ Resources:
           });
           return records;
         };
-
-  RGTopicFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${RGTopicFunction}

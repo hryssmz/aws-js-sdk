@@ -14,7 +14,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: appsync.amazonaws.com
+              Service:
+                Fn::Sub: appsync.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

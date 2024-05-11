@@ -24,7 +24,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: elasticbeanstalk.amazonaws.com
+              Service:
+                Fn::Sub: elasticbeanstalk.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
             Condition:
@@ -45,7 +46,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

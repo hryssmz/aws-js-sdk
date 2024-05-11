@@ -83,7 +83,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: codedeploy.amazonaws.com
+              Service:
+                Fn::Sub: codedeploy.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -168,7 +169,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: codepipeline.amazonaws.com
+              Service:
+                Fn::Sub: codepipeline.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

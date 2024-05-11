@@ -132,7 +132,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: backup.amazonaws.com
+              Service:
+                Fn::Sub: backup.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

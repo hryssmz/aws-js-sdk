@@ -32,7 +32,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: states.amazonaws.com
+              Service:
+                Fn::Sub: states.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -83,7 +84,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: apigateway.amazonaws.com
+              Service:
+                Fn::Sub: apigateway.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -95,7 +97,8 @@ Resources:
     Properties:
       Description: StartExecution API
       EndpointConfiguration:
-        Types: [REGIONAL]
+        Types:
+          - REGIONAL
       Name: StartExecutionAPI
 
   ExecutionResource:
@@ -121,7 +124,7 @@ Resources:
             StatusCode: 200
         Type: AWS
         Uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:states:action/StartExecution
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:states:action/StartExecution
       MethodResponses:
         - ResponseModels:
             application/json: Empty

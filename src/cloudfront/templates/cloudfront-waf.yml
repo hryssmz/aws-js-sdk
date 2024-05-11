@@ -35,7 +35,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: cloudfront.amazonaws.com
+              Service:
+                Fn::Sub: cloudfront.${AWS::URLSuffix}
             Action:
               - s3:GetObject
             Resource:
@@ -220,11 +221,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Ref: S3ObjectFunctionPolicy
+
+  S3ObjectFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-S3ObjectFunction
 
   S3ObjectFunction:
     Type: AWS::Serverless::Function
@@ -239,6 +247,9 @@ Resources:
       Runtime: nodejs18.x
       Handler: index.handler
       Timeout: 30
+      LoggingConfig:
+        LogGroup:
+          Ref: S3ObjectFunctionLogGroup
       InlineCode: |
         const https = require("https");
         const {
@@ -328,12 +339,6 @@ Resources:
             return await sendResponse(event, context, "FAILED", {});
           }
         };
-
-  S3ObjectFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${AWS::StackName}-S3ObjectFunction
 
   IndexHtmlObject:
     Type: AWS::CloudFormation::CustomResource

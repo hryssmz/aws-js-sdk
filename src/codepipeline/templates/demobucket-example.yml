@@ -109,7 +109,7 @@ Resources:
           - Effect: Allow
             Principal:
               Service:
-                - cloudtrail.amazonaws.com
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:GetBucketAcl
             Resource:
@@ -117,7 +117,7 @@ Resources:
           - Effect: Allow
             Principal:
               Service:
-                - cloudtrail.amazonaws.com
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:
@@ -134,7 +134,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: codedeploy.amazonaws.com
+              Service:
+                Fn::Sub: codedeploy.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -252,7 +253,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: codepipeline.amazonaws.com
+              Service:
+                Fn::Sub: codepipeline.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -356,7 +358,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: events.amazonaws.com
+              Service:
+                Fn::Sub: events.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -373,7 +376,7 @@ Resources:
           - AWS API Call via CloudTrail
         detail:
           eventSource:
-            - s3.amazonaws.com
+            - Fn::Sub: s3.${AWS::URLSuffix}
           eventName:
             - CopyObject
             - PutObject
@@ -446,7 +449,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

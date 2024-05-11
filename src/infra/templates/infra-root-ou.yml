@@ -52,11 +52,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Ref: ServiceLinkedRoleFunctionPolicy
+
+  ServiceLinkedRoleFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: IsTokyoCondition
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/ServiceLinkedRoleFunction
 
   ServiceLinkedRoleFunction:
     Type: AWS::Lambda::Function
@@ -71,6 +79,9 @@ Resources:
       Runtime: nodejs18.x
       Handler: index.handler
       Timeout: 900
+      LoggingConfig:
+        LogGroup:
+          Ref: ServiceLinkedRoleFunctionLogGroup
       Code:
         ZipFile: |
           const https = require("https");
@@ -204,18 +215,12 @@ Resources:
             }
           };
 
-  ServiceLinkedRoleFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Condition: IsTokyoCondition
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/ServiceLinkedRoleFunction
-
   ConfigServiceLinkedRole:
     Type: AWS::CloudFormation::CustomResource
     Condition: IsTokyoCondition
     Properties:
       ServiceToken:
         Fn::GetAtt: ServiceLinkedRoleFunction.Arn
-      AWSServiceName: config.amazonaws.com
+      AWSServiceName:
+        Fn::Sub: config.${AWS::URLSuffix}
       Description: Service-Linked Role for AWS Config.

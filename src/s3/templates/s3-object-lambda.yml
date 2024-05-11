@@ -39,6 +39,12 @@ Resources:
                 FunctionArn:
                   Fn::GetAtt: TransformFunction.Arn
 
+  TransformFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-TransformFunction
+
   TransformFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -51,6 +57,9 @@ Resources:
         - arm64
       Policies:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonS3ObjectLambdaExecutionRolePolicy
+      LoggingConfig:
+        LogGroup:
+          Ref: TransformFunctionLogGroup
       InlineCode: |
         from http.client import HTTPResponse
         from typing import Any
@@ -91,9 +100,3 @@ Resources:
 
             # Exit the Lambda function: return the status code
             return {"statusCode": 200}
-
-  TransformFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${TransformFunction}

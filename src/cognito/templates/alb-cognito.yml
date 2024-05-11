@@ -147,11 +147,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SignUpFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SignUpFunction
 
   SignUpFunction:
     Type: AWS::Serverless::Function
@@ -165,6 +172,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SignUpFunctionLogGroup
       Environment:
         Variables:
           USERNAME:
@@ -225,12 +235,6 @@ Resources:
           return response;
         };
 
-  SignUpFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SignUpFunction}
-
   ConfirmEmailFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -242,11 +246,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ConfirmEmailFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ConfirmEmailFunction
 
   ConfirmEmailFunction:
     Type: AWS::Serverless::Function
@@ -260,6 +271,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: ConfirmEmailFunctionLogGroup
       Environment:
         Variables:
           USERNAME:
@@ -314,12 +328,6 @@ Resources:
           return response;
         };
 
-  ConfirmEmailFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${ConfirmEmailFunction}
-
   SignInFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -331,11 +339,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SignInFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SignInFunction
 
   SignInFunction:
     Type: AWS::Serverless::Function
@@ -349,6 +364,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SignInFunctionLogGroup
       Environment:
         Variables:
           USERNAME:
@@ -421,12 +439,6 @@ Resources:
           return AuthenticationResult;
         };
 
-  SignInFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SignInFunction}
-
   # ACM
   ALBCertificate:
     Type: AWS::CertificateManager::Certificate
@@ -476,7 +488,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

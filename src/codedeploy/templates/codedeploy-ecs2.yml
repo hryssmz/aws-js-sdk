@@ -199,7 +199,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ecs-tasks.amazonaws.com
+              Service:
+                Fn::Sub: ecs-tasks.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -328,7 +329,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: codedeploy.amazonaws.com
+              Service:
+                Fn::Sub: codedeploy.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -408,12 +410,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: AfterAllowTestTrafficFunctionPolicy
+
+  AfterAllowTestTrafficFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-AfterAllowTestTrafficFunction
 
   AfterAllowTestTrafficFunction:
     Type: AWS::Serverless::Function
@@ -427,6 +436,9 @@ Resources:
         - arm64
       Runtime: nodejs18.x
       Handler: index.handler
+      LoggingConfig:
+        LogGroup:
+          Ref: AfterAllowTestTrafficFunctionLogGroup
       InlineCode: |
         const {
           CodeDeployClient,
@@ -465,12 +477,6 @@ Resources:
             });
           return result;
         };
-
-  AfterAllowTestTrafficFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${AfterAllowTestTrafficFunction}
 
 Outputs:
   ALBDNSName:

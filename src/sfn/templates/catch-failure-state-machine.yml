@@ -14,17 +14,34 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
+  FailFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-FailFunction
+
   FailFunction:
     Type: AWS::Lambda::Function
     Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-FailFunction
+      Description: Lambda function returns a custom error
+      Role:
+        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs14.x
       Architectures:
         - x86_64
+      LoggingConfig:
+        LogGroup:
+          Ref: FailFunctionLogGroup
       Code:
         ZipFile: |
           exports.handler = async (event, context) => {
@@ -36,11 +53,6 @@ Resources:
 
             throw new CustomError("This is a custom error!");
           };
-      Description: Lambda function returns a custom error
-      Handler: index.handler
-      Role:
-        Fn::GetAtt: LambdaFunctionExecutionRole.Arn
-      Runtime: nodejs14.x
 
   StateMachineExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -76,7 +88,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: states.amazonaws.com
+              Service:
+                Fn::Sub: states.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

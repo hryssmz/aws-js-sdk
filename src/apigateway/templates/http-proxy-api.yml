@@ -8,7 +8,8 @@ Resources:
     Properties:
       Description: Http proxy API
       EndpointConfiguration:
-        Types: [REGIONAL]
+        Types:
+          - REGIONAL
       Name: HttpProxyApi
 
   ProxyResource:

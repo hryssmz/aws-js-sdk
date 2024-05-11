@@ -51,12 +51,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: PutRecordsFunctionPolicy
+
+  PutRecordsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-PutRecordsFunction
 
   PutRecordsFunction:
     Type: AWS::Serverless::Function
@@ -70,6 +77,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: PutRecordsFunctionLogGroup
       Environment:
         Variables:
           STREAM_NAME:
@@ -99,12 +109,6 @@ Resources:
           console.log(JSON.stringify(result, null, 2));
           return result;
         };
-
-  PutRecordsFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${PutRecordsFunction}
 
   ResetShardIteratorFunctionPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -137,12 +141,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: ResetShardIteratorFunctionPolicy
+
+  ResetShardIteratorFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ResetShardIteratorFunction
 
   ResetShardIteratorFunction:
     Type: AWS::Serverless::Function
@@ -156,6 +167,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: ResetShardIteratorFunctionLogGroup
       Environment:
         Variables:
           STREAM_NAME:
@@ -206,12 +220,6 @@ Resources:
           return Item;
         };
 
-  ResetShardIteratorFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${ResetShardIteratorFunction}
-
   GetRecordsFunctionPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -244,12 +252,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: GetRecordsFunctionPolicy
+
+  GetRecordsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-GetRecordsFunction
 
   GetRecordsFunction:
     Type: AWS::Serverless::Function
@@ -263,6 +278,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: GetRecordsFunctionLogGroup
       Environment:
         Variables:
           STREAM_NAME:
@@ -316,9 +334,3 @@ Resources:
           console.log(JSON.stringify(records, null, 2));
           return records;
         };
-
-  GetRecordsFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${GetRecordsFunction}

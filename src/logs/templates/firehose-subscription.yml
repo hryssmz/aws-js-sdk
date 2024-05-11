@@ -53,12 +53,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: DestinationFunctionPolicy
+
+  DestinationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-DestinationFunction
 
   DestinationFunction:
     Type: AWS::Serverless::Function
@@ -73,6 +80,9 @@ Resources:
       Timeout: 10
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: DestinationFunctionLogGroup
       InlineCode: |
         const { GetObjectCommand, S3Client } = require("@aws-sdk/client-s3");
 
@@ -102,17 +112,12 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: DestinationFunction
-      Principal: s3.amazonaws.com
+      Principal:
+        Fn::Sub: s3.${AWS::URLSuffix}
       SourceArn:
         Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}
       SourceAccount:
         Ref: AWS::AccountId
-
-  DestinationFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${DestinationFunction}
 
   PartitionFunctionRole:
     Type: AWS::IAM::Role
@@ -125,11 +130,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  PartitionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-PartitionFunction
 
   PartitionFunction:
     Type: AWS::Serverless::Function
@@ -144,6 +156,9 @@ Resources:
       Timeout: 180
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: PartitionFunctionLogGroup
       InlineCode: |
         const zlib = require("zlib");
 
@@ -168,12 +183,6 @@ Resources:
 
           return { records };
         };
-
-  PartitionFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${PartitionFunction}
 
   # Kinesis Data Firehose
   FirehoseLogGroup:
@@ -232,7 +241,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: firehose.amazonaws.com
+              Service:
+                Fn::Sub: firehose.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -299,7 +309,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: logs.amazonaws.com
+              Service:
+                Fn::Sub: logs.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
             Condition:
@@ -356,7 +367,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -377,8 +389,8 @@ Resources:
         - IncludeManagementEvents: true
           ReadWriteType: All
           ExcludeManagementEventSources:
-            - kms.amazonaws.com
-            - rdsdata.amazonaws.com
+            - Fn::Sub: kms.${AWS::URLSuffix}
+            - Fn::Sub: rdsdata.${AWS::URLSuffix}
       CloudWatchLogsLogGroupArn:
         Fn::GetAtt: TrailLogGroup.Arn
       CloudWatchLogsRoleArn:
@@ -406,7 +418,8 @@ Resources:
           - Sid: AWSCloudTrailAclCheck
             Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:GetBucketAcl
             Resource:
@@ -418,7 +431,8 @@ Resources:
           - Sid: AWSCloudTrailWrite
             Effect: Allow
             Principal:
-              Service: cloudtrail.amazonaws.com
+              Service:
+                Fn::Sub: cloudtrail.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:

@@ -41,7 +41,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: events.amazonaws.com
+              Service:
+                Fn::Sub: events.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -79,11 +80,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${StackSetName}-SubscriberFunction
 
   SubscriberFunction:
     Type: AWS::Lambda::Function
@@ -97,17 +105,14 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SubscriberFunctionLogGroup
       Code:
         ZipFile: |
           exports.handler = async event => {
             console.log(JSON.stringify(event, null, 2));
           };
-
-  SubscriberFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SubscriberFunction}
 
   SubscriberFunctionPermission:
     Type: AWS::Lambda::Permission
@@ -115,7 +120,8 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: SubscriberFunction
-      Principal: events.amazonaws.com
+      Principal:
+        Fn::Sub: events.${AWS::URLSuffix}
       SourceArn:
         Fn::GetAtt: EventBridgeRule.Arn
 
@@ -146,12 +152,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: PutEventsFunctionPolicy
+
+  PutEventsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${StackSetName}-PutEventsFunction
 
   PutEventsFunction:
     Type: AWS::Lambda::Function
@@ -165,6 +178,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: PutEventsFunctionLogGroup
       Code:
         ZipFile: |
           const {
@@ -194,9 +210,3 @@ Resources:
             const { Entries } = await client.send(command);
             return Entries;
           };
-
-  PutEventsFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${PutEventsFunction}

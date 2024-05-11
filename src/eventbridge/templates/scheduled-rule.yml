@@ -4,6 +4,12 @@ Transform: AWS::Serverless-2016-10-31
 Description: My first scheduled rule
 
 Resources:
+  JobFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-JobFunction
+
   JobFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -14,6 +20,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: JobFunctionLogGroup
       Events:
         ScheduledRule:
           Type: Schedule
@@ -27,9 +36,3 @@ Resources:
         exports.handler = async event => {
           console.log(JSON.stringify(event, null, 2));
         };
-
-  JobFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${JobFunction}

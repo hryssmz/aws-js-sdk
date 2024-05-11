@@ -48,12 +48,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: DestinationFunctionPolicy
+
+  DestinationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-DestinationFunction
 
   DestinationFunction:
     Type: AWS::Serverless::Function
@@ -68,6 +75,9 @@ Resources:
       Timeout: 10
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: DestinationFunctionLogGroup
       InlineCode: |
         const { GetObjectCommand, S3Client } = require("@aws-sdk/client-s3");
 
@@ -92,17 +102,12 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: DestinationFunction
-      Principal: s3.amazonaws.com
+      Principal:
+        Fn::Sub: s3.${AWS::URLSuffix}
       SourceArn:
         Fn::Sub: arn:${AWS::Partition}:s3:::${AWS::StackName}-destinationbucket-${AWS::Region}
       SourceAccount:
         Ref: AWS::AccountId
-
-  DestinationFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${DestinationFunction}
 
   # Kinesis Stream source
   KinesisStream:
@@ -140,12 +145,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: ProducerFunctionPolicy
+
+  ProducerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ProducerFunction
 
   ProducerFunction:
     Type: AWS::Serverless::Function
@@ -160,6 +172,9 @@ Resources:
       Timeout: 10
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: ProducerFunctionLogGroup
       Environment:
         Variables:
           STREAM_NAME:
@@ -192,12 +207,6 @@ Resources:
           console.log(JSON.stringify(result, null, 2));
           return result;
         };
-
-  ProducerFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${ProducerFunction}
 
   # Kinesis Data Firehose
   FirehoseLogGroup:
@@ -253,7 +262,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: firehose.amazonaws.com
+              Service:
+                Fn::Sub: firehose.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
 
@@ -288,7 +298,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: firehose.amazonaws.com
+              Service:
+                Fn::Sub: firehose.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
 

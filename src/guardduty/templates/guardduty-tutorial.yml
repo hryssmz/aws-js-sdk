@@ -31,7 +31,8 @@ Resources:
           - Sid: GuardDutyBucketAccessPermissions
             Effect: Allow
             Principal:
-              Service: guardduty.amazonaws.com
+              Service:
+                Fn::Sub: guardduty.${AWS::URLSuffix}
             Action:
               - s3:GetBucketLocation
             Resource:
@@ -45,7 +46,8 @@ Resources:
           - Sid: GuardDutyObjectAccessPermissions
             Effect: Allow
             Principal:
-              Service: guardduty.amazonaws.com
+              Service:
+                Fn::Sub: guardduty.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:
@@ -59,7 +61,8 @@ Resources:
           - Sid: DenyUnencryptedUploads
             Effect: Deny
             Principal:
-              Service: guardduty.amazonaws.com
+              Service:
+                Fn::Sub: guardduty.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:
@@ -70,7 +73,8 @@ Resources:
           - Sid: DenyIncorrectHeader
             Effect: Deny
             Principal:
-              Service: guardduty.amazonaws.com
+              Service:
+                Fn::Sub: guardduty.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:
@@ -108,7 +112,8 @@ Resources:
           - Sid: GuardDutyAccessPermissions
             Effect: Allow
             Principal:
-              Service: guardduty.amazonaws.com
+              Service:
+                Fn::Sub: guardduty.${AWS::URLSuffix}
             Action:
               - kms:GenerateDataKey
             Resource: "*"
@@ -219,7 +224,8 @@ Resources:
             Action:
               - sns:Publish
             Principal:
-              Service: events.amazonaws.com
+              Service:
+                Fn::Sub: events.${AWS::URLSuffix}
             Resource:
               - Ref: GuardDutyTopic
             Condition:
@@ -238,11 +244,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SubscriberFunction
 
   SubscriberFunction:
     Type: AWS::Serverless::Function
@@ -256,6 +269,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SubscriberFunctionLogGroup
       Events:
         SNSEvent:
           Type: SNS
@@ -273,9 +289,3 @@ Resources:
           });
           return records;
         };
-
-  SubscriberFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SubscriberFunction}

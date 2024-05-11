@@ -39,12 +39,19 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - Ref: ProducerFunctionPolicy
+
+  ProducerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ProducerFunction
 
   ProducerFunction:
     Type: AWS::Serverless::Function
@@ -58,6 +65,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: ProducerFunctionLogGroup
       Environment:
         Variables:
           STREAM_NAME:
@@ -88,12 +98,6 @@ Resources:
           return result;
         };
 
-  ProducerFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${ProducerFunction}
-
   ConsumerFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -105,11 +109,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ConsumerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ConsumerFunction
 
   ConsumerFunction:
     Type: AWS::Serverless::Function
@@ -123,6 +134,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: ConsumerFunctionLogGroup
       Events:
         KinesisEvent:
           Type: Kinesis
@@ -142,9 +156,3 @@ Resources:
           console.log(JSON.stringify(records, null, 2));
           return records;
         };
-
-  ConsumerFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${ConsumerFunction}

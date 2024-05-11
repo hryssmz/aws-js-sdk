@@ -11,7 +11,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: appsync.amazonaws.com
+              Service:
+                Fn::Sub: appsync.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       Description: Logging role for GraphQl API

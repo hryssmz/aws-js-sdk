@@ -36,7 +36,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ssm.amazonaws.com
+              Service:
+                Fn::Sub: ssm.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
             Condition:
@@ -98,11 +99,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  LambdaFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/Automation-${AWS::StackName}-LambdaFunction
 
   LambdaFunction:
     Type: AWS::Serverless::Function
@@ -117,17 +125,14 @@ Resources:
       Runtime: nodejs18.x
       Handler: index.handler
       Timeout: 30
+      LoggingConfig:
+        LogGroup:
+          Ref: LambdaFunctionLogGroup
       InlineCode: |
         exports.handler = async event => {
           console.log(`event: ${JSON.stringify(event, null, 2)}`);
           return { message: "Hello World!" };
         };
-
-  LambdaFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${LambdaFunction}
 
   # EC2
   EC2InstanceRole:
@@ -141,7 +146,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -191,7 +197,8 @@ Resources:
               - Fn::GetAtt: RunbookDocumentRole.Arn
             Condition:
               StringLikeIfExists:
-                iam:PassedToService: ssm.amazonaws.com
+                iam:PassedToService:
+                  Fn::Sub: ssm.${AWS::URLSuffix}
 
   EventBridgeRuleRole:
     Type: AWS::IAM::Role
@@ -204,7 +211,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: events.amazonaws.com
+              Service:
+                Fn::Sub: events.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -250,11 +258,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SubscriberFunction
 
   SubscriberFunction:
     Type: AWS::Serverless::Function
@@ -268,16 +283,13 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SubscriberFunctionLogGroup
       InlineCode: |
         exports.handler = async event => {
           console.log(JSON.stringify(event, null, 2));
         };
-
-  SubscriberFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SubscriberFunction}
 
   SubscriberFunctionPermission:
     Type: AWS::Lambda::Permission
@@ -285,6 +297,7 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: SubscriberFunction
-      Principal: events.amazonaws.com
+      Principal:
+        Fn::Sub: events.${AWS::URLSuffix}
       SourceArn:
         Fn::GetAtt: EventBridgeRule.Arn

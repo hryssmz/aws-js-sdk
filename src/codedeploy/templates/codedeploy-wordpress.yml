@@ -84,7 +84,7 @@ Resources:
               - s3:List*
             Effect: Allow
             Resource:
-              Fn::Sub: arn:aws:s3:::${DemoBucket}/*
+              Fn::Sub: arn:${AWS::Partition}:s3:::${DemoBucket}/*
             Principal:
               AWS:
                 - Fn::GetAtt: CodeDeployRole.Arn
@@ -100,7 +100,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: codedeploy.amazonaws.com
+              Service:
+                Fn::Sub: codedeploy.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -181,7 +182,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:

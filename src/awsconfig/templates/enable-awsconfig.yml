@@ -25,7 +25,8 @@ Resources:
           - Sid: ConfigBucketAccessPermissions
             Effect: Allow
             Principal:
-              Service: config.amazonaws.com
+              Service:
+                Fn::Sub: config.${AWS::URLSuffix}
             Action:
               - s3:GetBucketAcl
               - s3:ListBucket
@@ -38,7 +39,8 @@ Resources:
           - Sid: S3ObjectAccessPermissions
             Effect: Allow
             Principal:
-              Service: config.amazonaws.com
+              Service:
+                Fn::Sub: config.${AWS::URLSuffix}
             Action:
               - s3:PutObject
             Resource:
@@ -77,7 +79,8 @@ Resources:
           - Sid: SNSAccessPermissions
             Effect: Allow
             Principal:
-              Service: config.amazonaws.com
+              Service:
+                Fn::Sub: config.${AWS::URLSuffix}
             Action:
               - sns:Publish
             Resource:
@@ -94,11 +97,18 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SubscriberFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SubscriberFunction
 
   SubscriberFunction:
     Type: AWS::Serverless::Function
@@ -112,6 +122,9 @@ Resources:
       Runtime: nodejs18.x
       Architectures:
         - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SubscriberFunctionLogGroup
       Events:
         SNSEvent:
           Type: SNS
@@ -129,12 +142,6 @@ Resources:
           });
           return records;
         };
-
-  SubscriberFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${SubscriberFunction}
 
   DeliveryChannel:
     Type: AWS::Config::DeliveryChannel
@@ -156,7 +163,7 @@ Resources:
       Name:
         Ref: AWS::StackName
       RoleARN:
-        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig
+        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.${AWS::URLSuffix}/AWSServiceRoleForConfig
       RecordingGroup:
         AllSupported: true
         IncludeGlobalResourceTypes: true

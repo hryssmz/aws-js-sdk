@@ -14,7 +14,8 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
@@ -62,7 +63,8 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName:
         Ref: HelloWorldFunction
-      Principal: apigateway.amazonaws.com
+      Principal:
+        Fn::Sub: apigateway.${AWS::URLSuffix}
       SourceAccount:
         Ref: AWS::AccountId
       SourceArn:
