@@ -1,0 +1,188 @@
+# apigateway/templates/api-cache.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: API Gateway with cache
+
+Resources:
+  LambdaBasicRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-LambdaBasicRole-${AWS::Region}
+      Description: Service role for basic Lambda functions
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  HelloWorldFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-HelloWorldFunction
+
+  HelloWorldFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-HelloWorldFunction
+      Description: HelloWorld function
+      Role:
+        Fn::GetAtt: LambdaBasicRole.Arn
+      Runtime: python3.11
+      Handler: index.handler
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: HelloWorldFunctionLogGroup
+      Code:
+        ZipFile: |
+          from datetime import datetime, timedelta, timezone
+          import json
+          from typing import Any
+
+
+          def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+              now = datetime.now(tz=timezone(offset=timedelta(hours=0))).isoformat()
+              return {
+                  "statusCode": 200,
+                  "headers": {"Access-Control-Allow-Origin": "*"},
+                  "body": json.dumps({"message": now}, indent=2, ensure_ascii=False),
+              }
+
+  HelloWorldFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: HelloWorldFunction
+      Principal: apigateway.amazonaws.com
+      SourceAccount:
+        Ref: AWS::AccountId
+      SourceArn:
+        Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/${RestApiStage}/GET/
+
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name:
+        Ref: AWS::StackName
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      EndpointConfiguration:
+        Types:
+          - EDGE
+      Body:
+        openapi: "3.0.1"
+        info:
+          title: My REST API
+          version: "1.0"
+        paths:
+          /:
+            parameters:
+              - name: id
+                description: Cache ID
+                in: query
+                required: false
+                schema:
+                  type: string
+            get:
+              operationId: HelloWorld
+              tags:
+                - HelloWorld
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/HelloWorldResponse"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: "#/components/headers/Access-Control-Allow-Origin"
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${HelloWorldFunction.Arn}/invocations
+                httpMethod: POST
+                cacheKeyParameters:
+                  - method.request.querystring.id
+        components:
+          schemas:
+            HelloWorldResponse:
+              description: Response body for GET /
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+              example:
+                message: Hello World!
+          headers:
+            Access-Control-Allow-Origin:
+              description: Response header for CORS support
+              schema:
+                type: string
+                example: "*"
+        x-amazon-apigateway-gateway-responses:
+          DEFAULT_4XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {
+                  "type": "$context.error.responseType",
+                  "message": "$context.error.message"
+                }
+          DEFAULT_5XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {
+                  "type": "$context.error.responseType",
+                  "message": "$context.error.message"
+                }
+
+  RestApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      Description: REST API deployment
+      RestApiId:
+        Ref: RestApi
+
+  RestApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: dev
+      Description: dev stage
+      RestApiId:
+        Ref: RestApi
+      DeploymentId:
+        Ref: RestApiDeployment
+      CacheClusterEnabled: true
+      CacheClusterSize: 0.5
+      MethodSettings:
+        - ResourcePath: /
+          HttpMethod: GET
+          CachingEnabled: true
+          CacheTtlInSeconds: 30
+
+Outputs:
+  RestApiUrl:
+    Description: REST API URL
+    Value:
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApiStage}
+
+  SampleCurlCommand:
+    Description: Sample curl command
+    Value:
+      Fn::Sub: >
+        curl -sSL https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApiStage}?id=123

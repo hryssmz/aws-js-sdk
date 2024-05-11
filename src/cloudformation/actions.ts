@@ -5,8 +5,8 @@ import { sleep } from "../utils";
 import type { Parameter } from "@aws-sdk/client-cloudformation";
 import type { Action } from "../utils";
 
-const stackName = "first-glue-job";
-const templateDir = `${__dirname}/../../src/glue/templates`;
+const stackName = "iam-auth-api";
+const templateDir = `${__dirname}/../../src/apigateway/templates`;
 const templatePath = `${templateDir}/${stackName}.yml`;
 const parameters: Parameter[] = [
   // {
@@ -14,7 +14,7 @@ const parameters: Parameter[] = [
   //   ParameterValue:
   //     "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC3/8npLHRT/Es4T213AupeM1hBMrbzCJ8ZUUELCoh38Z79B6Ee2wLZ2IZRGmpo0Jj+Dw35UBnw4SjU9wOGHnA7Jn8ZYjWpLeXxN7OpgyBnHgNugiRiYxHYxixEsYdSvfvD+3o5LHHyrFPhMXR2hacTYezsYGGPn+DX+UQZjDwNis+MRPK5nimQ4KHHgQ6PGQIbdWICdGreLNhIWTYT8ONRUWIBnpglNe0QhKd2XvJ1/Z4rwGZiappMDliVmzmrzlOE+riwiBhs4DElkYKk4q3rl9G0IwGQZussVE6r7VpbUbpCVhvMkDu8KUAmG3xYrWcfl1ASd1I/6bu+8Art5SrC5rjsRYbi87QislVHG5us44K5k4N0eSg4Q4CWwjh2r9vXmEEt+ItVY+BzPk0sMtpKghE5toNaAQxEmq2ZYYGkyQ0QzBgLZtBl8dE2pIMJn9ctyT8aWazh4qsKMpJn15wz1qEqwnj7NT6GXwipjoAlemJwD85Bjq/UCnn4EHCM5Ec= hryssmz@smz",
   // },
-  // { ParameterKey: "SshCidrIp", ParameterValue: "60.87.147.140/32" },
+  // { ParameterKey: "SshCidrIp", ParameterValue: "60.87.150.174/32" },
   // { ParameterKey: "InstanceType", ParameterValue: "t3.micro" },
 ];
 const organizationalUnitIds = [
@@ -99,10 +99,12 @@ async function deleteStackSet() {
       RegionConcurrencyType: "PARALLEL",
     },
   });
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   for (const _ of Array(maxRetry)) {
     try {
       await cloudformation.deleteStackSet({ StackSetName: stackName });
       break;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       if (error.name === "OperationInProgressException") {
         await sleep(interval);

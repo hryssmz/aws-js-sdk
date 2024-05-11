@@ -290,24 +290,6 @@ Resources:
         - Key: Name
           Value: BastionSecurityGroup
 
-  PrivateSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupName:
-        Fn::Sub: ${AWS::StackName}-PrivateSecurityGroup
-      GroupDescription: Private instances security group
-      VpcId:
-        Ref: VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp:
-            Fn::GetAtt: VPC.CidrBlock
-      Tags:
-        - Key: Name
-          Value: PrivateSecurityGroup
-
   BastionInstance:
     Type: AWS::EC2::Instance
     Metadata:

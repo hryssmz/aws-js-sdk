@@ -1,0 +1,236 @@
+# waf/templates/waf-ip-rule-group.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: WAF with IP rule group
+
+Parameters:
+  MyIP:
+    Type: String
+    Description: My IP address
+    Default: 60.87.150.174/32
+
+Resources:
+  # REST API
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RestApi
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      StageName: dev
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: My REST API
+          version: "1.0"
+        paths:
+          /:
+            post:
+              responses:
+                "200":
+                  description: 200 OK
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: '{ "statusCode": 200 }'
+                responses:
+                  default:
+                    statusCode: 200
+                    responseTemplates:
+                      application/json: |
+                        { "message": "Hello World!" }
+                passthroughBehavior: when_no_match
+
+  # WAF
+  IpSet:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-IpSet
+      Description:
+        Fn::Sub: ${AWS::StackName} IP set
+      Scope: REGIONAL
+      IPAddressVersion: IPV4
+      Addresses:
+        - Ref: MyIP
+
+  RuleGroup:
+    Type: AWS::WAFv2::RuleGroup
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RuleGroup
+      Description:
+        Fn::Sub: ${AWS::StackName} rule group
+      Capacity: 10
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName:
+          Fn::Sub: ${AWS::StackName}-RuleGroup
+      Scope: REGIONAL
+      CustomResponseBodies:
+        Forbidden:
+          ContentType: APPLICATION_JSON
+          Content: |
+            { "message": "403 Forbidden in RuleGroup" }
+      AvailableLabels:
+        - Fn::Sub: ${AWS::StackName}-RuleGroup:Rule1
+        - Fn::Sub: ${AWS::StackName}-RuleGroup:Rule2
+      Rules:
+        - Name:
+            Fn::Sub: ${AWS::StackName}-RuleGroup-Rule1
+          Priority: 1
+          RuleLabels:
+            - Name:
+                Fn::Sub: ${AWS::StackName}-RuleGroup:Rule1
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 403
+                CustomResponseBodyKey: Forbidden
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName:
+              Fn::Sub: ${AWS::StackName}-RuleGroup-Rule1
+          Statement:
+            NotStatement:
+              Statement:
+                IPSetReferenceStatement:
+                  Arn:
+                    Fn::GetAtt: IpSet.Arn
+        - Name:
+            Fn::Sub: ${AWS::StackName}-RuleGroup-Rule2
+          Priority: 2
+          RuleLabels:
+            - Name:
+                Fn::Sub: ${AWS::StackName}-RuleGroup:Rule2
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 403
+                CustomResponseBodyKey: Forbidden
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName:
+              Fn::Sub: ${AWS::StackName}-RuleGroup-Rule2
+          Statement:
+            ByteMatchStatement:
+              FieldToMatch:
+                SingleHeader:
+                  Name: User-Agent
+              PositionalConstraint: EXACTLY
+              SearchString: BotAgent
+              TextTransformations:
+                - Priority: 0
+                  Type: NONE
+
+  WebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-WebACL
+      Description:
+        Fn::Sub: ${AWS::StackName} Web ACL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName:
+          Fn::Sub: ${AWS::StackName}-WebACL
+      Scope: REGIONAL
+      CustomResponseBodies:
+        Forbidden:
+          ContentType: APPLICATION_JSON
+          Content: |
+            { "message": "403 Forbidden" }
+      Rules:
+        - Name:
+            Fn::Sub: ${AWS::StackName}-WebACL-Rule1
+          Priority: 1
+          OverrideAction:
+            Count: {}
+            # None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName:
+              Fn::Sub: ${AWS::StackName}-WebACL-Rule1
+          Statement:
+            ManagedRuleGroupStatement:
+              Name: AWSManagedRulesUnixRuleSet
+              VendorName: AWS
+        - Name:
+            Fn::Sub: ${AWS::StackName}-WebACL-Rule2
+          Priority: 2
+          OverrideAction:
+            Count: {}
+            # None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName:
+              Fn::Sub: ${AWS::StackName}-WebACL-Rule2
+          Statement:
+            RuleGroupReferenceStatement:
+              Arn:
+                Fn::GetAtt: RuleGroup.Arn
+        - Name:
+            Fn::Sub: ${AWS::StackName}-WebACL-Rule3
+          Priority: 3
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 403
+                CustomResponseBodyKey: Forbidden
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName:
+              Fn::Sub: ${AWS::StackName}-WebACL-Rule3
+          Statement:
+            OrStatement:
+              Statements:
+                - LabelMatchStatement:
+                    Scope: NAMESPACE
+                    Key: "awswaf:managed:aws:posix-os:"
+                - LabelMatchStatement:
+                    Scope: NAMESPACE
+                    Key:
+                      Fn::Sub: "awswaf:${AWS::AccountId}:rulegroup:${AWS::StackName}-RuleGroup:"
+
+  WebACLRestApiAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn:
+        Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis/${RestApi}/stages/${RestApi.Stage}
+      WebACLArn:
+        Fn::GetAtt: WebACL.Arn
+
+Outputs:
+  RestApiUrl:
+    Description: REST API URL
+    Value:
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}
+
+  CurlCommand:
+    Description: Sample curl command
+    Value:
+      Fn::Sub: >
+        curl -isSL -X POST -d '{"statusCode": 200, "command": "echo Hello World"}' https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}
+
+  BadCurlCommand1:
+    Description: Sample bad curl command 1
+    Value:
+      Fn::Sub: >
+        curl -isSL -X POST -H "User-Agent: BotAgent" -d '{"statusCode": 200, "command": "echo Hello World"}' https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}
+
+  BadCurlCommand2:
+    Description: Sample bad curl command 2
+    Value:
+      Fn::Sub: >
+        curl -isSL -X POST -d '{"statusCode": 200, "command": "echo $PATH"}' https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}

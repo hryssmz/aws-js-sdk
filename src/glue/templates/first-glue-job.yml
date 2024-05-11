@@ -186,27 +186,19 @@ Resources:
         from awsglue.utils import getResolvedOptions
 
 
-        def main(args: dict[str, str]) -> Any:
-            print(sys.argv)
-            print(args)
-            print(os.environ)
+        def main(args: dict[str, str]) -> None:
+            print(args["custom_key"])
+            print(args["custom_key2"])
+            print(os.environ["CUSTOM_KEYS"])
 
 
         if __name__ == "__main__":
-            arg_keys = ["continuous-log-logGroup", "scriptLocation"]
-            env_keys = ["DB_SECRET_ARN", "DB_NAME"]
+            arg_keys = ["custom_key", "custom_key2"]
             args = getResolvedOptions(sys.argv, arg_keys)
-            for k, v in getResolvedOptions(sys.argv, env_keys).items():
-                os.environ[k] = v
+            os.environ["CUSTOM_KEYS"] = args["custom_key"] + args["custom_key2"]
             main(args)
 
   # Glue resources
-  GlueJobLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws-glue/${AWS::StackName}-GlueJobLogGroup
-
   GlueJobPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -249,6 +241,7 @@ Resources:
       Description: My glue job
       Role:
         Fn::GetAtt: GlueJobRole.Arn
+      GlueVersion: 3.0
       Command:
         Name: pythonshell
         PythonVersion: 3.9
@@ -257,14 +250,9 @@ Resources:
       DefaultArguments:
         --job-language: python
         --enable-job-insights: "true"
-        --enable-continuous-cloudwatch-log: "true"
-        --enable-continuous-log-filter: "false"
-        --extra-py-files:
-          Fn::Join:
-            - ","
-            - - Fn::Sub: s3://${S3Bucket}/mypackage-0.0.1-py3-none-any.whl
-        --continuous-log-logGroup:
-          Ref: GlueJobLogGroup
-        --DB_SECRET_ARN: arn
-        --DB_NAME: postgres
+        --custom_key: Value
+        --custom_key2: Value2
         library-set: analytics
+      MaxCapacity: 0.0625
+      MaxRetries: 0
+      Timeout: 1

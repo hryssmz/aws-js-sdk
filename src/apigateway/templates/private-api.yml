@@ -1,0 +1,398 @@
+# apigateway/templates/private-api.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: |
+  Private API
+
+  ```sh
+  # ssh commands
+  eval `ssh-agent`
+  ssh-add tmp/ec2key.pem
+  ssh -A ec2-user@bastion-host-public-ip
+  ssh -A ec2-user@private-host-private-ip
+  ```
+
+Parameters:
+  SshCidrIp:
+    Type: String
+    Description: SSH CIDR IP block
+    AllowedPattern: \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}
+    ConstraintDescription: must be a valid CIDR block of the form x.x.x.x/x
+
+  PublicKeyBody:
+    Type: String
+    Description: EC2 public key
+    AllowedPattern: ssh-rsa .*
+    ConstraintDescription: must be a valid RSA public key
+
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
+
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDRs
+    Default: 172.20.0.0/20,172.20.16.0/20
+
+  PrivateSubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Private subnet CIDRs
+    Default: 172.20.128.0/20,172.20.144.0/20
+
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
+
+Resources:
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Ref: VPCCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  Subnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet0
+
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet1
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: RouteTable
+
+  Subnet0RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet0
+      RouteTableId:
+        Ref: RouteTable
+
+  Subnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet1
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  PrivateSubnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: PrivateSubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet0
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: PrivateSubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet1
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable
+
+  PrivateSubnet0PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet0
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  PrivateSubnet1PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet1
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  # VPC Endpoint
+  VPCESecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-VPCESecurityGroup
+      GroupDescription: VPC endpoint security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+      Tags:
+        - Key: Name
+          Value: VPCESecurityGroup
+
+  VPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName:
+        Fn::Sub: com.amazonaws.${AWS::Region}.execute-api
+      VpcId:
+        Ref: VPC
+      SubnetIds:
+        - Ref: PrivateSubnet0
+        - Ref: PrivateSubnet1
+      SecurityGroupIds:
+        - Ref: VPCESecurityGroup
+      PrivateDnsEnabled: true
+
+  # EC2
+  SSHKeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName:
+        Fn::Sub: ${AWS::StackName}-SSHKeyPair
+      PublicKeyMaterial:
+        Ref: PublicKeyBody
+
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-BastionSecurityGroup
+      GroupDescription: Bastion instances security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:
+            Ref: SshCidrIp
+      Tags:
+        - Key: Name
+          Value: BastionSecurityGroup
+
+  PrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-PrivateSecurityGroup
+      GroupDescription: Private instances security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:
+            Fn::GetAtt: VPC.CidrBlock
+      Tags:
+        - Key: Name
+          Value: PrivateSecurityGroup
+
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      KeyName:
+        Ref: SSHKeyPair
+      SecurityGroupIds:
+        - Ref: BastionSecurityGroup
+      SubnetId:
+        Ref: Subnet0
+      Tags:
+        - Key: Name
+          Value: BastionInstance
+
+  PrivateInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      KeyName:
+        Ref: SSHKeyPair
+      SecurityGroupIds:
+        - Ref: PrivateSecurityGroup
+      SubnetId:
+        Ref: PrivateSubnet0
+      Tags:
+        - Key: Name
+          Value: PrivateInstance
+
+  # REST API
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name:
+        Ref: AWS::StackName
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      EndpointConfiguration:
+        Types:
+          - PRIVATE
+        VpcEndpointIds:
+          - Ref: VPCEndpoint
+      Policy:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: execute-api:Invoke
+            Resource: execute-api:/*
+            Condition:
+              StringEquals:
+                aws:SourceVpce:
+                  Ref: VPCEndpoint
+
+  GetRootMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Ref: RestApi
+      ResourceId:
+        Fn::GetAtt: RestApi.RootResourceId
+      HttpMethod: GET
+      OperationName: GetRoot
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{ "statusCode": 200 }'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: '{ "requestTime": "$context.requestTime" }'
+      MethodResponses:
+        - StatusCode: 200
+
+  RestApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetRootMethod
+    Properties:
+      Description: REST API deployment
+      RestApiId:
+        Ref: RestApi
+
+  RestApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: dev
+      Description: dev stage
+      RestApiId:
+        Ref: RestApi
+      DeploymentId:
+        Ref: RestApiDeployment
+
+Outputs:
+  RestApiUrl:
+    Description: REST API URL
+    Value:
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApiStage}
+
+  VPCEndpointId:
+    Description: VPC endpoint ID
+    Value:
+      Ref: VPCEndpoint

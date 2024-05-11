@@ -1,0 +1,482 @@
+# appsync/templates/first-graphql-api.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: First GraphQL API
+
+Resources:
+  TodoTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName:
+        Fn::Sub: ${AWS::StackName}-TodoTable
+      PrimaryKey:
+        Name: id
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  TodoDataSourcePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-TodoDataSourcePolicy-${AWS::Region}
+      Description: CRUD policy for Todo data source
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:DeleteItem
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:Query
+              - dynamodb:Scan
+              - dynamodb:UpdateItem
+            Resource:
+              - Fn::GetAtt: TodoTable.Arn
+              - Fn::Sub: ${TodoTable.Arn}/*
+
+  TodoDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-TodoDataSourceRole-${AWS::Region}
+      Description: CRUD role for Todo data source
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: TodoDataSourcePolicy
+
+  GraphQLApiLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-GraphQLApiLogRole-${AWS::Region}
+      Description: Service role for GraphQL API logging
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
+
+  GraphQLApi:
+    Type: AWS::Serverless::GraphQLApi
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-GraphQLApi
+      Auth:
+        Type: API_KEY
+      ApiKeys:
+        ApiKey:
+          ApiKeyId:
+            Fn::Sub: ${AWS::StackName}-ApiKey
+          Description: GraphQL API key
+      Logging:
+        CloudWatchLogsRoleArn:
+          Fn::GetAtt: GraphQLApiLogRole.Arn
+        ExcludeVerboseContent: true
+        FieldLogLevel: ALL
+      XrayEnabled: true
+      SchemaInline: |
+        input TableBooleanFilterInput {
+          ne: Boolean
+          eq: Boolean
+          attributeExists: Boolean
+        }
+
+        input TableIntFilterInput {
+          ne: Int
+          eq: Int
+          le: Int
+          lt: Int
+          ge: Int
+          gt: Int
+          between: [Int]
+          attributeExists: Boolean
+        }
+
+        input TableFloatFilterInput {
+          ne: Float
+          eq: Float
+          le: Float
+          lt: Float
+          ge: Float
+          gt: Float
+          between: [Float]
+          attributeExists: Boolean
+        }
+
+        input TableStringFilterInput {
+          ne: String
+          eq: String
+          le: String
+          lt: String
+          ge: String
+          gt: String
+          contains: String
+          notContains: String
+          between: [String]
+          beginsWith: String
+          attributeExists: Boolean
+          size: ModelSizeInput
+        }
+
+        input TableIDFilterInput {
+          ne: ID
+          eq: ID
+          le: ID
+          lt: ID
+          ge: ID
+          gt: ID
+          contains: ID
+          notContains: ID
+          between: [ID]
+          beginsWith: ID
+          attributeExists: Boolean
+          size: ModelSizeInput
+        }
+
+        input ModelSizeInput {
+          ne: Int
+          eq: Int
+          le: Int
+          lt: Int
+          ge: Int
+          gt: Int
+          between: [Int]
+        }
+
+        type Todo {
+          id: ID!
+          name: String
+          when: String
+          where: String
+          description: String
+        }
+
+        type TodoConnection {
+          items: [Todo]
+          nextToken: String
+        }
+
+        input CreateTodoInput {
+          name: String
+          when: String
+          where: String
+          description: String
+        }
+
+        input DeleteTodoInput {
+          id: ID!
+        }
+
+        input UpdateTodoInput {
+          id: ID!
+          name: String
+          when: String
+          where: String
+          description: String
+        }
+
+        input TableTodoFilterInput {
+          id: TableIDFilterInput
+          name: TableStringFilterInput
+          when: TableStringFilterInput
+          where: TableStringFilterInput
+          description: TableStringFilterInput
+        }
+
+        schema {
+          query: Query
+          mutation: Mutation
+          subscription: Subscription
+        }
+
+        type Query {
+          getTodo(id: ID!): Todo
+          listTodos(
+            filter: TableTodoFilterInput
+            limit: Int
+            nextToken: String
+          ): TodoConnection
+        }
+
+        type Mutation {
+          createTodo(input: CreateTodoInput!): Todo
+          updateTodo(input: UpdateTodoInput!): Todo
+          deleteTodo(input: DeleteTodoInput!): Todo
+        }
+
+        type Subscription {
+          onCreateTodo(
+            id: ID
+            name: String
+            when: String
+            where: String
+            description: String
+          ): Todo @aws_subscribe(mutations: ["createTodo"])
+          onUpdateTodo(
+            id: ID
+            name: String
+            when: String
+            where: String
+            description: String
+          ): Todo @aws_subscribe(mutations: ["updateTodo"])
+          onDeleteTodo(
+            id: ID
+            name: String
+            when: String
+            where: String
+            description: String
+          ): Todo @aws_subscribe(mutations: ["deleteTodo"])
+        }
+      DataSources:
+        DynamoDb:
+          Todo:
+            Name: TodoDataSource
+            Description: Todo data source
+            TableName:
+              Ref: TodoTable
+            ServiceRoleArn:
+              Fn::GetAtt: TodoDataSourceRole.Arn
+      Functions:
+        CreateTodoFunction:
+          Name: CreateTodoFunction
+          Description: Create Todo function
+          DataSource: Todo
+          Runtime:
+            Name: APPSYNC_JS
+            Version: 1.0.0
+          InlineCode: |
+            import { util } from "@aws-appsync/utils";
+            import { put } from "@aws-appsync/utils/dynamodb";
+
+            export function request(ctx) {
+              console.log(ctx);
+              const id = util.autoId();
+              const key = { id };
+              const item = { id, ...ctx.args.input };
+              const condition = { id: { attributeExists: false } };
+              const req = put({ key, item, condition });
+              console.log(req);
+              return req;
+            }
+
+            export function response(ctx) {
+              console.log(ctx);
+              const { error, result } = ctx;
+              if (error) {
+                return util.appendError(error.message, error.type, result);
+              }
+              return result;
+            }
+        UpdateTodoFunction:
+          Name: UpdateTodoFunction
+          Description: Update Todo function
+          DataSource: Todo
+          Runtime:
+            Name: APPSYNC_JS
+            Version: 1.0.0
+          InlineCode: |
+            import { util } from "@aws-appsync/utils";
+            import { update } from "@aws-appsync/utils/dynamodb";
+
+            export function request(ctx) {
+              console.log(ctx);
+              const { id, ...values } = ctx.args.input;
+              const key = { id };
+              const condition = Object.keys(key).reduce((acc, k) => {
+                return { ...acc, [k]: { attributeExists: true } };
+              }, {});
+              const req = update({ key, update: values, condition });
+              console.log(req);
+              return req;
+            }
+
+            export function response(ctx) {
+              console.log(ctx);
+              const { error, result } = ctx;
+              if (error) {
+                return util.appendError(error.message, error.type, result);
+              }
+              return result;
+            }
+        DeleteTodoFunction:
+          Name: DeleteTodoFunction
+          Description: Delete Todo function
+          DataSource: Todo
+          Runtime:
+            Name: APPSYNC_JS
+            Version: 1.0.0
+          InlineCode: |
+            import { util } from "@aws-appsync/utils";
+            import { remove } from "@aws-appsync/utils/dynamodb";
+
+            export function request(ctx) {
+              console.log(ctx);
+              const { id } = ctx.args.input;
+              const key = { id };
+              const req = remove({ key });
+              console.log(req);
+              return req;
+            }
+
+            export function response(ctx) {
+              console.log(ctx);
+              const { error, result } = ctx;
+              if (error) {
+                return util.appendError(error.message, error.type, result);
+              }
+              return result;
+            }
+        GetTodoFunction:
+          Name: GetTodoFunction
+          Description: Get Todo function
+          DataSource: Todo
+          Runtime:
+            Name: APPSYNC_JS
+            Version: 1.0.0
+          InlineCode: |
+            import { util } from "@aws-appsync/utils";
+            import { get } from "@aws-appsync/utils/dynamodb";
+
+            export function request(ctx) {
+              console.log(ctx);
+              const { id } = ctx.args;
+              const key = { id };
+              const req = get({ key });
+              console.log(req);
+              return req;
+            }
+
+            export function response(ctx) {
+              console.log(ctx);
+              const { error, result } = ctx;
+              if (error) {
+                return util.appendError(error.message, error.type, result);
+              }
+              return result;
+            }
+        ListTodosFunction:
+          Name: ListTodosFunction
+          Description: List Todos function
+          DataSource: Todo
+          Runtime:
+            Name: APPSYNC_JS
+            Version: 1.0.0
+          InlineCode: |
+            import { util } from "@aws-appsync/utils";
+            import { scan } from "@aws-appsync/utils/dynamodb";
+
+            export function request(ctx) {
+              console.log(ctx);
+              const { filter, limit, nextToken } = ctx.args;
+              const req = scan({ limit, nextToken, filter });
+              console.log(req);
+              return req;
+            }
+
+            export function response(ctx) {
+              console.log(ctx);
+              const { error, result } = ctx;
+              if (error) {
+                return util.appendError(error.message, error.type, result);
+              }
+              const { items = [], nextToken } = result;
+              return { items, nextToken };
+            }
+      Resolvers:
+        Mutation:
+          CreateTodoResolver:
+            FieldName: createTodo
+            Runtime:
+              Name: APPSYNC_JS
+              Version: 1.0.0
+            Pipeline:
+              - CreateTodoFunction
+          UpdateTodoResolver:
+            FieldName: updateTodo
+            Runtime:
+              Name: APPSYNC_JS
+              Version: 1.0.0
+            Pipeline:
+              - UpdateTodoFunction
+          DeleteTodoResolver:
+            FieldName: deleteTodo
+            Runtime:
+              Name: APPSYNC_JS
+              Version: 1.0.0
+            Pipeline:
+              - DeleteTodoFunction
+        Query:
+          GetTodoResolver:
+            FieldName: getTodo
+            Runtime:
+              Name: APPSYNC_JS
+              Version: 1.0.0
+            Pipeline:
+              - GetTodoFunction
+          ListTodosResolver:
+            FieldName: listTodos
+            Runtime:
+              Name: APPSYNC_JS
+              Version: 1.0.0
+            Pipeline:
+              - ListTodosFunction
+
+  GraphQLApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/appsync/apis/${GraphQLApi.ApiId}
+
+  GraphQLApiSamplingRule:
+    Type: AWS::XRay::SamplingRule
+    Properties:
+      SamplingRule:
+        RuleName:
+          Fn::Sub: ${AWS::StackName}-GraphQLApi
+        ResourceARN:
+          Ref: GraphQLApi
+        Priority: 10
+        FixedRate: 0.1
+        ReservoirSize: 1
+        ServiceName: "*"
+        ServiceType: AWS::AppSync::GraphQLAPI
+        Host: "*"
+        HTTPMethod: "*"
+        URLPath: "*"
+        Version: 1
+
+  GraphQLApiXRayGroup:
+    Type: AWS::XRay::Group
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-GraphQLApi
+      FilterExpression:
+        Fn::Sub: service("${AWS::StackName}-GraphQLApi")
+
+Outputs:
+  CurlCreateTodoCommand:
+    Description: curl command to create Todo
+    Value:
+      Fn::Sub: >
+        curl -sSL -X POST -H "x-api-key:${GraphQLApiApiKey.ApiKey}" -d '{"query":"mutation CreateTodo($input: CreateTodoInput!) { createTodo(input: $input) { description, id, name, when, where } }","variables":{"input":{"name":"Shopping List","when":"Friday","where":"Home","description":"I need to buy eggs"}}}' ${GraphQLApi.GraphQLUrl} | jq
+
+  CurlListTodosCommand:
+    Description: curl command to list Todos
+    Value:
+      Fn::Sub: >
+        curl -sSL -X POST -H "x-api-key:${GraphQLApiApiKey.ApiKey}" -d '{"query":"query ListTodos { listTodos { items { description, id, name, when, where }, nextToken } }"}' ${GraphQLApi.GraphQLUrl} | jq

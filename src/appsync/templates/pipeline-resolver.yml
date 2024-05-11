@@ -28,7 +28,13 @@ Resources:
         CloudWatchLogsRoleArn:
           Fn::GetAtt: GraphQLApiLoggingRole.Arn
         ExcludeVerboseContent: true
-        FieldLogLevel: ERROR
+        FieldLogLevel: ALL
+
+  GraphQLApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/appsync/apis/${GraphQLApi.ApiId}
 
   GraphQLSchema:
     Type: AWS::AppSync::GraphQLSchema

@@ -183,13 +183,22 @@ Resources:
         import sys
         from typing import Any
 
+        from sqlalchemy import Engine, create_engine
+
         from awsglue.utils import getResolvedOptions
+
+
+        def create_engine() -> Engine:
+            engine = create_engine("sqlite+pysqlite:///:memory:")
+            return engine
 
 
         def main(args: dict[str, str]) -> None:
             print(args["custom_key"])
             print(args["custom_key2"])
             print(os.environ["CUSTOM_KEYS"])
+            os.system("cat /etc/os-release")
+
 
         if __name__ == "__main__":
             arg_keys = ["custom_key", "custom_key2"]
@@ -198,12 +207,6 @@ Resources:
             main(args)
 
   # Glue resources
-  GlueJobLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws-glue/${AWS::StackName}-GlueJobLogGroup
-
   GlueJobPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -246,6 +249,7 @@ Resources:
       Description: My glue job
       Role:
         Fn::GetAtt: GlueJobRole.Arn
+      GlueVersion: 3.0
       Command:
         Name: pythonshell
         PythonVersion: 3.9
@@ -253,7 +257,11 @@ Resources:
           Ref: MainPyObject
       DefaultArguments:
         --job-language: python
-        --enable-job-insights: true
+        --enable-job-insights: "true"
+        --additional-python-modules: SQLAlchemy==2.0.25
+      MaxCapacity: 0.0625
+      MaxRetries: 0
+      Timeout: 1
 
   # Step Functions resources
   StateMachineExecutionPolicy:
@@ -315,4 +323,5 @@ Resources:
               Arguments:
                 --custom_key: Value
                 --custom_key2: Value2
+            TimeoutSeconds: 120
             End: true

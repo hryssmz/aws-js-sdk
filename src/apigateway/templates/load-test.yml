@@ -156,6 +156,12 @@ Resources:
       ManagedPolicyArns:
         - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
+  HelloWorldFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-HelloWorldFunction
+
   HelloWorldFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -168,6 +174,9 @@ Resources:
       Handler: index.handler
       Architectures:
         - Ref: Architecture
+      LoggingConfig:
+        LogGroup:
+          Ref: HelloWorldFunctionLogGroup
       Events:
         ApiEvent:
           Type: Api
@@ -187,12 +196,6 @@ Resources:
                 "headers": {"Access-Control-Allow-Origin": "*"},
                 "body": json.dumps({"message": "Hello World"}),
             }
-
-  HelloWorldFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /aws/lambda/${HelloWorldFunction}
 
   LoadTestFunction:
     Type: AWS::Serverless::Function

@@ -1,28 +1,15 @@
-# route53/templates/failover-routing.yml
+# apigateway/templates/vpc-link-api.yml
 AWSTemplateFormatVersion: "2010-09-09"
-Transform: AWS::Serverless-2016-10-31
-Description: Route 53 failover routing policy
+Description: API with VPC link
 
 Parameters:
-  HostedZoneId:
-    Type: AWS::Route53::HostedZone::Id
-    Description: Hosted zone ID
-    Default: Z09445683VNYYIVGA22CI
-
-  DomainName:
-    Type: String
-    Description: Hosted zone domain name
-    Default: hryssmz.click
-
-  VpcId:
-    Type: AWS::EC2::VPC::Id
-    Description: VPC ID
-    Default: vpc-01d5cfd2cad5314f1
-
-  SubnetIds:
-    Type: List<AWS::EC2::Subnet::Id>
-    Description: Subnet IDs
-    Default: subnet-00ee516fa04d610fe,subnet-0c99e2001f0ae6c0a
+  DesiredCapacity:
+    Type: Number
+    Description: DesiredCapacity for auto scaling group
+    Default: 0
+    MinValue: 0
+    MaxValue: 5
+    ConstraintDescription: must be an integer between 0 and 5
 
   ImageId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
@@ -34,7 +21,115 @@ Parameters:
     Description: EC2 instance type
     Default: t2.micro
 
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
+
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDRs
+    Default: 172.20.0.0/20,172.20.16.0/20
+
 Resources:
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Ref: VPCCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  Subnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet0
+
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet1
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: RouteTable
+
+  Subnet0RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet0
+      RouteTableId:
+        Ref: RouteTable
+
+  Subnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet1
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
   # EC2
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -43,16 +138,22 @@ Resources:
         Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
       GroupDescription: EC2 security group
       VpcId:
-        Ref: VpcId
-      SecurityGroupIngress:
-        - Description: HTTP inbound rule
-          IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
+        Ref: VPC
       Tags:
         - Key: Name
           Value: EC2SecurityGroup
+
+  EC2SecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: HTTP inbound rule
+      GroupId:
+        Ref: EC2SecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId:
+        Ref: NLBSecurityGroup
 
   EC2InstanceRole:
     Type: AWS::IAM::Role
@@ -84,7 +185,7 @@ Resources:
     Properties:
       LaunchTemplateName:
         Fn::Sub: ${AWS::StackName}-EC2LaunchTemplate
-      VersionDescription: Launch template for EC2 instances
+      VersionDescription: Launch template for AL2023 instances
       TagSpecifications:
         - ResourceType: launch-template
           Tags:
@@ -194,126 +295,199 @@ Resources:
               find /var/www -type d -exec chmod 2775 {} \;
               find /var/www -type f -exec chmod 0664 {} \;
 
-  EC2Instance0:
-    Type: AWS::EC2::Instance
+              /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --region ${AWS::Region} --resource AutoScalingGroup
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    CreationPolicy:
+      ResourceSignal:
+        Count:
+          Ref: DesiredCapacity
+        Timeout: PT4M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: 2
+        MinInstancesInService: 0
+        MinSuccessfulInstancesPercent: 100
+        SuspendProcesses:
+          - HealthCheck
+          - ReplaceUnhealthy
+          - AZRebalance
+          - AlarmNotification
+          - ScheduledActions
+        PauseTime: PT4M
+        WaitOnResourceSignals: true
     Properties:
+      AutoScalingGroupName:
+        Fn::Sub: ${AWS::StackName}-AutoScalingGroup
+      MinSize: 0
+      MaxSize: 5
+      DesiredCapacity:
+        Ref: DesiredCapacity
+      DesiredCapacityType: units
+      DefaultInstanceWarmup: 120
+      HealthCheckGracePeriod: 120
+      HealthCheckType: EC2
+      VPCZoneIdentifier:
+        - Ref: Subnet0
+        - Ref: Subnet1
       LaunchTemplate:
         LaunchTemplateId:
           Ref: EC2LaunchTemplate
         Version:
           Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
-      SubnetId:
-        Fn::Select:
-          - 0
-          - Ref: SubnetIds
+      TargetGroupARNs:
+        - Ref: NLBTargetGroup
       Tags:
         - Key: Name
-          Value: EC2Instance0
+          Value: AutoScalingGroup
+          PropagateAtLaunch: false
 
-  EIP0:
-    Type: AWS::EC2::EIP
+  # ELB
+  NLBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Domain: vpc
-      InstanceId:
-        Ref: EC2Instance0
+      Name:
+        Fn::Sub: ${AWS::StackName}-NLBTargetGroup
+      TargetType: instance
+      IpAddressType: ipv4
+      Protocol: TCP
+      Port: 80
+      VpcId:
+        Ref: VPC
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      Matcher:
+        HttpCode: 200
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 10
+
+  NLBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-NLBSecurityGroup
+      GroupDescription: NLB security group
+      VpcId:
+        Ref: VPC
+      SecurityGroupEgress:
+        - Description: HTTP outbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          DestinationSecurityGroupId:
+            Ref: EC2SecurityGroup
       Tags:
         - Key: Name
-          Value: EIP0
+          Value: NLBSecurityGroup
 
-  EC2Instance1:
-    Type: AWS::EC2::Instance
+  NLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      LaunchTemplate:
-        LaunchTemplateId:
-          Ref: EC2LaunchTemplate
-        Version:
-          Fn::GetAtt: EC2LaunchTemplate.LatestVersionNumber
-      SubnetId:
-        Fn::Select:
-          - 1
-          - Ref: SubnetIds
-      Tags:
-        - Key: Name
-          Value: EC2Instance1
+      Name:
+        Fn::Sub: ${AWS::StackName}-NLB
+      Type: network
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      SecurityGroups:
+        - Ref: NLBSecurityGroup
+      Subnets:
+        - Ref: Subnet0
+        - Ref: Subnet1
+      EnforceSecurityGroupInboundRulesOnPrivateLinkTraffic: "off"
 
-  EIP1:
-    Type: AWS::EC2::EIP
+  NLBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
-      Domain: vpc
-      InstanceId:
-        Ref: EC2Instance1
-      Tags:
-        - Key: Name
-          Value: EIP1
+      LoadBalancerArn:
+        Ref: NLB
+      Port: 80
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: NLBTargetGroup
 
-  # Route 53
-  HealthCheck0:
-    Type: AWS::Route53::HealthCheck
+  # REST API
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
     Properties:
-      HealthCheckConfig:
-        Type: HTTP
-        IPAddress:
-          Ref: EIP0
-        Port: 80
-        ResourcePath: /index.html
-        RequestInterval: 10
-        FailureThreshold: 1
-      HealthCheckTags:
-        - Key: Name
-          Value: HealthCheck0
+      Name:
+        Ref: AWS::StackName
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      EndpointConfiguration:
+        Types:
+          - EDGE
 
-  HealthCheck1:
-    Type: AWS::Route53::HealthCheck
+  GetRootMethod:
+    Type: AWS::ApiGateway::Method
     Properties:
-      HealthCheckConfig:
-        Type: HTTP
-        IPAddress:
-          Ref: EIP1
-        Port: 80
-        ResourcePath: /index.html
-        RequestInterval: 10
-        FailureThreshold: 1
-      HealthCheckTags:
-        - Key: Name
-          Value: HealthCheck1
+      RestApiId:
+        Ref: RestApi
+      ResourceId:
+        Fn::GetAtt: RestApi.RootResourceId
+      HttpMethod: GET
+      OperationName: GetRoot
+      AuthorizationType: NONE
+      Integration:
+        Type: HTTP_PROXY
+        ConnectionType: VPC_LINK
+        ConnectionId: ${stageVariables.vpcLinkId}
+        Uri:
+          Fn::Sub: http://${NLB.DNSName}
+        IntegrationHttpMethod: GET
+        PassthroughBehavior: WHEN_NO_MATCH
 
-  RecordSetGroup:
-    Type: AWS::Route53::RecordSetGroup
+  RestApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetRootMethod
     Properties:
-      Comment: My weighted RecordSet group
-      HostedZoneId:
-        Ref: HostedZoneId
-      RecordSets:
-        - Name:
-            Ref: DomainName
-          Type: A
-          ResourceRecords:
-            - Ref: EIP0
-          TTL: 10
-          SetIdentifier:
-            Ref: EIP0
-          Failover: PRIMARY
-          HealthCheckId:
-            Ref: HealthCheck0
-        - Name:
-            Ref: DomainName
-          Type: A
-          ResourceRecords:
-            - Ref: EIP1
-          TTL: 10
-          SetIdentifier:
-            Ref: EIP1
-          Failover: SECONDARY
-          HealthCheckId:
-            Ref: HealthCheck1
+      Description: REST API deployment
+      RestApiId:
+        Ref: RestApi
+
+  RestApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: dev
+      Description: dev stage
+      RestApiId:
+        Ref: RestApi
+      DeploymentId:
+        Ref: RestApiDeployment
+      Variables:
+        vpcLinkId:
+          Ref: VpcLink
+
+  VpcLink:
+    Type: AWS::ApiGateway::VpcLink
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-VpcLink
+      Description:
+        Fn::Sub: ${AWS::StackName} VPC Link
+      TargetArns:
+        - Ref: NLB
 
 Outputs:
-  EC2Instance0:
-    Description: Instance ID 0
+  NLBUrl:
+    Description: URL of the NLB
     Value:
-      Ref: EC2Instance0
+      Fn::Sub: http://${NLB.DNSName}
 
-  EC2Instance1:
-    Description: Instance ID 1
+  VpcLinkId:
+    Description: VPC Link ID
     Value:
-      Ref: EC2Instance1
+      Ref: VpcLink
+
+  RestApiUrl:
+    Description: REST API URL
+    Value:
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApiStage}

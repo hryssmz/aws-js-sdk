@@ -1,0 +1,660 @@
+# apigateway/templates/iam-auth-api.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: IAM authorizer API
+
+Resources:
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RestApi
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      StageName: dev
+      Auth:
+        DefaultAuthorizer: AWS_IAM
+        AddDefaultAuthorizerToCorsPreflight: false
+        AddApiKeyRequiredToCorsPreflight: false
+        ResourcePolicy:
+          CustomStatements:
+            - Effect: Allow
+              Principal:
+                AWS:
+                  - Fn::GetAtt: ExecuteApiFunctionRole.Arn
+              Action:
+                - execute-api:Invoke
+              Resource:
+                - Fn::Sub: execute-api:/*/GET/*
+            - Effect: Allow
+              Principal:
+                AWS:
+                  - Fn::GetAtt: ExecuteApiFunction2Role.Arn
+              Action:
+                - execute-api:Invoke
+              Resource:
+                - Fn::Sub: execute-api:/*/*/*
+      Cors:
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: My REST API
+          version: "1.0"
+        servers:
+          - url: https://{restApiId}.execute-api.{region}.amazonaws.com/{basePath}
+            variables:
+              restApiId:
+                default: example123
+              region:
+                default: ap-northeast-1
+              basePath:
+                default: dev
+        paths:
+          /:
+            get:
+              operationId: GetRoot
+              tags:
+                - Root
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/GetRootResponse"
+                      examples:
+                        example1:
+                          value:
+                            message: Hello world!
+                  headers:
+                    Access-Control-Allow-Origin:
+                      description: Response header for CORS support
+                      schema:
+                        type: string
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: '{ "statusCode": 200 }'
+                responses:
+                  default:
+                    statusCode: 200
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                    responseTemplates:
+                      application/json: '{ "message": "Hello world!" }'
+                passthroughBehavior: when_no_match
+            post:
+              operationId: PostRoot
+              tags:
+                - Root
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/GetRootResponse"
+                      examples:
+                        example1:
+                          value:
+                            message: Hello world!
+                  headers:
+                    Access-Control-Allow-Origin:
+                      description: Response header for CORS support
+                      schema:
+                        type: string
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: '{ "statusCode": 200 }'
+                responses:
+                  default:
+                    statusCode: 200
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                    responseTemplates:
+                      application/json: '{ "message": "Hello world!" }'
+                passthroughBehavior: when_no_match
+        components:
+          schemas:
+            GetRootResponse:
+              description: Response body for GET /
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+        x-amazon-apigateway-gateway-responses:
+          DEFAULT_4XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {
+                  "type": "$context.error.responseType",
+                  "message": "$context.error.message"
+                }
+          DEFAULT_5XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {
+                  "type": "$context.error.responseType",
+                  "message": "$context.error.message"
+                }
+
+  ExecuteApiFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ExecuteApiFunctionRole-${AWS::Region}
+      Description: Service role for ExecuteApiFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ExecuteApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ExecuteApiFunction
+
+  ExecuteApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ExecuteApiFunction
+      Description: Execute API funciton
+      Role:
+        Fn::GetAtt: ExecuteApiFunctionRole.Arn
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: ExecuteApiFunctionLogGroup
+      Environment:
+        Variables:
+          HOST_NAME:
+            Fn::Sub: ${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+          BASE_PATH:
+            Fn::Sub: /${RestApi.Stage}
+      InlineCode: |
+        // @ts-check
+        /* eslint-disable @typescript-eslint/no-var-requires */
+        const https = require("node:https");
+        const { Hash } = require("@aws-sdk/hash-node");
+        const { SignatureV4 } = require("@aws-sdk/signature-v4");
+
+        /**
+        * @typedef {import("@aws-sdk/types").HttpRequest} HttpRequest
+        * @typedef {import("@aws-sdk/types").SourceData} SourceData
+        * @typedef {Partial<Pick<HttpRequest, "body" | "headers" | "method" | "path" | "query">>} LambdaEvent
+        */
+
+        class Sha256Hash extends Hash {
+          /**
+          * @param {SourceData | undefined} secret
+          */
+          constructor(secret) {
+            super("sha256", secret);
+          }
+        }
+
+        /**
+        * @param {string} uri
+        * @param {boolean} escapeSlash
+        * @returns {string}
+        */
+        const uriEncode = (uri, escapeSlash = true) => {
+          const encoded = encodeURIComponent(uri)
+            .replace("!", "%21")
+            .replace("*", "%2A")
+            .replace("'", "%27")
+            .replace("(", "%28")
+            .replace(")", "%29");
+          return escapeSlash ? encoded : encoded.replace("%2F", "/");
+        };
+
+        /**
+        * @param {HttpRequest["query"]} query
+        * @returns {string}
+        */
+        const getQueryString = (query = {}) => {
+          return Object.entries(query)
+            .reduce(
+              (acc, [k, v]) =>
+                v === null
+                  ? acc
+                  : typeof v === "string"
+                  ? [...acc, `${k}=${uriEncode(v)}`]
+                  : [...acc, ...v.map(v2 => `${k}=${uriEncode(v2)}`)],
+              [""],
+            )
+            .slice(1)
+            .join("&");
+        };
+
+        /**
+        * @param {import("node:https").RequestOptions} options
+        * @param {string | Buffer | Uint8Array} body
+        * @returns {Promise<Buffer>}
+        */
+        const sendRequest = async (options, body) => {
+          const result = await new Promise((resolve, reject) => {
+            const req = https.request(options, res => {
+              const chunks = [];
+              res.on("data", chunk => {
+                chunks.push(chunk);
+              });
+              res.on("error", error => {
+                reject(error.message);
+              });
+              res.on("end", () => {
+                const data = Buffer.concat(chunks);
+                resolve(data);
+              });
+            });
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(body);
+            req.end();
+          });
+          return result;
+        };
+
+        /**
+        * @param {LambdaEvent} event
+        * @returns {Promise<string>}
+        */
+        exports.handler = async event => {
+          const accessKeyId = process.env.AWS_ACCESS_KEY_ID ?? "";
+          const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY ?? "";
+          const sessionToken = process.env.AWS_SESSION_TOKEN ?? "";
+          const hostname = process.env.HOST_NAME ?? "";
+          const basePath = process.env.BASE_PATH ?? "";
+          const region = process.env.AWS_REGION ?? "";
+          const service = "execute-api";
+          const { method = "GET", query } = event;
+          const path = `${basePath}${event.path ?? "/"}`;
+          const headers = { ...(event.headers ?? {}), Host: hostname };
+          const body = method === "GET" ? "" : event.body ?? "";
+
+          const sigv4 = new SignatureV4({
+            credentials: { accessKeyId, secretAccessKey, sessionToken },
+            region,
+            service,
+            sha256: Sha256Hash,
+            applyChecksum: false,
+            uriEscapePath: false,
+          });
+          const signedRequest = await sigv4.sign({
+            headers,
+            hostname,
+            method,
+            path,
+            query,
+            body,
+            protocol: "https:",
+          });
+          const queryString = getQueryString(query);
+          const result = await sendRequest(
+            {
+              hostname,
+              method,
+              path: `${path}?${queryString}`,
+              headers: signedRequest.headers,
+            },
+            body,
+          );
+          return result.toString();
+        };
+
+  ExecuteApiFunction2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ExecuteApiFunction2Role-${AWS::Region}
+      Description: Service role for ExecuteApiFunction2
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ExecuteApiFunction2LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ExecuteApiFunction2
+
+  ExecuteApiFunction2:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ExecuteApiFunction2
+      Description: Execute API funciton 2
+      Role:
+        Fn::GetAtt: ExecuteApiFunction2Role.Arn
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: ExecuteApiFunction2LogGroup
+      Environment:
+        Variables:
+          HOST_NAME:
+            Fn::Sub: ${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+          BASE_PATH:
+            Fn::Sub: /${RestApi.Stage}
+      InlineCode: |
+        // @ts-check
+        /* eslint-disable @typescript-eslint/no-var-requires */
+        const crypto = require("node:crypto");
+        const https = require("node:https");
+
+        /**
+        * @typedef {import("@aws-sdk/types").HttpRequest} HttpRequest
+        * @typedef {Partial<Pick<HttpRequest, "body" | "headers" | "method" | "path" | "query">>} LambdaEvent
+        */
+
+        /**
+        * @param {string} uri
+        * @param {boolean} escapeSlash
+        * @returns {string}
+        */
+        const uriEncode = (uri, escapeSlash = true) => {
+          const encoded = encodeURIComponent(uri)
+            .replace("!", "%21")
+            .replace("*", "%2A")
+            .replace("'", "%27")
+            .replace("(", "%28")
+            .replace(")", "%29");
+          return escapeSlash ? encoded : encoded.replace("%2F", "/");
+        };
+
+        /**
+        * @returns {string}
+        */
+        const getAmzDate = () => {
+          const now = new Date();
+          const year = now.getUTCFullYear();
+          const month = `${now.getUTCMonth() + 1}`.padStart(2, "0");
+          const day = `${now.getUTCDate()}`.padStart(2, "0");
+          const hours = `${now.getUTCHours()}`.padStart(2, "0");
+          const minutes = `${now.getUTCMinutes()}`.padStart(2, "0");
+          const seconds = `${now.getUTCSeconds()}`.padStart(2, "0");
+          const amzDate = `${year}${month}${day}T${hours}${minutes}${seconds}Z`;
+          return amzDate;
+        };
+
+        /**
+        * @param {HttpRequest["query"]} query
+        * @returns {string}
+        */
+        const getQueryString = (query = {}) => {
+          return Object.entries(query)
+            .reduce(
+              (acc, [k, v]) =>
+                v === null
+                  ? acc
+                  : typeof v === "string"
+                  ? [...acc, `${k}=${uriEncode(v)}`]
+                  : [...acc, ...v.map(v2 => `${k}=${uriEncode(v2)}`)],
+              [""],
+            )
+            .slice(1)
+            .join("&");
+        };
+
+        /**
+        * @param {HttpRequest["query"]} query
+        * @returns {string}
+        */
+        const getCanonicalQueryString = (query = {}) => {
+          return Object.entries(query)
+            .reduce(
+              (acc, [k, v]) => {
+                return v === null
+                  ? acc
+                  : typeof v === "string"
+                  ? [...acc, [k, uriEncode(v)]]
+                  : [...acc, ...v.map(i => [k, uriEncode(i)])];
+              },
+              [["", ""]],
+            )
+            .slice(1)
+            .sort(([k1, v1], [k2, v2]) =>
+              k1 !== k2 ? k1.localeCompare(k2) : v1.localeCompare(v2),
+            )
+            .reduce((acc, [k, v]) => [...acc, `${k}=${v}`], [])
+            .join("&");
+        };
+
+        /**
+        * @param {HttpRequest["headers"]} headers
+        * @param {string} amzDate
+        * @param {string | undefined} sessionToken
+        * @returns {Record<string, string>}
+        */
+        const getHeadersToSign = (headers, amzDate, sessionToken) => {
+          const headersToSign = { ...headers };
+          Object.assign(headersToSign, {
+            "X-Amz-Date": amzDate,
+            ...(sessionToken ? { "X-Amz-Security-Token": sessionToken } : {}),
+          });
+          return headersToSign;
+        };
+
+        /**
+        * @param {Record<string, string>} headersToSign
+        * @returns {string}
+        */
+        const getCanonicalHeaders = headersToSign => {
+          return Object.entries(headersToSign)
+            .map(([k, v]) => [k.toLowerCase(), v.trim().replace(/ +/, " ")])
+            .sort(([k1], [k2]) => k1.localeCompare(k2))
+            .reduce((acc, [k, v]) => acc + `${k}:${v}\n`, "");
+        };
+
+        /**
+        * @param {Record<string, string>} headersToSign
+        * @returns {string}
+        */
+        const getSignedHeaders = headersToSign => {
+          return Object.keys(headersToSign)
+            .map(k => k.toLowerCase())
+            .sort((k1, k2) => k1.localeCompare(k2))
+            .join(";");
+        };
+
+        /**
+        * @param {string} canonicalRequest
+        * @param {string} amzDate
+        * @param {"AWS4-HMAC-SHA256"} algorithm
+        * @param {string} credentialScope
+        * @returns {string}
+        */
+        const getStringToSign = (
+          canonicalRequest,
+          amzDate,
+          algorithm,
+          credentialScope,
+        ) => {
+          const hashCanonicalRequest = crypto
+            .createHash("sha256")
+            .update(canonicalRequest)
+            .digest("hex");
+          const stringToSign = [
+            algorithm,
+            amzDate,
+            credentialScope,
+            hashCanonicalRequest,
+          ].join("\n");
+          return stringToSign;
+        };
+
+        /**
+        * @param {string} secretAccessKey
+        * @param {string} amzDate
+        * @param {string} region
+        * @param {string} service
+        * @returns {Buffer}
+        */
+        const getSigningKey = (secretAccessKey, amzDate, region, service) => {
+          const dateStamp = amzDate.slice(0, 8);
+          const kDate = crypto
+            .createHmac("SHA256", `AWS4${secretAccessKey}`)
+            .update(dateStamp)
+            .digest();
+          const kRegion = crypto.createHmac("SHA256", kDate).update(region).digest();
+          const kService = crypto
+            .createHmac("SHA256", kRegion)
+            .update(service)
+            .digest();
+          const signingKey = crypto
+            .createHmac("SHA256", kService)
+            .update("aws4_request")
+            .digest();
+          return signingKey;
+        };
+
+        /**
+        * @param {string} signature
+        * @param {string} accessKeyId
+        * @param {string} signedHeaders
+        * @param {"AWS4-HMAC-SHA256"} algorithm
+        * @param {string} credentialScope
+        * @returns {string}
+        */
+        const getAuthoizationHeader = (
+          signature,
+          accessKeyId,
+          signedHeaders,
+          algorithm,
+          credentialScope,
+        ) => {
+          return `${algorithm} Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+        };
+
+        /**
+        * @param {import("node:https").RequestOptions} options
+        * @param {string | Buffer | Uint8Array} body
+        * @returns {Promise<Buffer>}
+        */
+        const sendRequest = async (options, body) => {
+          const result = await new Promise((resolve, reject) => {
+            const req = https.request(options, res => {
+              const chunks = [];
+              res.on("data", chunk => {
+                chunks.push(chunk);
+              });
+              res.on("error", error => {
+                reject(error.message);
+              });
+              res.on("end", () => {
+                const data = Buffer.concat(chunks);
+                resolve(data);
+              });
+            });
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(body);
+            req.end();
+          });
+          return result;
+        };
+
+        /**
+        * @param {LambdaEvent} event
+        * @returns {Promise<string>}
+        */
+        exports.handler = async event => {
+          const accessKeyId = process.env.AWS_ACCESS_KEY_ID ?? "";
+          const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY ?? "";
+          const sessionToken = process.env.AWS_SESSION_TOKEN ?? "";
+          const hostname = process.env.HOST_NAME ?? "";
+          const basePath = process.env.BASE_PATH ?? "";
+          const region = process.env.AWS_REGION ?? "";
+          const service = "execute-api";
+          const { method = "GET", query } = event;
+          const path = `${basePath}${event.path ?? "/"}`;
+          const headers = { ...(event.headers ?? {}), Host: hostname };
+          const body = method === "GET" ? "" : event.body ?? "";
+          const amzDate = getAmzDate();
+          const dateStamp = amzDate.slice(0, 8);
+
+          const canonicalQueryString = getCanonicalQueryString(query);
+          const headersToSign = getHeadersToSign(headers, amzDate, sessionToken);
+          const canonicalHeaders = getCanonicalHeaders(headersToSign);
+          const signedHeaders = getSignedHeaders(headersToSign);
+          const payloadHash = crypto.createHash("sha256").update(body).digest("hex");
+          const canonicalRequest = [
+            method,
+            path,
+            canonicalQueryString,
+            canonicalHeaders,
+            signedHeaders,
+            payloadHash,
+          ].join("\n");
+          const algorithm = "AWS4-HMAC-SHA256";
+          const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+          const stringToSign = getStringToSign(
+            canonicalRequest,
+            amzDate,
+            algorithm,
+            credentialScope,
+          );
+          const signingKey = getSigningKey(secretAccessKey, amzDate, region, service);
+          const signature = crypto
+            .createHmac("sha256", signingKey)
+            .update(stringToSign)
+            .digest("hex");
+          const authorizationHeader = getAuthoizationHeader(
+            signature,
+            accessKeyId,
+            signedHeaders,
+            algorithm,
+            credentialScope,
+          );
+          const queryString = getQueryString(query);
+          const result = await sendRequest(
+            {
+              hostname,
+              method,
+              path: `${path}?${queryString}`,
+              headers: { ...headersToSign, Authorization: authorizationHeader },
+            },
+            body,
+          );
+          return result.toString("utf8");
+        };
+
+Outputs:
+  RestApiUrl:
+    Description: REST API URL
+    Value:
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApiStage}

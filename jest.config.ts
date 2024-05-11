@@ -2,13 +2,12 @@
  * For a detailed explanation regarding each configuration property and type check, visit:
  * https://jestjs.io/docs/configuration
  */
-export default {
+import type { Config } from "jest";
+const config: Config = {
   // collectCoverageFrom: [
   //   "src/iam/__tests__/dummy.ts",
   // ],
-  // testMatch: [
-  //   "<rootDir>/src/iam/__tests__/dummy.spec.ts",
-  // ],
+  // testMatch: ["<rootDir>/src/apigateway/libs/*.spec.ts"],
 
   // All imported modules in your tests should be mocked automatically
   // automock: false,
@@ -23,7 +22,7 @@ export default {
   // clearMocks: false,
 
   // Indicates whether the coverage information should be collected while executing the test
-  collectCoverage: true,
+  collectCoverage: false,
 
   // An array of glob patterns indicating a set of files for which coverage information should be collected
   // collectCoverageFrom: undefined,
@@ -210,3 +209,5 @@ export default {
   // Whether to use watchman for file crawling
   // watchman: true,
 };
+
+export default config;

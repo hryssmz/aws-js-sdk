@@ -1,0 +1,179 @@
+# apigateway/templates/api-usage-plan.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: API Gateway usage plan
+
+Parameters:
+  ApiKeyValue:
+    Type: String
+    Default: abcdefghijklmnopqrst
+
+Resources:
+  ApiGatewayCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ApiGatewayCloudWatchRole-${AWS::Region}
+      Description: Global service role for API Gateway to write logs
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn:
+        Fn::GetAtt: ApiGatewayCloudWatchRole.Arn
+
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/apigateway/${AWS::StackName}-ApiAccessLogGroup
+
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name:
+        Ref: AWS::StackName
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      EndpointConfiguration:
+        Types:
+          - EDGE
+
+  GetRootMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Ref: RestApi
+      ResourceId:
+        Fn::GetAtt: RestApi.RootResourceId
+      HttpMethod: GET
+      OperationName: GetRoot
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: MOCK
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{ "statusCode": 200 }'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: '{ "requestTime": "$context.requestTime" }'
+      MethodResponses:
+        - StatusCode: 200
+
+  RestApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetRootMethod
+    Properties:
+      Description: REST API deployment
+      RestApiId:
+        Ref: RestApi
+
+  RestApiStage:
+    Type: AWS::ApiGateway::Stage
+    DependsOn:
+      - ApiExecutionLogGroup
+    Properties:
+      StageName: dev
+      Description: dev stage
+      RestApiId:
+        Ref: RestApi
+      DeploymentId:
+        Ref: RestApiDeployment
+      AccessLogSetting:
+        DestinationArn:
+          Fn::GetAtt: ApiAccessLogGroup.Arn
+        Format:
+          Fn::Join:
+            - ""
+            - Fn::Split:
+                - "\n"
+                - >
+                  {
+                    "requestId": "$context.requestId",
+                    "extendedRequestId": "$context.extendedRequestId",
+                    "ip": "$context.identity.sourceIp",
+                    "caller": "$context.identity.caller",
+                    "user": "$context.identity.user",
+                    "requestTime": "$context.requestTime",
+                    "httpMethod": "$context.httpMethod",
+                    "resourcePath": "$context.resourcePath",
+                    "status": "$context.status",
+                    "protocol": "$context.protocol",
+                    "responseLength": "$context.responseLength"
+                  }
+      MethodSettings:
+        - ResourcePath: /*
+          HttpMethod: "*"
+          LoggingLevel: INFO
+
+  ApiExecutionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: API-Gateway-Execution-Logs_${RestApi}/dev
+
+  RestApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RestApiKey
+      Description: REST API API key
+      Enabled: true
+      Value:
+        Ref: ApiKeyValue
+
+  UsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName:
+        Fn::Sub: ${AWS::StackName}-UsagePlan
+      Description:
+        Fn::Sub: ${AWS::StackName} Usage plan
+      ApiStages:
+        - ApiId:
+            Ref: RestApi
+          Stage:
+            Ref: RestApiStage
+          Throttle:
+            //GET:
+              BurstLimit: 20
+              RateLimit: 10
+      Throttle:
+        BurstLimit: 10
+        RateLimit: 5
+      Quota:
+        Limit: 100
+        Period: DAY
+
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId:
+        Ref: RestApiKey
+      KeyType: API_KEY
+      UsagePlanId:
+        Ref: UsagePlan
+
+Outputs:
+  RestApiUrl:
+    Description: REST API URL
+    Value:
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApiStage}
+
+  SampleCurlCommand:
+    Description: Sample curl command
+    Value:
+      Fn::Sub: >
+        curl -sSL -H 'x-api-key: ${ApiKeyValue}' https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApiStage}

@@ -8,11 +8,6 @@ Parameters:
     Description: VPC ID
     Default: vpc-01d5cfd2cad5314f1
 
-  VpcCidr:
-    Type: String
-    Description: VPC Cidr block
-    Default: 172.31.0.0/16
-
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Subnet IDs
