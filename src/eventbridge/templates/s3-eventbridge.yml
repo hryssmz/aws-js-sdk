@@ -1,0 +1,138 @@
+# s3/templates/s3-eventbridge.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Send S3 event to Event Bridge
+
+Resources:
+  # S3 resources
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+
+  # EventBridge resources
+  S3EventRulePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-S3EventRulePolicy-${AWS::Region}
+      Description: Execution policy for S3 event rule
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - states:StartExecution
+            Resource:
+              - Ref: StateMachine
+
+  S3EventRuleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-S3EventRuleRole-${AWS::Region}
+      Description: Service role for S3 event rule
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: events.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: S3EventRulePolicy
+
+  S3EventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-S3EventRule
+      Description: Event rule for S3 events
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - Ref: S3Bucket
+      Targets:
+        - Id:
+            Fn::GetAtt: StateMachine.Name
+          Arn:
+            Ref: StateMachine
+          RoleArn:
+            Fn::GetAtt: S3EventRuleRole.Arn
+          InputTransformer:
+            InputPathsMap:
+              bucket: $.detail.bucket.name
+              key: $.detail.object.key
+            InputTemplate: |
+              {
+                "bucket": <bucket>,
+                "key": <key>
+              }
+
+  # Step Functions resources
+  StateMachineExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-StateMachineExecutionPolicy-${AWS::Region}
+      Description: Execution policy for State Machine
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+              - xray:GetSamplingRules
+              - xray:GetSamplingTargets
+            Resource:
+              - "*"
+
+  StateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-StateMachineExecutionRole-${AWS::Region}
+      Description: Execution role for State Machine
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: states.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: StateMachineExecutionPolicy
+
+  StateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName:
+        Fn::Sub: ${AWS::StackName}-StateMachine
+      StateMachineType: STANDARD
+      RoleArn:
+        Fn::GetAtt: StateMachineExecutionRole.Arn
+      Definition:
+        Comment: My state machine
+        StartAt: Pass
+        States:
+          Pass:
+            Type: Pass
+            End: true

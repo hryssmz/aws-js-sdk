@@ -1,0 +1,353 @@
+# secretsmanager/templates/single-user-rot-mysql.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::SecretsManager-2020-07-23
+Description: Single user rotation for MySQL
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+    Default: vpc-01d5cfd2cad5314f1
+
+  VpcCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.31.0.0/16
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs
+    Default: subnet-00ee516fa04d610fe,subnet-0c99e2001f0ae6c0a
+
+  PrivateSubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Private subnet CIDRs
+    Default: 172.31.128.0/20,172.31.144.0/20
+
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
+
+  DBUser:
+    Type: String
+    Description: DB user
+    Default: user
+
+  DBAdmin:
+    Type: String
+    Description: DB admin
+    Default: admin
+
+  DefaultDBUserPassword:
+    Type: String
+    Description: Default DB user password
+    Default: password
+
+  DBName:
+    Type: String
+    Description: DB name
+    Default: testdb
+
+  DBPort:
+    Type: String
+    Description: DB port
+    Default: 3306
+
+Resources:
+  # Secrets manager resources
+  RDSSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RDSSecret
+      Description: RDS secret
+      SecretString:
+        Fn::Sub: |
+          {
+            "username": "${DBUser}",
+            "password": "${DefaultDBUserPassword}"
+          }
+
+  RotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    Properties:
+      SecretId:
+        Ref: RDSSecret
+      RotationRules:
+        AutomaticallyAfterDays: 2
+        Duration: 2h
+      RotateImmediatelyOnUpdate: false
+      HostedRotationLambda:
+        RotationType: MySQLSingleUser
+        RotationLambdaName:
+          Fn::Sub: ${AWS::StackName}-RotationScheduleHostedRotationLambda
+        ExcludeCharacters: "\"'@/\\"
+        VpcSecurityGroupIds:
+          Ref: EC2SecurityGroup
+        VpcSubnetIds:
+          Fn::Join:
+            - ","
+            - - Ref: PrivateSubnet0
+              - Ref: PrivateSubnet1
+
+  RotationScheduleHostedRotationLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-RotationScheduleHostedRotationLambda
+
+  SecretTargetAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      TargetType: AWS::RDS::DBInstance
+      TargetId:
+        Ref: DBInstance
+      SecretId:
+        Ref: RDSSecret
+
+  # VPC resources
+  PrivateSubnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: PrivateSubnetCidrs
+      VpcId:
+        Ref: VpcId
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet0
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: PrivateSubnetCidrs
+      VpcId:
+        Ref: VpcId
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet1
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable
+
+  PrivateSubnet0PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet0
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  PrivateSubnet1PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet1
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  VPCESecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-VPCESecurityGroup
+      GroupDescription: VPC endpoint security group
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp:
+            Ref: VpcCidr
+      Tags:
+        - Key: Name
+          Value: VPCESecurityGroup
+
+  SecretsManagerVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName:
+        Fn::Sub: com.amazonaws.${AWS::Region}.secretsmanager
+      VpcId:
+        Ref: VpcId
+      SubnetIds:
+        - Ref: PrivateSubnet0
+        - Ref: PrivateSubnet1
+      SecurityGroupIds:
+        - Ref: VPCESecurityGroup
+      PrivateDnsEnabled: true
+
+  # EC2 resources
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 instances security group
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value: EC2SecurityGroup
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /usr/local/bin/admin-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  mysql -h${DBInstance.Endpoint.Address} -P${DBInstance.Endpoint.Port} -u${DBAdmin} -p$1 --prompt="\u@\h/\d> " -D${!2:-${DBAdmin}}
+              mode: "000755"
+            /usr/local/bin/create-db-user.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  mysql -h${DBInstance.Endpoint.Address} -P${DBInstance.Endpoint.Port} -u${DBAdmin} -p$1 -e"CREATE USER IF NOT EXISTS ${DBUser} IDENTIFIED BY '${DefaultDBUserPassword}'; GRANT ALL PRIVILEGES ON ${DBAdmin}.* TO '${DBUser}'@'%';"
+              mode: "000755"
+            /usr/local/bin/db-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  mysql -h${DBInstance.Endpoint.Address} -P${DBInstance.Endpoint.Port} -u${DBUser} -p$1 --prompt="\u@\h/\d> " -D${!2:-${DBAdmin}}
+              mode: "000755"
+    Properties:
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroupIds:
+        - Ref: EC2SecurityGroup
+      SubnetId:
+        Fn::Select:
+          - 0
+          - Ref: SubnetIds
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            dnf update -y
+            dnf install -y mariadb105
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
+      Tags:
+        - Key: Name
+          Value: EC2Instance
+
+  # RDS resources
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-DBSecurityGroup
+      GroupDescription: DB security group
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        - Description: DB inbound rule
+          IpProtocol: tcp
+          FromPort:
+            Ref: DBPort
+          ToPort:
+            Ref: DBPort
+          SourceSecurityGroupId:
+            Ref: EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: DBSecurityGroup
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName:
+        Fn::Sub: ${AWS::StackName}-DBSubnetGroup
+      DBSubnetGroupDescription: DB subnet group
+      SubnetIds:
+        - Ref: PrivateSubnet0
+        - Ref: PrivateSubnet1
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBInstanceIdentifier:
+        Fn::Sub: ${AWS::StackName}-DBInstance
+      Engine: mysql
+      EngineVersion: 8.0.39
+      MasterUsername:
+        Ref: DBAdmin
+      ManageMasterUserPassword: true
+      Port:
+        Ref: DBPort
+      DBName:
+        Ref: DBAdmin
+      DBInstanceClass: db.t3.micro
+      StorageType: gp2
+      AllocatedStorage: 20
+      MaxAllocatedStorage: 100
+      StorageEncrypted: true
+      BackupRetentionPeriod: 0
+      NetworkType: IPV4
+      DBSubnetGroupName:
+        Ref: DBSubnetGroup
+      VPCSecurityGroups:
+        - Ref: DBSecurityGroup
+      CACertificateIdentifier: rds-ca-rsa4096-g1

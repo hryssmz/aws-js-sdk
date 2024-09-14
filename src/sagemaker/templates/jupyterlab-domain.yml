@@ -1,0 +1,387 @@
+# sagemaker/templates/jupyerlab-domain.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: SageMaker JupyterLab domain
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+    Default: vpc-01d5cfd2cad5314f1
+
+  VpcCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.31.0.0/16
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs
+    Default: subnet-00ee516fa04d610fe,subnet-0c99e2001f0ae6c0a
+
+  UserName:
+    Type: String
+    Description: SSO user name
+    Default: hryssmz@yahoo.com
+
+  PrincipalId:
+    Type: String
+    Description: SSO user principal ID
+    Default: 2704ba18-c021-7033-8107-f06e36f9426e
+
+  IdentityStoreId:
+    Type: String
+    Description: SSO identity store ID
+    Default: d-95676dc1f8
+
+Resources:
+  # SageMaker resources
+  DomainExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DomainExecutionRole-${AWS::Region}
+      Description: Service role for SageMaker domain
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: sagemaker.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSageMakerFullAccess
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSageMakerCanvasFullAccess
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSageMakerCanvasAIServicesAccess
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonS3FullAccess
+
+  Domain:
+    Type: AWS::SageMaker::Domain
+    DeletionPolicy: Retain
+    Properties:
+      DomainName:
+        Fn::Sub: ${AWS::StackName}-Domain
+      AuthMode: SSO
+      VpcId:
+        Ref: VpcId
+      SubnetIds:
+        Ref: SubnetIds
+      DefaultUserSettings:
+        # AutoMountHomeEFS: Enabled
+        ExecutionRole:
+          Fn::GetAtt: DomainExecutionRole.Arn
+        SpaceStorageSettings:
+          DefaultEbsStorageSettings:
+            DefaultEbsVolumeSizeInGb: 10
+            MaximumEbsVolumeSizeInGb: 100
+      DefaultSpaceSettings:
+        ExecutionRole:
+          Fn::GetAtt: DomainExecutionRole.Arn
+        JupyterLabAppSettings:
+          DefaultResourceSpec:
+            InstanceType: ml.t3.medium
+          LifecycleConfigArns:
+            - Fn::GetAtt: StudioLifecycleConfig.StudioLifecycleConfigArn
+            - Fn::GetAtt: StudioLifecycleConfig2.StudioLifecycleConfigArn
+          CodeRepositories:
+            - RepositoryUrl: https://github.com/aws/aws-sam-cli
+      DomainSettings:
+        DockerSettings:
+          EnableDockerAccess: ENABLED
+
+  UserProfile:
+    Type: AWS::SageMaker::UserProfile
+    DependsOn: DeleteDomain
+    Properties:
+      UserProfileName:
+        Fn::Sub: ${AWS::StackName}-UserProfile
+      DomainId:
+        Ref: Domain
+      SingleSignOnUserIdentifier: UserName
+      SingleSignOnUserValue:
+        Ref: UserName
+      UserSettings:
+        JupyterLabAppSettings:
+          DefaultResourceSpec:
+            InstanceType: ml.t3.medium
+          LifecycleConfigArns:
+            - Fn::GetAtt: StudioLifecycleConfig.StudioLifecycleConfigArn
+            - Fn::GetAtt: StudioLifecycleConfig2.StudioLifecycleConfigArn
+          CodeRepositories:
+            - RepositoryUrl: https://github.com/aws/aws-sam-cli
+
+  StudioLifecycleConfig:
+    Type: AWS::SageMaker::StudioLifecycleConfig
+    Properties:
+      StudioLifecycleConfigName:
+        Fn::Sub: ${AWS::StackName}-StudioLifecycleConfig
+      StudioLifecycleConfigAppType: JupyterLab
+      StudioLifecycleConfigContent:
+        Fn::Base64: |
+          #!/bin/sh
+          set -eux
+          echo "Hello World!"
+
+  StudioLifecycleConfig2:
+    Type: AWS::SageMaker::StudioLifecycleConfig
+    Properties:
+      StudioLifecycleConfigName:
+        Fn::Sub: ${AWS::StackName}-StudioLifecycleConfig2
+      StudioLifecycleConfigAppType: JupyterLab
+      StudioLifecycleConfigContent:
+        Fn::Base64: |
+          #!/bin/sh
+          set -eux
+          whoami
+          pwd
+          ls
+          echo "Hello" >/tmp/hello.txt
+
+  SharedSpace:
+    Type: AWS::SageMaker::Space
+    Properties:
+      SpaceName:
+        Fn::Sub: ${AWS::StackName}-SharedSpace2
+      SpaceDisplayName: Shared space
+      DomainId:
+        Ref: Domain
+      SpaceSharingSettings:
+        SharingType: Shared
+      OwnershipSettings:
+        OwnerUserProfileName:
+          Fn::Select:
+            - 0
+            - Fn::Split:
+                - "|"
+                - Ref: UserProfile
+      SpaceSettings:
+        AppType: JupyterLab
+        SpaceStorageSettings:
+          EbsStorageSettings:
+            EbsVolumeSizeInGb: 16
+        JupyterLabAppSettings:
+          DefaultResourceSpec:
+            InstanceType: ml.t3.medium
+            LifecycleConfigArn:
+              Fn::GetAtt: StudioLifecycleConfig.StudioLifecycleConfigArn
+
+  PrivateSpace:
+    Type: AWS::SageMaker::Space
+    Properties:
+      SpaceName:
+        Fn::Sub: ${AWS::StackName}-PrivateSpace2
+      SpaceDisplayName: Private space
+      DomainId:
+        Ref: Domain
+      SpaceSharingSettings:
+        SharingType: Private
+      OwnershipSettings:
+        OwnerUserProfileName:
+          Fn::Select:
+            - 0
+            - Fn::Split:
+                - "|"
+                - Ref: UserProfile
+      SpaceSettings:
+        AppType: JupyterLab
+        SpaceStorageSettings:
+          EbsStorageSettings:
+            EbsVolumeSizeInGb: 16
+        JupyterLabAppSettings:
+          DefaultResourceSpec:
+            InstanceType: ml.t3.medium
+            LifecycleConfigArn:
+              Fn::GetAtt: StudioLifecycleConfig.StudioLifecycleConfigArn
+
+  # SSO resources
+  ApplicationAssignment:
+    Type: AWS::SSO::ApplicationAssignment
+    DependsOn: DeleteDomain
+    Properties:
+      ApplicationArn:
+        Fn::GetAtt: Domain.SingleSignOnApplicationArn
+      PrincipalId:
+        Ref: PrincipalId
+      PrincipalType: USER
+
+  SSOGroup:
+    Type: AWS::IdentityStore::Group
+    Properties:
+      DisplayName:
+        Fn::Sub: ${AWS::StackName}-SSOGroup
+      Description: SSO group
+      IdentityStoreId:
+        Ref: IdentityStoreId
+
+  ApplicationAssignment2:
+    Type: AWS::SSO::ApplicationAssignment
+    DependsOn: DeleteDomain
+    Properties:
+      ApplicationArn:
+        Fn::GetAtt: Domain.SingleSignOnApplicationArn
+      PrincipalId:
+        Fn::GetAtt: SSOGroup.GroupId
+      PrincipalType: GROUP
+
+  # Custom resources
+  DeleteDomainFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-DeleteDomainFunctionPolicy-${AWS::Region}
+      Description: Policy for DeleteDomainFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SageMakerAccessPermissions
+            Effect: Allow
+            Action:
+              - sagemaker:DeleteDomain
+            Resource: "*"
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: ${DeleteDomainFunctionLogGroup.Arn}
+
+  DeleteDomainFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-DeleteDomainFunctionRole-${AWS::Region}
+      Description: Service role for DeleteDomainFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: DeleteDomainFunctionPolicy
+
+  DeleteDomainFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-DeleteDomainFunction
+
+  DeleteDomainFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-DeleteDomainFunction
+      Description: SageMaker delete domain function
+      Role:
+        Fn::GetAtt: DeleteDomainFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Timeout: 30
+      LoggingConfig:
+        LogGroup:
+          Ref: DeleteDomainFunctionLogGroup
+      InlineCode: |
+        const https = require("node:https");
+        const {
+          DeleteDomainCommand,
+          SageMakerClient,
+        } = require("@aws-sdk/client-sagemaker");
+
+        const serialize = obj => JSON.stringify(obj, null, 2);
+
+        const sendResponse = async (
+          event,
+          context,
+          status,
+          data,
+          physicalResourceId,
+          noEcho,
+        ) => {
+          const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
+          const body = serialize({
+            Status: status,
+            Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,
+            PhysicalResourceId: physicalResourceId || context.logStreamName,
+            Data: data,
+            StackId,
+            RequestId,
+            LogicalResourceId,
+            NoEcho: noEcho || false,
+          });
+
+          const { hostname, pathname, search } = new URL(ResponseURL);
+          const path = `${pathname}${search}`;
+          const headers = {
+            "Content-Type": "application/json",
+            "Content-Length": body.length,
+          };
+
+          return await new Promise((resolve, reject) => {
+            const req = https.request(
+              { hostname, port: 443, path, method: "PUT", headers },
+              res => {
+                const chunks = [];
+                res.on("data", chunk => {
+                  chunks.push(chunk);
+                });
+                res.on("error", error => {
+                  reject(error.message);
+                });
+                res.on("end", () => {
+                  const data = Buffer.concat(chunks);
+                  resolve(data);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(body);
+            req.end();
+          });
+        };
+
+        exports.handler = async (event, context) => {
+          console.log(serialize(event));
+          const client = new SageMakerClient();
+          const { ResourceProperties } = event;
+          const { DomainId } = ResourceProperties;
+
+          try {
+            if (event.RequestType === "Create" || event.RequestType === "Update") {
+              return await sendResponse(event, context, "SUCCESS", {}, DomainId);
+            } else if (event.RequestType === "Delete") {
+              const command = new DeleteDomainCommand({
+                DomainId,
+                RetentionPolicy: { HomeEfsFileSystem: "Delete" },
+              });
+              await client.send(command).catch(error => {
+                if (error.name !== "ResourceNotFound") {
+                  throw error;
+                }
+              });
+              return await sendResponse(event, context, "SUCCESS");
+            } else {
+              throw new Error(`Invalid RequestType: ${event.RequestType}`);
+            }
+          } catch (error) {
+            console.error(error);
+            return await sendResponse(event, context, "FAILED", {});
+          }
+        };
+
+  DeleteDomain:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: DeleteDomainFunction.Arn
+      DomainId:
+        Ref: Domain

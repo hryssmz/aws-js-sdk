@@ -1,0 +1,31 @@
+# sagemaker/templates/notebook-instance.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: My Notebook instance
+
+Resources:
+  NotebookInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-NotebookInstanceRole-${AWS::Region}
+      Description: Service role for Notebook instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: sagemaker.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSageMakerFullAccess
+
+  NotebookInstance:
+    Type: AWS::SageMaker::NotebookInstance
+    Properties:
+      NotebookInstanceName:
+        Fn::Sub: ${AWS::StackName}-NotebookInstance
+      InstanceType: ml.t3.medium
+      RoleArn:
+        Fn::GetAtt: NotebookInstanceRole.Arn

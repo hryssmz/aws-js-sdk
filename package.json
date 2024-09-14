@@ -29,11 +29,13 @@
     "@aws-sdk/client-cognito-identity-provider": "^3.409.0",
     "@aws-sdk/client-dynamodb": "^3.409.0",
     "@aws-sdk/client-ec2": "^3.409.0",
+    "@aws-sdk/client-efs": "^3.645.0",
     "@aws-sdk/client-eventbridge": "^3.421.0",
     "@aws-sdk/client-iam": "^3.409.0",
     "@aws-sdk/client-kinesis": "^3.409.0",
     "@aws-sdk/client-lambda": "^3.409.0",
     "@aws-sdk/client-s3": "^3.409.0",
+    "@aws-sdk/client-sagemaker": "^3.646.0",
     "@aws-sdk/client-secrets-manager": "^3.409.0",
     "@aws-sdk/client-sesv2": "^3.409.0",
     "@aws-sdk/client-sfn": "^3.409.0",
@@ -54,6 +56,7 @@
     "luxon": "^3.4.3"
   },
   "devDependencies": {
+    "@aws-sdk/client-route-53-domains": "^3.614.0",
     "@aws-sdk/hash-node": "^3.374.0",
     "@aws-sdk/signature-v4": "^3.374.0",
     "@babel/core": "^7.22.17",

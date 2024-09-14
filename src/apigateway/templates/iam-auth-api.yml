@@ -659,4 +659,4 @@ Outputs:
   RestApiUrl:
     Description: REST API URL
     Value:
-      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApiStage}
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${RestApi.Stage}

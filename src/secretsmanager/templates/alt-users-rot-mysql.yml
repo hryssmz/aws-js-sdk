@@ -1,20 +1,28 @@
-# secretsmanager/templates/alt-users-rotation.yml
+# secretsmanager/templates/alt-user-rot-mysql.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::SecretsManager-2020-07-23
-Description: Alternating users rotation
+Description: Alternating user rotation for MySQL
 
 Parameters:
-  SshCidrIp:
-    Type: String
-    Description: SSH CIDR IP block
-    AllowedPattern: \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}
-    ConstraintDescription: must be a valid CIDR block of the form x.x.x.x/x
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+    Default: vpc-01d5cfd2cad5314f1
 
-  PublicKeyBody:
+  VpcCidr:
     Type: String
-    Description: EC2 public key
-    AllowedPattern: ssh-rsa .*
-    ConstraintDescription: must be a valid RSA public key
+    Description: VPC CIDR
+    Default: 172.31.0.0/16
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs
+    Default: subnet-00ee516fa04d610fe,subnet-0c99e2001f0ae6c0a
+
+  PrivateSubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Private subnet CIDRs
+    Default: 172.31.128.0/20,172.31.144.0/20
 
   ImageId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
@@ -26,25 +34,10 @@ Parameters:
     Description: EC2 instance type
     Default: t2.micro
 
-  VPCCidr:
-    Type: String
-    Description: VPC CIDR
-    Default: 172.20.0.0/16
-
-  SubnetCidrs:
-    Type: CommaDelimitedList
-    Description: Subnet CIDRs
-    Default: 172.20.0.0/20,172.20.16.0/20
-
-  PrivateSubnetCidrs:
-    Type: CommaDelimitedList
-    Description: Private subnet CIDRs
-    Default: 172.20.128.0/20,172.20.144.0/20
-
   DBUser:
     Type: String
     Description: DB user
-    Default: dbuser
+    Default: user
 
   DBMaster:
     Type: String
@@ -54,15 +47,25 @@ Parameters:
   DBAdmin:
     Type: String
     Description: DB admin
-    Default: postgres
+    Default: admin
 
   DefaultDBUserPassword:
     Type: String
     Description: Default DB user password
     Default: password
 
+  DBName:
+    Type: String
+    Description: DB name
+    Default: testdb
+
+  DBPort:
+    Type: String
+    Description: DB port
+    Default: 3306
+
 Resources:
-  # Secrets Manager
+  # Secrets manager resources
   MasterSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
@@ -86,12 +89,12 @@ Resources:
         Duration: 2h
       RotateImmediatelyOnUpdate: false
       HostedRotationLambda:
-        RotationType: PostgreSQLSingleUser
+        RotationType: MySQLSingleUser
         RotationLambdaName:
           Fn::Sub: ${AWS::StackName}-MasterRotationScheduleHostedRotationLambda
         ExcludeCharacters: "\"'@/\\"
         VpcSecurityGroupIds:
-          Ref: BastionSecurityGroup
+          Ref: EC2SecurityGroup
         VpcSubnetIds:
           Fn::Join:
             - ","
@@ -137,14 +140,14 @@ Resources:
         Duration: 2h
       RotateImmediatelyOnUpdate: false
       HostedRotationLambda:
-        RotationType: PostgreSQLMultiUser
+        RotationType: MySQLSingleUser
         RotationLambdaName:
           Fn::Sub: ${AWS::StackName}-RotationScheduleHostedRotationLambda
         ExcludeCharacters: "\"'@/\\"
         MasterSecretArn:
           Ref: MasterSecret
         VpcSecurityGroupIds:
-          Ref: BastionSecurityGroup
+          Ref: EC2SecurityGroup
         VpcSubnetIds:
           Fn::Join:
             - ","
@@ -166,104 +169,7 @@ Resources:
       SecretId:
         Ref: RDSSecret
 
-  # VPC
-  VPC:
-    Type: AWS::EC2::VPC
-    Properties:
-      CidrBlock:
-        Ref: VPCCidr
-      EnableDnsSupport: true
-      EnableDnsHostnames: true
-      Tags:
-        - Key: Name
-          Value: VPC
-
-  Subnet0:
-    Type: AWS::EC2::Subnet
-    Properties:
-      CidrBlock:
-        Fn::Select:
-          - 0
-          - Ref: SubnetCidrs
-      VpcId:
-        Ref: VPC
-      AvailabilityZone:
-        Fn::Select:
-          - 0
-          - Fn::GetAZs: ""
-      MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: Subnet0
-
-  Subnet1:
-    Type: AWS::EC2::Subnet
-    Properties:
-      CidrBlock:
-        Fn::Select:
-          - 1
-          - Ref: SubnetCidrs
-      VpcId:
-        Ref: VPC
-      AvailabilityZone:
-        Fn::Select:
-          - 1
-          - Fn::GetAZs: ""
-      MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: Subnet1
-
-  RouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId:
-        Ref: VPC
-      Tags:
-        - Key: Name
-          Value: RouteTable
-
-  Subnet0RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId:
-        Ref: Subnet0
-      RouteTableId:
-        Ref: RouteTable
-
-  Subnet1RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId:
-        Ref: Subnet1
-      RouteTableId:
-        Ref: RouteTable
-
-  InternetGateway:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: Name
-          Value: InternetGateway
-
-  InternetGatewayAttachment:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId:
-        Ref: VPC
-      InternetGatewayId:
-        Ref: InternetGateway
-
-  InternetRoute:
-    Type: AWS::EC2::Route
-    DependsOn: InternetGatewayAttachment
-    Properties:
-      RouteTableId:
-        Ref: RouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId:
-        Ref: InternetGateway
-
+  # VPC resources
   PrivateSubnet0:
     Type: AWS::EC2::Subnet
     Properties:
@@ -272,7 +178,7 @@ Resources:
           - 0
           - Ref: PrivateSubnetCidrs
       VpcId:
-        Ref: VPC
+        Ref: VpcId
       AvailabilityZone:
         Fn::Select:
           - 0
@@ -289,7 +195,7 @@ Resources:
           - 1
           - Ref: PrivateSubnetCidrs
       VpcId:
-        Ref: VPC
+        Ref: VpcId
       AvailabilityZone:
         Fn::Select:
           - 1
@@ -302,7 +208,7 @@ Resources:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId:
-        Ref: VPC
+        Ref: VpcId
       Tags:
         - Key: Name
           Value: PrivateRouteTable
@@ -323,90 +229,6 @@ Resources:
       RouteTableId:
         Ref: PrivateRouteTable
 
-  # EC2
-  SSHKeyPair:
-    Type: AWS::EC2::KeyPair
-    Properties:
-      KeyName:
-        Fn::Sub: ${AWS::StackName}-SSHKeyPair
-      PublicKeyMaterial:
-        Ref: PublicKeyBody
-
-  BastionSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupName:
-        Fn::Sub: ${AWS::StackName}-BastionSecurityGroup
-      GroupDescription: Bastion instances security group
-      VpcId:
-        Ref: VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp:
-            Ref: SshCidrIp
-      Tags:
-        - Key: Name
-          Value: BastionSecurityGroup
-
-  BastionInstance:
-    Type: AWS::EC2::Instance
-    Metadata:
-      AWS::CloudFormation::Init:
-        config:
-          files:
-            /usr/local/bin/create-db-users.sh:
-              content:
-                Fn::Sub: |
-                  #!/bin/sh
-                  PASSWORD=`python3 -c "from urllib.parse import quote; print(quote('$1', safe=''))"`
-                  psql -d postgresql://${DBAdmin}:$PASSWORD@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${DBAdmin} -c "CREATE ROLE ${DBUser} WITH LOGIN CREATEDB CREATEROLE PASSWORD '${DefaultDBUserPassword}';"
-                  psql -d postgresql://${DBAdmin}:$PASSWORD@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${DBAdmin} -c "CREATE ROLE ${DBMaster} WITH LOGIN SUPERUSER PASSWORD '${DefaultDBUserPassword}';"
-              mode: "000755"
-            /usr/local/bin/db-login.sh:
-              content:
-                Fn::Sub: |
-                  #!/bin/sh
-                  PASSWORD=`python3 -c "from urllib.parse import quote; print(quote('$1', safe=''))"`
-                  psql -d postgresql://${DBUser}:$PASSWORD@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${!2:-${DBAdmin}}
-              mode: "000755"
-            /usr/local/bin/master-login.sh:
-              content:
-                Fn::Sub: |
-                  #!/bin/sh
-                  PASSWORD=`python3 -c "from urllib.parse import quote; print(quote('$1', safe=''))"`
-                  psql -d postgresql://${DBMaster}:$PASSWORD@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${!2:-${DBAdmin}}
-              mode: "000755"
-            /usr/local/bin/admin-login.sh:
-              content:
-                Fn::Sub: |
-                  #!/bin/sh
-                  PASSWORD=`python3 -c "from urllib.parse import quote; print(quote('$1', safe=''))"`
-                  psql -d postgresql://${DBAdmin}:$PASSWORD@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${!2:-${DBAdmin}}
-              mode: "000755"
-    Properties:
-      ImageId:
-        Ref: ImageId
-      InstanceType:
-        Ref: InstanceType
-      KeyName:
-        Ref: SSHKeyPair
-      SecurityGroupIds:
-        - Ref: BastionSecurityGroup
-      SubnetId:
-        Ref: Subnet0
-      UserData:
-        Fn::Base64:
-          Fn::Sub: |
-            #!/bin/sh
-            dnf update -y
-            dnf install -y postgresql15
-            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource BastionInstance --region ${AWS::Region}
-      Tags:
-        - Key: Name
-          Value: BastionInstance
-
   VPCESecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -414,13 +236,13 @@ Resources:
         Fn::Sub: ${AWS::StackName}-VPCESecurityGroup
       GroupDescription: VPC endpoint security group
       VpcId:
-        Ref: VPC
+        Ref: VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
           CidrIp:
-            Fn::GetAtt: VPC.CidrBlock
+            Ref: VpcCidr
       Tags:
         - Key: Name
           Value: VPCESecurityGroup
@@ -432,7 +254,7 @@ Resources:
       ServiceName:
         Fn::Sub: com.amazonaws.${AWS::Region}.secretsmanager
       VpcId:
-        Ref: VPC
+        Ref: VpcId
       SubnetIds:
         - Ref: PrivateSubnet0
         - Ref: PrivateSubnet1
@@ -440,7 +262,100 @@ Resources:
         - Ref: VPCESecurityGroup
       PrivateDnsEnabled: true
 
-  # RDS
+  # EC2 resources
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 instances security group
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value: EC2SecurityGroup
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /usr/local/bin/admin-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  mysql -h${DBInstance.Endpoint.Address} -P${DBInstance.Endpoint.Port} -u${DBAdmin} -p$1 --prompt="\u@\h/\d> " -D${!2:-${DBAdmin}}
+              mode: "000755"
+            /usr/local/bin/create-db-users.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  mysql -h${DBInstance.Endpoint.Address} -P${DBInstance.Endpoint.Port} -u${DBAdmin} -p$1 -e"CREATE USER IF NOT EXISTS ${DBUser} IDENTIFIED BY '${DefaultDBUserPassword}'; GRANT ALL PRIVILEGES ON ${DBAdmin}.* TO '${DBUser}'; CREATE USER IF NOT EXISTS ${DBMaster} IDENTIFIED BY '${DefaultDBUserPassword}'; GRANT ALL PRIVILEGES ON ${DBAdmin}.* TO '${DBMaster}';"
+              mode: "000755"
+            /usr/local/bin/master-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  mysql -h${DBInstance.Endpoint.Address} -P${DBInstance.Endpoint.Port} -u${DBMaster} -p$1 --prompt="\u@\h/\d> " -D${!2:-${DBAdmin}}
+              mode: "000755"
+            /usr/local/bin/db-login.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  mysql -h${DBInstance.Endpoint.Address} -P${DBInstance.Endpoint.Port} -u${DBUser} -p$1 --prompt="\u@\h/\d> " -D${!2:-${DBAdmin}}
+              mode: "000755"
+    Properties:
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroupIds:
+        - Ref: EC2SecurityGroup
+      SubnetId:
+        Fn::Select:
+          - 0
+          - Ref: SubnetIds
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            dnf update -y
+            dnf install -y mariadb105
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
+      Tags:
+        - Key: Name
+          Value: EC2Instance
+
+  # RDS resources
   DBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -448,14 +363,16 @@ Resources:
         Fn::Sub: ${AWS::StackName}-DBSecurityGroup
       GroupDescription: DB security group
       VpcId:
-        Ref: VPC
+        Ref: VpcId
       SecurityGroupIngress:
         - Description: DB inbound rule
           IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
+          FromPort:
+            Ref: DBPort
+          ToPort:
+            Ref: DBPort
           SourceSecurityGroupId:
-            Ref: BastionSecurityGroup
+            Ref: EC2SecurityGroup
       Tags:
         - Key: Name
           Value: DBSecurityGroup
@@ -477,12 +394,13 @@ Resources:
     Properties:
       DBInstanceIdentifier:
         Fn::Sub: ${AWS::StackName}-DBInstance
-      Engine: postgres
-      EngineVersion: 15.3
+      Engine: mysql
+      EngineVersion: 8.0.39
       MasterUsername:
         Ref: DBAdmin
       ManageMasterUserPassword: true
-      Port: 5432
+      Port:
+        Ref: DBPort
       DBName:
         Ref: DBAdmin
       DBInstanceClass: db.t3.micro

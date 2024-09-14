@@ -1,0 +1,147 @@
+# cloudfront/templates/apigw-origin.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: CloudFront with API Gateway origin
+
+Mappings:
+  CloudFrontManagedPolicy:
+    Cache:
+      CachingDisabled: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+      CachingOptimized: 658327ea-f89d-4fab-a63d-7e88639e58f6
+
+    OriginRequest:
+      AllViewer: 216adef6-5c7f-47e4-b989-5492eafa07d3
+      AllViewerExceptHostHeader: b689b0a8-53d0-40ab-baf2-68738e2966ac
+
+Resources:
+  # CloudFront resources
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: CloudFront distribution
+        Enabled: true
+        Origins:
+          - Id:
+              Fn::Sub: ${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+            DomainName:
+              Fn::Sub: ${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+            CustomOriginConfig:
+              HTTPPort: 443
+              OriginProtocolPolicy: https-only
+            OriginPath:
+              Fn::Sub: /${RestApi.Stage}
+        DefaultCacheBehavior:
+          CachePolicyId:
+            Fn::FindInMap:
+              - CloudFrontManagedPolicy
+              - Cache
+              - CachingDisabled
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          TargetOriginId:
+            Fn::Sub: ${RestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+          ViewerProtocolPolicy: allow-all
+
+  # API Gateway resources
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RestApi
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      StageName: dev
+      Cors:
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: My REST API
+          version: "1.0"
+        servers:
+          - url: https://{restApiId}.execute-api.{region}.amazonaws.com/{basePath}
+            variables:
+              restApiId:
+                default: example123
+              region:
+                default: ap-northeast-1
+              basePath:
+                default: dev
+        paths:
+          /:
+            get:
+              operationId: HelloWorld
+              tags:
+                - HelloWorld
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/HelloWorldResponse"
+                      examples:
+                        example1:
+                          value:
+                            message: Hello world!
+                  headers:
+                    Access-Control-Allow-Origin:
+                      description: Response header for CORS support
+                      schema:
+                        type: string
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: '{ "statusCode": 200 }'
+                responses:
+                  default:
+                    statusCode: 200
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                    responseTemplates:
+                      application/json: '{ "message": "Hello world!" }'
+                passthroughBehavior: when_no_match
+        components:
+          schemas:
+            HelloWorldResponse:
+              description: Hello world response
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+        x-amazon-apigateway-gateway-responses:
+          DEFAULT_4XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {
+                  "type": "$context.error.responseType",
+                  "message": "$context.error.message"
+                }
+          DEFAULT_5XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {
+                  "type": "$context.error.responseType",
+                  "message": "$context.error.message"
+                }
+
+Outputs:
+  DistributionDomain:
+    Description: Distribution domain name
+    Value:
+      Fn::GetAtt: Distribution.DomainName

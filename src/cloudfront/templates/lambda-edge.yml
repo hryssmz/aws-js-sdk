@@ -1,7 +1,25 @@
 # cloudfront/templates/cloudfront-function.yml
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: CloudFront with CloudFront functions
+Description: CloudFront with Lambda@Edge functions
+
+Rules:
+  TestVirginia:
+    Assertions:
+      - AssertDescription: Only us-east-1 is allowed
+        Assert:
+          Fn::Equals:
+            - us-east-1
+            - Ref: AWS::Region
+
+Mappings:
+  CloudFrontManagedPolicy:
+    Cache:
+      CachingDisabled: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+      CachingOptimized: 658327ea-f89d-4fab-a63d-7e88639e58f6
+    OriginRequest:
+      AllViewer: 216adef6-5c7f-47e4-b989-5492eafa07d3
+      AllViewerExceptHostHeader: b689b0a8-53d0-40ab-baf2-68738e2966ac
 
 Resources:
   # S3
@@ -38,26 +56,6 @@ Resources:
                   Fn::Sub: arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}
 
   # CloudFront
-  NoCachePolicy:
-    Type: AWS::CloudFront::CachePolicy
-    Properties:
-      CachePolicyConfig:
-        Name:
-          Fn::Sub: ${AWS::StackName}-NoCachePolicy
-        Comment: CloudFront no-cache policy
-        DefaultTTL: 0
-        MinTTL: 0
-        MaxTTL: 0
-        ParametersInCacheKeyAndForwardedToOrigin:
-          EnableAcceptEncodingBrotli: false
-          EnableAcceptEncodingGzip: false
-          CookiesConfig:
-            CookieBehavior: none
-          HeadersConfig:
-            HeaderBehavior: none
-          QueryStringsConfig:
-            QueryStringBehavior: none
-
   OriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
@@ -68,27 +66,6 @@ Resources:
         OriginAccessControlOriginType: s3
         SigningBehavior: always
         SigningProtocol: sigv4
-
-  CloudFrontFunction:
-    Type: AWS::CloudFront::Function
-    Properties:
-      Name:
-        Fn::Sub: ${AWS::StackName}-CloudFrontFunction
-      FunctionConfig:
-        Comment: CloudFront function
-        Runtime: cloudfront-js-1.0
-      AutoPublish: true
-      FunctionCode: |
-        function handler(event) {
-          return {
-            statusCode: 200,
-            statusDescription: "OK",
-            body: {
-              encoding: "text",
-              data: JSON.stringify(event, null, 2),
-            }
-          };
-        }
 
   Distribution:
     Type: AWS::CloudFront::Distribution
@@ -107,7 +84,10 @@ Resources:
               OriginAccessIdentity: ""
         DefaultCacheBehavior:
           CachePolicyId:
-            Ref: NoCachePolicy
+            Fn::FindInMap:
+              - CloudFrontManagedPolicy
+              - Cache
+              - CachingDisabled
           AllowedMethods:
             - GET
             - HEAD
@@ -118,11 +98,55 @@ Resources:
           TargetOriginId:
             Fn::GetAtt: S3Bucket.RegionalDomainName
           ViewerProtocolPolicy: allow-all
-          FunctionAssociations:
+          LambdaFunctionAssociations:
             - EventType: viewer-request
-              FunctionARN:
-                Fn::GetAtt: CloudFrontFunction.FunctionARN
+              LambdaFunctionARN:
+                Fn::Sub: ${LambdaEdgeFunction.Version}
         DefaultRootObject: index.html
+
+  LambdaEdgeFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-LambdaEdgeFunctionRole-${AWS::Region}
+      Description: Service role for LambdaEdgeFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - Fn::Sub: lambda.${AWS::URLSuffix}
+                - Fn::Sub: edgelambda.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  LambdaEdgeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-LambdaEdgeFunction
+      Description: Lambda@Edge function
+      AutoPublishAlias: latest
+      Timeout: 5
+      Role:
+        Fn::GetAtt: LambdaEdgeFunctionRole.Arn
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Architectures:
+        - x86_64
+      InlineCode: |
+        exports.handler = async event => {
+          console.log(JSON.stringify(event, null, 2));
+          return {
+            body: JSON.stringify(event, null, 2),
+            bodyEncoding: "text",
+            status: "200",
+            statusDescription: "OK",
+          };
+        };
 
   # Custom resource
   S3ObjectFunctionPolicy:

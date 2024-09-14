@@ -1,0 +1,309 @@
+# route53/templates/route53-dns.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Create hosted zone and setup DNS
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: Hosted zone domain name
+    Default: hryssmz.click
+
+Resources:
+  # Route 53 resources
+  HostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name:
+        Ref: DomainName
+      HostedZoneConfig:
+        Comment: My root hosted zone
+
+  # Custom resources
+  Route53DnsFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-Route53DnsFunctionPolicy-${AWS::Region}
+      Description: Policy for Route53DnsFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3AccessPermissions
+            Effect: Allow
+            Action:
+              - route53domains:UpdateDomainNameservers
+            Resource: "*"
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: ${Route53DnsFunctionLogGroup.Arn}
+
+  Route53DnsFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-Route53DnsFunctionRole-${AWS::Region}
+      Description: Service role for Route53DnsFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: Route53DnsFunctionPolicy
+
+  Route53DnsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-Route53DnsFunction
+
+  Route53DnsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-Route53DnsFunction
+      Description: Route 53 DNS config function
+      Role:
+        Fn::GetAtt: Route53DnsFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Timeout: 30
+      LoggingConfig:
+        LogGroup:
+          Ref: Route53DnsFunctionLogGroup
+      InlineCode: |
+        const https = require("https");
+        const {
+          Route53DomainsClient,
+          UpdateDomainNameserversCommand,
+        } = require("@aws-sdk/client-route-53-domains");
+
+        const serialize = obj => JSON.stringify(obj, null, 2);
+
+        const sendResponse = async (
+          event,
+          context,
+          status,
+          data,
+          physicalResourceId,
+          noEcho,
+        ) => {
+          const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
+          const body = serialize({
+            Status: status,
+            Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,
+            PhysicalResourceId: physicalResourceId || context.logStreamName,
+            Data: data,
+            StackId,
+            RequestId,
+            LogicalResourceId,
+            NoEcho: noEcho || false,
+          });
+
+          const { hostname, pathname, search } = new URL(ResponseURL);
+          const path = `${pathname}${search}`;
+          const headers = {
+            "Content-Type": "application/json",
+            "Content-Length": body.length,
+          };
+
+          return await new Promise((resolve, reject) => {
+            const req = https.request(
+              { hostname, port: 443, path, method: "PUT", headers },
+              res => {
+                const chunks = [];
+                res.on("data", chunk => {
+                  chunks.push(chunk);
+                });
+                res.on("error", error => {
+                  reject(error.message);
+                });
+                res.on("end", () => {
+                  const data = Buffer.concat(chunks);
+                  resolve(data);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(body);
+            req.end();
+          });
+        };
+
+        exports.handler = async (event, context) => {
+          console.log(serialize(event));
+          const client = new Route53DomainsClient({ region: "us-east-1" });
+          const { ResourceProperties } = event;
+          const { DomainName, NameServers } = ResourceProperties;
+
+          try {
+            if (event.RequestType === "Create" || event.RequestType === "Update") {
+              const command = new UpdateDomainNameserversCommand({
+                DomainName,
+                Nameservers: NameServers.map(Name => ({ Name })),
+              });
+              await client.send(command);
+              return await sendResponse(
+                event,
+                context,
+                "SUCCESS",
+                { NameServers },
+                DomainName,
+              );
+            } else if (event.RequestType === "Delete") {
+              return await sendResponse(event, context, "SUCCESS");
+            } else {
+              throw new Error(`Invalid RequestType: ${event.RequestType}`);
+            }
+          } catch (error) {
+            console.error(error);
+            return await sendResponse(event, context, "FAILED", {});
+          }
+        };
+
+  Route53Dns:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: Route53DnsFunction.Arn
+      DomainName:
+        Ref: DomainName
+      NameServers:
+        Fn::GetAtt: HostedZone.NameServers
+
+  # ACM resources
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName:
+        Ref: DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName:
+            Ref: DomainName
+          HostedZoneId:
+            Ref: HostedZone
+
+  # API Gateway resources
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RestApi
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      StageName: dev
+      Cors:
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      DisableExecuteApiEndpoint: true
+      Domain:
+        DomainName:
+          Ref: DomainName
+        CertificateArn:
+          Ref: Certificate
+        EndpointConfiguration: REGIONAL
+        BasePath:
+          - /
+        Route53:
+          HostedZoneId:
+            Ref: HostedZone
+          EvaluateTargetHealth: false
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: My REST API
+          version: "1.0"
+        servers:
+          - url: https://{restApiId}.execute-api.{region}.amazonaws.com/{basePath}
+            variables:
+              restApiId:
+                default: example123
+              region:
+                default: ap-northeast-1
+              basePath:
+                default: dev
+        paths:
+          /:
+            get:
+              operationId: HelloWorld
+              tags:
+                - HelloWorld
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/HelloWorldResponse"
+                      examples:
+                        example1:
+                          value:
+                            message: Hello world!
+                  headers:
+                    Access-Control-Allow-Origin:
+                      description: Response header for CORS support
+                      schema:
+                        type: string
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: '{ "statusCode": 200 }'
+                responses:
+                  default:
+                    statusCode: 200
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                    responseTemplates:
+                      application/json: '{ "message": "Hello world!" }'
+                passthroughBehavior: when_no_match
+        components:
+          schemas:
+            HelloWorldResponse:
+              description: Hello world response
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+        x-amazon-apigateway-gateway-responses:
+          DEFAULT_4XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {
+                  "type": "$context.error.responseType",
+                  "message": "$context.error.message"
+                }
+          DEFAULT_5XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {
+                  "type": "$context.error.responseType",
+                  "message": "$context.error.message"
+                }
+
+Outputs:
+  RestApiUrl:
+    Description: REST API URL
+    Value:
+      Fn::Sub: https://${RestApi.DomainName}

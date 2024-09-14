@@ -13,7 +13,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+// import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { defaultClientConfig } from "../utils";
 import {
   CopyObjectCommandInput,
@@ -29,7 +29,7 @@ import {
   PutObjectCommandInput,
   S3ClientConfig,
 } from "@aws-sdk/client-s3";
-import type { RequestPresigningArguments } from "@aws-sdk/types";
+// import type { RequestPresigningArguments } from "@aws-sdk/types";
 
 export const defaultS3ClientConfig = { ...defaultClientConfig };
 
@@ -82,14 +82,14 @@ export class S3Wrapper {
     return result;
   }
 
-  async getObjectUrl(
-    params: GetObjectCommandInput,
-    options?: RequestPresigningArguments
-  ) {
-    const command = new GetObjectCommand(params);
-    const signedUrl = await getSignedUrl(this.client, command, options);
-    return signedUrl;
-  }
+  // async getObjectUrl(
+  //   params: GetObjectCommandInput,
+  //   options?: RequestPresigningArguments
+  // ) {
+  //   const command = new GetObjectCommand(params);
+  //   const signedUrl = await getSignedUrl(this.client, command, options);
+  //   return signedUrl;
+  // }
 
   async listBuckets(params: ListBucketsCommandInput) {
     const command = new ListBucketsCommand(params);
@@ -115,14 +115,14 @@ export class S3Wrapper {
     return result;
   }
 
-  async putObjectUrl(
-    params: PutObjectCommandInput,
-    options?: RequestPresigningArguments
-  ) {
-    const command = new PutObjectCommand(params);
-    const signedUrl = await getSignedUrl(this.client, command, options);
-    return signedUrl;
-  }
+  // async putObjectUrl(
+  //   params: PutObjectCommandInput,
+  //   options?: RequestPresigningArguments
+  // ) {
+  //   const command = new PutObjectCommand(params);
+  //   const signedUrl = await getSignedUrl(this.client, command, options);
+  //   return signedUrl;
+  // }
 
   async deleteAllObjects(Bucket?: string) {
     const { Contents } = await this.listObjects({ Bucket });

@@ -47,6 +47,7 @@ Resources:
               StringEquals:
                 aws:SourceAccount:
                   Ref: AWS::AccountId
+                sts:ExternalId: KeyboardCat7
               ArnLike:
                 aws:SourceArn:
                   Fn::Sub: arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*

@@ -5,8 +5,8 @@ import { sleep } from "../utils";
 import type { Parameter } from "@aws-sdk/client-cloudformation";
 import type { Action } from "../utils";
 
-const stackName = "iam-auth-api";
-const templateDir = `${__dirname}/../../src/apigateway/templates`;
+const stackName = "alb-cognito";
+const templateDir = `${__dirname}/../../src/cognito/templates`;
 const templatePath = `${templateDir}/${stackName}.yml`;
 const parameters: Parameter[] = [
   // {

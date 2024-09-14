@@ -61,6 +61,8 @@ Resources:
   RDSSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RDSSecret
       Description: RDS secret
       SecretString:
         Fn::Sub: |
@@ -91,7 +93,7 @@ Resources:
             - - Ref: PrivateSubnet0
               - Ref: PrivateSubnet1
 
-  RotationLambdaLogGroup:
+  RotationScheduleHostedRotationLambdaLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName:

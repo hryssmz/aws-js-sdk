@@ -1,0 +1,662 @@
+# cognito/templates/cognito-hosted-ui.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Cognito user pool client with Hosted UI
+
+Parameters:
+  SmsSenderRoleExternalId:
+    Type: String
+    Default: KeyboardCat
+
+  UserPoolDomainPrefix:
+    Type: String
+    Description: User pool domain prefix
+    Default: hryssmz
+
+  DomainName:
+    Type: String
+    Description: Hosted zone domain name
+    Default: hryssmz.click
+
+Resources:
+  # Route 53 resources
+  HostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name:
+        Ref: DomainName
+      HostedZoneConfig:
+        Comment: My root hosted zone
+
+  # ACM resources
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName:
+        Ref: DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName:
+            Ref: DomainName
+          HostedZoneId:
+            Ref: HostedZone
+
+  # API Gateway resources
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RestApi
+      Description:
+        Fn::Sub: ${AWS::StackName} REST API
+      StageName: dev
+      Cors:
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      DisableExecuteApiEndpoint: true
+      Domain:
+        DomainName:
+          Ref: DomainName
+        CertificateArn:
+          Ref: Certificate
+        EndpointConfiguration: REGIONAL
+        BasePath:
+          - /
+        Route53:
+          HostedZoneId:
+            Ref: HostedZone
+          EvaluateTargetHealth: false
+      OpenApiVersion: "3.0.1"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: My REST API
+          version: "1.0"
+        servers:
+          - url: https://{restApiId}.execute-api.{region}.amazonaws.com/{basePath}
+            variables:
+              restApiId:
+                default: example123
+              region:
+                default: ap-northeast-1
+              basePath:
+                default: dev
+        paths:
+          /code:
+            get:
+              operationId: GetCode
+              tags:
+                - Root
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/TokenResponse"
+                      examples:
+                        example1:
+                          value:
+                            accessToken: eyJraWQiOiJSSGhcL0dZaDE0eGVRMXRZMlpaQ0lnSksyeWZXTXVGUlNcL004RGNHbVQ3dUE9IiwiYWxnIjoiUlMyNTYifQ.eyJzdWIiOiI1N2Q0NmExOC1iMDMxLTcwODgtYzI2Zi1jMDdjYjQxZGI4NjciLCJpc3MiOiJodHRwczpcL1wvY29nbml0by1pZHAuYXAtbm9ydGhlYXN0LTEuYW1hem9uYXdzLmNvbVwvYXAtbm9ydGhlYXN0LTFfNmdRRDVGMU5hIiwidmVyc2lvbiI6MiwiY2xpZW50X2lkIjoiMnQwYmxsaWJvNjFqajg4Y2w5MWNnMnZhNjgiLCJvcmlnaW5fanRpIjoiMGRjZTY5MmQtYjRjYS00YzQ1LTgyNDQtNjJjYWQ4MDhlMjczIiwiZXZlbnRfaWQiOiIyYjMyMjQ3Zi01MDM1LTQ0ZDUtYmFmMC05ZmZmNGM5OGQyNGYiLCJ0b2tlbl91c2UiOiJhY2Nlc3MiLCJzY29wZSI6ImF3cy5jb2duaXRvLnNpZ25pbi51c2VyLmFkbWluIHBob25lIG9wZW5pZCBwcm9maWxlIGVtYWlsIiwiYXV0aF90aW1lIjoxNzE5OTIzMjk1LCJleHAiOjE3MTk5MjY4OTUsImlhdCI6MTcxOTkyMzI5NSwianRpIjoiMjQ4NGMzZGUtMDBmNC00NjZkLWE4NDMtZmRhOGVkNjlhN2Y4IiwidXNlcm5hbWUiOiJocnlzc216In0.XqVI_oo0CfIu4HxdIe400xoDcprIaYLQdPEmAPyydhVz5MrqwU_Xyey1eDg_t77EiLJfqoWl-t4m6FGlWyzbrRX73gkoW7U3SnLlaheKPoBxiNHwbar_rjXTniFzRxT6BhlIYdfSC6yy-kyXJhMsQG8azPKBoaK1uw058jnGpsyCYx17d0nRDYZNuTkhvYwHXSwcgsUclRRgTXCXoVvn3Fq1eHp1p_HsIfvb4XyoEKUDCvdxu0UL5iWJV_C8SjzzNJmyzTbN26Gj5m67m4vTCNlR1Lx87rZ_0L_nA-BjdGxGkXxO3A-5AxZVQcT7f0nE9TSthlEnMM09lYHjW4hjQg
+                            idToken: eyJraWQiOiJ1VFwvWWZsMENJWWNMXC9uTWoxUjNqcEJhVER5MlpiWXdcL2xQK05obHdaNW84PSIsImFsZyI6IlJTMjU2In0.eyJhdF9oYXNoIjoiMkpQcjJKT18wcmJ6dEpDR0lKVlBiUSIsInN1YiI6IjU3ZDQ2YTE4LWIwMzEtNzA4OC1jMjZmLWMwN2NiNDFkYjg2NyIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJpc3MiOiJodHRwczpcL1wvY29nbml0by1pZHAuYXAtbm9ydGhlYXN0LTEuYW1hem9uYXdzLmNvbVwvYXAtbm9ydGhlYXN0LTFfNmdRRDVGMU5hIiwiY29nbml0bzp1c2VybmFtZSI6ImhyeXNzbXoiLCJvcmlnaW5fanRpIjoiMGRjZTY5MmQtYjRjYS00YzQ1LTgyNDQtNjJjYWQ4MDhlMjczIiwiYXVkIjoiMnQwYmxsaWJvNjFqajg4Y2w5MWNnMnZhNjgiLCJldmVudF9pZCI6IjJiMzIyNDdmLTUwMzUtNDRkNS1iYWYwLTlmZmY0Yzk4ZDI0ZiIsInRva2VuX3VzZSI6ImlkIiwiYXV0aF90aW1lIjoxNzE5OTIzMjk1LCJleHAiOjE3MTk5MjY4OTUsImlhdCI6MTcxOTkyMzI5NSwianRpIjoiZTdjZTdkZjgtZjQzZi00NjM0LThiYmQtNGRkNTI2YjM2NmNjIiwiZW1haWwiOiJocnlzc216QHlhaG9vLmNvbSJ9.qjsshWg8Rlt7K2_6fhKUSCMDGMFrcWeGKFz3W9Od_2XKPLxoouUs0xpFhTJcG7pOvp7CSLh6Zfl6oqPTmhltDT5hnDU0yPD33ujvkvlpGBq1200pWqFmOeJG2PUYZb6iRodM5K4kjrYnwRnqWSpLDJaSdmFyX7IDYiNzOVhuMldTVHBIvaP-XdMo7dv_ksRRh5Kz9SczGmfMjPNvFjemzwW1lronmYbYPpOdiKgy8sG1otTzmg4PlPgkVjrwKrjGUZSH5b07P3Dl-LgMX0AcOb85sGTT9R8t4u4TqM1XaAcoi0BYOfgleZAekUcI473Ixf0B4YjJysKi94krRkZ2HA
+                            refreshToken: eyJjdHkiOiJKV1QiLCJlbmMiOiJBMjU2R0NNIiwiYWxnIjoiUlNBLU9BRVAifQ.nwGFDLrq7GxaZ-h0_DFocg5PYdiW3tDaIFFrG8CGq-H69J2Qaif7gnT6wB1toZiEp4ELCT_-9yJSfCDkC08JU2qON4mXGXM1Hv0XTRzYXX39uZePzAGwUzPIg-0ebilRKJ6-ncyd5gngs3XimE5vayBT8PkN2MHhv_jmEOMAL1cbdiTaH_4slcBfI5T-XCAFwaIEXAeOxg7S9mnUrcSgf4RZBsxoJvk9-twewdepNUQNaclrcEzOc7sdNOFfbQu4TOv3dHCU8FTIL5QVD5oeGEjwMteIugHK93ZHpYauGQwVSPNMo60LtoSwBgOUTSvQwouYm9tR_kuAee5JmS3LlQ.aCu0JIWLytHNsd8V.c1Av2o-ZGPcnjGLiUDUlDHiaCfEJiL8QLRQIrSC_zBanigvO3mNuBgjFYazCzoU7Ze0PoEd3NkOCdiraE4JpGQdr2Khc_OK1jhorhNHyr2udcO9UURkuSw1Fae4753vdhnMLTXyjntkXtDuCcDsXRcnUFF35VCi4c4GeUjNhRyMGssQmQEv9t6g1dIh3J_344ipdaHuTdAsGDmGkWh51y4TDsJOb79WrWO8tW4wQoOjgD0tFq71oaZ_Kad98WEuddw2NUdCJFfuiSgQvgeF3oBbOjOs-U-OiJq31L4oACO5NHQkoZFcb017Du8ed4Gck8bNI6fr6n2n_R5XDz6hgaxSyKizZm3zFpMmT9tcsoQdPy_RBUPgLDfqJB1xhYgkDckGJLaJUiFjUGy3EESPkcqZ1PMavtQZtqXOjlQGMpIYV6iLw74iFQ3mnv20qb18WOo_nBEb2RtKlVNkdbrplKGgnhEzWKp_xcUnn_6gbhPJZZ4l4ixOCVw3tBcQjbesvBc8QfAoGzBenRJDLtUAloPp0hdswP2MdJOXOnWmkzDTl3sESZ0pZoijjWKqd9NYy7kJuLESN3IFI4IFQXS4IU9yDxaE3Fv3fAKeOch8vs6rcac6dqC-xfDRVRMm7DLJzo3iuiznPWR6Z2w_L-iFumaEiAFy6-MM0nKcYjUPJeg_MMAoGTfBpSqrohNVJ4gbBYBslE4TYWFUDn_7tK_irKp6iUZBIV1G1GGoQk2peRZl5Qx4uu28hFZAvdA7fozVcer8UGSMQZBuj05wWLki0EiGPjp1CqTlIa1VVlfSrF130qJ3KNzWqlNtUR5M1RlX69wBf1TK6kk2QnuLZOhsHzEcSFVjPPlvJTNPIscO6oHpJSJ8LtTGFTgdUytg2I-9kqf0IMtt5BT1lMckcZHNtxkX4Xqe1--c33cKNpw5lxblmxdNq9O6Rh4Emw1KLSRjCjbRdF07p-QSM3Tklup--FcewgSinwPArAA5HYsh3q7NJ37mpzM9xe2owRke1g9nED1tPh2LxHDrecz_L_HagjLolc4KInt-HvLv4fvyCEWAV0rSyzvT4nH_-Dv-pXxP26rk_wc5UCPw062zMXqbVcwuOYn5Knuxeq2R5rt1tpRTg7ysmdM8jdhD46puQ3RcWIQoAa3DOn5Rw-DGJPxQiN0snq8GCqYTHIhv6jm_m2BUombwn5z1BfzkcQqr3rZ-YGpkXU1yJ0muA_8T4_AXu5YrmrYC69fL1a6f2QGl0GMgPl53rp3-px1Bb3suHvl_Ocn-GSkTIYb3rsWzeVKa1QkgnZSuhFhG2aKGCHDT_Ch3xVI1KMNGuYuF9OeKKP-sDfm17ygrTr6IKK6oYK8FbC59KwSRmbA.Z0iUj_1_-wnWlf5LNfmjGQ
+                  headers:
+                    Access-Control-Allow-Origin:
+                      description: Response header for CORS support
+                      schema:
+                        type: string
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetCodeFunction.Arn}/invocations
+                httpMethod: POST
+          /token:
+            get:
+              operationId: GetToken
+              tags:
+                - Root
+              responses:
+                "200":
+                  description: 200 OK
+                  content:
+                    text/html: {}
+                  headers:
+                    Access-Control-Allow-Origin:
+                      description: Response header for CORS support
+                      schema:
+                        type: string
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetTokenFunction.Arn}/invocations
+                httpMethod: POST
+        components:
+          schemas:
+            TokenResponse:
+              description: Response body for token
+              type: object
+              required:
+                - accessToken
+                - idToken
+                - refreshToken
+              properties:
+                accessToken:
+                  type: string
+                idToken:
+                  type: string
+                refreshToken:
+                  type: string
+        x-amazon-apigateway-gateway-responses:
+          DEFAULT_4XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {
+                  "type": "$context.error.responseType",
+                  "message": "$context.error.message"
+                }
+          DEFAULT_5XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {
+                  "type": "$context.error.responseType",
+                  "message": "$context.error.message"
+                }
+
+  GetCodeFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-GetCodeFunctionRole-${AWS::Region}
+      Description: Service role for GetCodeFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  GetCodeFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-GetCodeFunction
+
+  GetCodeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-GetCodeFunction
+      Description: Get token from authorization code grant
+      Role:
+        Fn::GetAtt: GetCodeFunctionRole.Arn
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: GetCodeFunctionLogGroup
+      Environment:
+        Variables:
+          CLIENT_ID:
+            Ref: UserPoolClient
+          REDIRECT_URI:
+            Fn::Sub: https://${DomainName}/code
+          TOKEN_ENDPOINT_HOST:
+            Fn::Sub: ${UserPoolDomainPrefix}.auth.${AWS::Region}.amazoncognito.com
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /code
+            RestApiId:
+              Ref: RestApi
+      InlineCode: |
+        const https = require("node:https");
+        const querystring = require("node:querystring");
+
+        exports.handler = async event => {
+          console.log(JSON.stringify(event, null, 2));
+          const { code } = event.queryStringParameters;
+          const reqBody = {
+            grant_type: "authorization_code",
+            client_id: process.env.CLIENT_ID,
+            redirect_uri: process.env.REDIRECT_URI,
+            code,
+          };
+          const headers = { "Content-Type": "application/x-www-form-urlencoded" };
+          const data = await new Promise((resolve, reject) => {
+            const req = https.request(
+              {
+                hostname: process.env.TOKEN_ENDPOINT_HOST,
+                port: 443,
+                path: "/oauth2/token",
+                method: "POST",
+                headers,
+              },
+              res => {
+                const chunks = [];
+                res.on("data", chunk => {
+                  chunks.push(chunk);
+                });
+                res.on("error", error => {
+                  reject(error.message);
+                });
+                res.on("end", () => {
+                  const data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+                  resolve(data);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(querystring.stringify(reqBody));
+            req.end();
+          });
+          console.log(JSON.stringify(data, null, 2));
+          const resBody = {
+            accessToken: data.access_token,
+            idToken: data.id_token,
+            refreshToken: data.refresh_token,
+          };
+          return {
+            statusCode: 200,
+            headers: { "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify(resBody, null, 2),
+          };
+        };
+
+  GetTokenFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-GetTokenFunctionRole-${AWS::Region}
+      Description: Service role for GetTokenFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  GetTokenFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-GetTokenFunction
+
+  GetTokenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-GetTokenFunction
+      Description: Get token from implicit code grant
+      Role:
+        Fn::GetAtt: GetTokenFunctionRole.Arn
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: GetTokenFunctionLogGroup
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /token
+            RestApiId:
+              Ref: RestApi
+      InlineCode: |
+        exports.handler = async () => {
+          return {
+            statusCode: 200,
+            headers: {
+              "Access-Control-Allow-Origin": "*",
+              "Content-Type": "text/html",
+            },
+            body: `
+              <pre></pre>
+              <script>
+                const pre = document.querySelector("pre");
+                const resBody = window.location.hash
+                  .slice(1)
+                  .split("&")
+                  .reduce((acc, item) => {
+                    const pair = item.split("=");
+                    acc[pair[0]] = pair[1];
+                    return acc;
+                  }, {});
+                pre.textContent = JSON.stringify(resBody, null, 2);
+              </script>
+            `,
+          };
+        };
+
+  # Cognito resources
+  SmsSenderPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-SmsSenderPolicy-${AWS::Region}
+      Description: Execution policy for sending SMS
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sns:Publish
+            Resource: "*"
+
+  SmsSenderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SmsSenderRole-${AWS::Region}
+      Description: Service role for sending SMS
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: cognito-idp.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+                sts:ExternalId:
+                  Ref: SmsSenderRoleExternalId
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*
+      ManagedPolicyArns:
+        - Ref: SmsSenderPolicy
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName:
+        Fn::Sub: ${AWS::StackName}-UserPool
+      UsernameConfiguration:
+        CaseSensitive: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+          RequireLowercase: true
+      MfaConfiguration: OPTIONAL
+      EnabledMfas:
+        - SMS_MFA
+        - SOFTWARE_TOKEN_MFA
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      AutoVerifiedAttributes:
+        - email
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate:
+          - email
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+        - Name: phone_number
+          Required: false
+          Mutable: true
+      EmailConfiguration:
+        EmailSendingAccount: COGNITO_DEFAULT
+      SmsConfiguration:
+        ExternalId:
+          Ref: SmsSenderRoleExternalId
+        SnsCallerArn:
+          Fn::GetAtt: SmsSenderRole.Arn
+        SnsRegion:
+          Ref: AWS::Region
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId:
+        Ref: UserPool
+      Domain:
+        Ref: UserPoolDomainPrefix
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName:
+        Fn::Sub: ${AWS::StackName}-UserPoolClient
+      UserPoolId:
+        Ref: UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      ReadAttributes:
+        - email
+        - email_verified
+        - phone_number
+        - phone_number_verified
+      WriteAttributes:
+        - email
+        - phone_number
+      CallbackURLs:
+        - Fn::Sub: https://${DomainName}/code
+        - Fn::Sub: https://${DomainName}/token
+      # DefaultRedirectURI:
+      #   Ref: DefaultRedirectURI
+      SupportedIdentityProviders:
+        - COGNITO
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+        - implicit
+      AllowedOAuthScopes:
+        - email
+        - phone
+        - openid
+        - profile
+        - aws.cognito.signin.user.admin
+
+  # Custom resources
+  Route53DnsFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-Route53DnsFunctionPolicy-${AWS::Region}
+      Description: Policy for Route53DnsFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3AccessPermissions
+            Effect: Allow
+            Action:
+              - route53domains:UpdateDomainNameservers
+            Resource: "*"
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: ${Route53DnsFunctionLogGroup.Arn}
+
+  Route53DnsFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-Route53DnsFunctionRole-${AWS::Region}
+      Description: Service role for Route53DnsFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: Route53DnsFunctionPolicy
+
+  Route53DnsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-Route53DnsFunction
+
+  Route53DnsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-Route53DnsFunction
+      Description: Route 53 DNS config function
+      Role:
+        Fn::GetAtt: Route53DnsFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Timeout: 30
+      LoggingConfig:
+        LogGroup:
+          Ref: Route53DnsFunctionLogGroup
+      InlineCode: |
+        const https = require("https");
+        const {
+          Route53DomainsClient,
+          UpdateDomainNameserversCommand,
+        } = require("@aws-sdk/client-route-53-domains");
+
+        const serialize = obj => JSON.stringify(obj, null, 2);
+
+        const sendResponse = async (
+          event,
+          context,
+          status,
+          data,
+          physicalResourceId,
+          noEcho,
+        ) => {
+          const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
+          const body = serialize({
+            Status: status,
+            Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,
+            PhysicalResourceId: physicalResourceId || context.logStreamName,
+            Data: data,
+            StackId,
+            RequestId,
+            LogicalResourceId,
+            NoEcho: noEcho || false,
+          });
+
+          const { hostname, pathname, search } = new URL(ResponseURL);
+          const path = `${pathname}${search}`;
+          const headers = {
+            "Content-Type": "application/json",
+            "Content-Length": body.length,
+          };
+
+          return await new Promise((resolve, reject) => {
+            const req = https.request(
+              { hostname, port: 443, path, method: "PUT", headers },
+              res => {
+                const chunks = [];
+                res.on("data", chunk => {
+                  chunks.push(chunk);
+                });
+                res.on("error", error => {
+                  reject(error.message);
+                });
+                res.on("end", () => {
+                  const data = Buffer.concat(chunks);
+                  resolve(data);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(body);
+            req.end();
+          });
+        };
+
+        exports.handler = async (event, context) => {
+          console.log(serialize(event));
+          const client = new Route53DomainsClient({ region: "us-east-1" });
+          const { ResourceProperties } = event;
+          const { DomainName, NameServers } = ResourceProperties;
+
+          try {
+            if (event.RequestType === "Create" || event.RequestType === "Update") {
+              const command = new UpdateDomainNameserversCommand({
+                DomainName,
+                Nameservers: NameServers.map(Name => ({ Name })),
+              });
+              await client.send(command);
+              return await sendResponse(
+                event,
+                context,
+                "SUCCESS",
+                { NameServers },
+                DomainName,
+              );
+            } else if (event.RequestType === "Delete") {
+              return await sendResponse(event, context, "SUCCESS");
+            } else {
+              throw new Error(`Invalid RequestType: ${event.RequestType}`);
+            }
+          } catch (error) {
+            console.error(error);
+            return await sendResponse(event, context, "FAILED", {});
+          }
+        };
+
+  Route53Dns:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: Route53DnsFunction.Arn
+      DomainName:
+        Ref: DomainName
+      NameServers:
+        Fn::GetAtt: HostedZone.NameServers
+
+Outputs:
+  LoginUrlCode:
+    Description: Login URL with authorization code grant
+    Value:
+      Fn::Sub: https://${UserPoolDomainPrefix}.auth.${AWS::Region}.amazoncognito.com/login?client_id=${UserPoolClient}&response_type=code&redirect_uri=https://${DomainName}/code
+
+  LoginUrlToken:
+    Description: Login URL with implicit code grant
+    Value:
+      Fn::Sub: https://${UserPoolDomainPrefix}.auth.${AWS::Region}.amazoncognito.com/login?client_id=${UserPoolClient}&response_type=token&redirect_uri=https://${DomainName}/token

@@ -1,0 +1,208 @@
+# imagebuilder/templates/first-ami-pipeline.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: My First AMI pipeline
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+    Default: vpc-01d5cfd2cad5314f1
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs
+    Default: subnet-00ee516fa04d610fe,subnet-0c99e2001f0ae6c0a
+
+  BaseImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Base image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t3.micro
+
+Resources:
+  # EC2 resources
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/EC2InstanceProfileForImageBuilder
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/EC2InstanceProfileForImageBuilderECRContainerBuilds
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: EC2 security group
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: EC2SecurityGroup
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Fn::GetAtt: AmiImage.ImageId
+      InstanceType:
+        Ref: InstanceType
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroupIds:
+        - Ref: EC2SecurityGroup
+      SubnetId:
+        Fn::Select:
+          - 0
+          - Ref: SubnetIds
+      Tags:
+        - Key: Name
+          Value: EC2Instance
+
+  # Image Builder resources
+  BuildComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-BuildComponent
+      Description: My build component
+      ChangeDescription: First version
+      Platform: Linux
+      Version: 1.0.0
+      SupportedOsVersions:
+        - Amazon Linux 2023
+      Data:
+        Fn::Sub: |
+          name: ${AWS::StackName}-BuildComponent
+          description: My build component
+          schemaVersion: 1.0
+          parameters:
+            - MyInputParameter:
+                type: string
+                default: "It's me!"
+                description: This is an input parameter.
+          phases:
+            - name: build
+              steps:
+                - name: HelloWorldStep
+                  action: ExecuteBash
+                  inputs:
+                    commands:
+                      - echo "Hello World! Build phase. My input parameter value is {{ MyInputParameter }}" | tee /tmp/build-`date +'%Y%m%d_%H%M%S'`.log
+            - name: validate
+              steps:
+                - name: HelloWorldStep
+                  action: ExecuteBash
+                  inputs:
+                    commands:
+                      - echo "Hello World! Validate phase. My input parameter value is {{ MyInputParameter }}" | tee /tmp/validate-`date +'%Y%m%d_%H%M%S'`.log
+            - name: test
+              steps:
+                - name: HelloWorldStep
+                  action: ExecuteBash
+                  inputs:
+                    commands:
+                      - echo "Hello World! Test phase. My input parameter value is {{ MyInputParameter }}" | tee /tmp/test-`date +'%Y%m%d_%H%M%S'`.log
+
+  ImageRecipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ImageRecipe
+      Description: My image recipe
+      Version: 1.0.0
+      ParentImage:
+        Ref: BaseImageId
+      Components:
+        - ComponentArn:
+            Ref: BuildComponent
+          Parameters:
+            - Name: MyInputParameter
+              Value:
+                - John Doe
+
+  InfrastructureConfiguration:
+    Type: AWS::ImageBuilder::InfrastructureConfiguration
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-InfrastructureConfiguration
+      Description: My infrastructure configuration
+      InstanceProfileName:
+        Ref: EC2InstanceProfile
+      InstanceTypes:
+        - t3.micro
+
+  DistributionConfiguration:
+    Type: AWS::ImageBuilder::DistributionConfiguration
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-DistributionConfiguration
+      Description: My distribution configuration
+      Distributions:
+        - Region:
+            Ref: AWS::Region
+          AmiDistributionConfiguration:
+            Name:
+              Fn::Sub: ${AWS::StackName}-AMI-{{ imagebuilder:buildDate }}
+            Description: AMI distribution configuration
+
+  ImagePipeline:
+    Type: AWS::ImageBuilder::ImagePipeline
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-ImagePipeline
+      Description: My image pipeline
+      ImageRecipeArn:
+        Ref: ImageRecipe
+      InfrastructureConfigurationArn:
+        Ref: InfrastructureConfiguration
+      DistributionConfigurationArn:
+        Ref: DistributionConfiguration
+
+  AmiImage:
+    Type: AWS::ImageBuilder::Image
+    Properties:
+      ImageRecipeArn:
+        Ref: ImageRecipe
+      DistributionConfigurationArn:
+        Ref: DistributionConfiguration
+      InfrastructureConfigurationArn:
+        Ref: InfrastructureConfiguration
+
+Outputs:
+  AmiImageId:
+    Description: AMI image ID
+    Value:
+      Fn::GetAtt: AmiImage.ImageId
