@@ -5,8 +5,8 @@ import { sleep } from "../utils";
 import type { Parameter } from "@aws-sdk/client-cloudformation";
 import type { Action } from "../utils";
 
-const stackName = "alb-cognito";
-const templateDir = `${__dirname}/../../src/cognito/templates`;
+const stackName = "lambda-container";
+const templateDir = `${__dirname}/../../src/lambda/templates`;
 const templatePath = `${templateDir}/${stackName}.yml`;
 const parameters: Parameter[] = [
   // {

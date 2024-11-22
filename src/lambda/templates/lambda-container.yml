@@ -1,0 +1,387 @@
+# lambda/templates/lambda-container.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Lambda function with container deployment
+
+Parameters:
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: EC2 image ID
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t3.micro
+
+Resources:
+  # CloudWatch Logs
+  CloudWatchAgentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/ec2/${AWS::StackName}-CloudWatchAgentLogGroup
+
+  # SSM resources
+  CloudWatchAgentConfigParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name:
+        Fn::Sub: /AmazonCloudWatch-${AWS::StackName}/amazon-cloudwatch-agent.json
+      Description: SSM Parameter for CloudWatchAgent configuration
+      Type: String
+      Value:
+        Fn::Sub: |
+          {
+            "agent": {
+              "metrics_collection_interval": 60,
+              "logfile": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log"
+            },
+            "logs": {
+              "logs_collected": {
+                "files": {
+                  "collect_list": [
+                    {
+                      "file_path": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log",
+                      "log_group_name": "${CloudWatchAgentLogGroup}",
+                      "log_stream_name": "{instance_id}-amazon-cloudwatch-agent.log"
+                    },
+                    {
+                      "file_path": "/var/log/cfn-hup.log",
+                      "log_group_name": "${CloudWatchAgentLogGroup}",
+                      "log_stream_name": "{instance_id}-cfn-hup.log"
+                    },
+                    {
+                      "file_path": "/var/log/cloud-init-output.log",
+                      "log_group_name": "${CloudWatchAgentLogGroup}",
+                      "log_stream_name": "{instance_id}-cloud-init-output.log"
+                    }
+                  ]
+                }
+              },
+              "log_stream_name": "default"
+            }
+          }
+
+  InstallCloudWatchAgentAssociation:
+    Type: AWS::SSM::Association
+    Properties:
+      AssociationName:
+        Fn::Sub: ${AWS::StackName}-InstallCloudWatchAgentAssociation
+      Name: AWS-ConfigureAWSPackage
+      Parameters:
+        action:
+          - Install
+        name:
+          - AmazonCloudWatchAgent
+      ApplyOnlyAtCronInterval: true
+      ScheduleExpression: cron(0 2 ? * SUN *)
+      Targets:
+        - Key: tag:Name
+          Values:
+            - EC2Instance
+
+  StartCloudWatchAgentAssociation:
+    Type: AWS::SSM::Association
+    Properties:
+      AssociationName:
+        Fn::Sub: ${AWS::StackName}-StartCloudWatchAgentAssociation
+      Name: AmazonCloudWatch-ManageAgent
+      Parameters:
+        action:
+          - configure
+        optionalConfigurationSource:
+          - ssm
+        optionalConfigurationLocation:
+          - Fn::Sub: /AmazonCloudWatch-${AWS::StackName}/amazon-cloudwatch-agent.json
+        optionalRestart:
+          - "yes"
+      ApplyOnlyAtCronInterval: true
+      ScheduleExpression: cron(0 2 ? * SUN#1 *)
+      Targets:
+        - Key: tag:Name
+          Values:
+            - EC2Instance
+
+  # EC2 resources
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceRole-${AWS::Region}
+      Description: Service role for EC2 instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Sub: ${AWS::StackName}-EC2InstanceProfile-${AWS::Region}
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EC2SecurityGroup
+      GroupDescription: Web security group
+      SecurityGroupIngress:
+        - Description: HTTP inbound rule
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: EC2SecurityGroup
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content:
+                Fn::Sub: |
+                  [main]
+                  stack=${AWS::StackName}
+                  region=${AWS::Region}
+                  interval=1
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content:
+                Fn::Sub: |
+                  [cfn-auto-reloader-hook]
+                  triggers=post.update
+                  path=Resources.EC2Instance.Metadata.AWS::CloudFormation::Init
+                  action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
+                  runas=root
+            /etc/systemd/system/cfn-hup.service:
+              content:
+                Fn::Sub: |
+                  [Unit]
+                  Description=cfn-hup service
+                  After=network.target
+
+                  [Service]
+                  Type=simple
+                  User=root
+                  ExecStart=/opt/aws/bin/cfn-hup
+                  Restart=always
+                  RestartSec=3
+
+                  [Install]
+                  WantedBy=multi-user.target
+            /usr/local/bin/cfn-reinit:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  sudo /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
+              mode: "000755"
+            /home/ec2-user/app/scripts/ec2-user-init.sh:
+              content:
+                Fn::Sub: |
+                  #!/bin/sh
+                  wget https://github.com/aws/aws-sam-cli/releases/latest/download/aws-sam-cli-linux-x86_64.zip
+                  unzip aws-sam-cli-linux-x86_64.zip -d sam-installation
+                  sudo ./sam-installation/install
+                  rm -rf sam-installation aws-sam-cli-linux-x86_64.zip
+              mode: "000755"
+              group: ec2-user
+              owner: ec2-user
+            /home/ec2-user/app/index.js:
+              content: |
+                exports.handler = async event => {
+                  const response = {
+                    statusCode: 200,
+                    body: JSON.stringify("Hello from ECR Lambda!"),
+                  };
+                  return response;
+                };
+              group: ec2-user
+              owner: ec2-user
+            /home/ec2-user/app/Dockerfile:
+              content: |
+                FROM public.ecr.aws/lambda/nodejs:20
+
+                # Copy function code
+                COPY index.js ${LAMBDA_TASK_ROOT}
+
+                # Set the CMD to your handler (could also be done as a parameter override outside of the Dockerfile)
+                CMD ["index.handler"]
+              group: ec2-user
+              owner: ec2-user
+            /home/ec2-user/app/samconfig.toml:
+              content:
+                Fn::Sub: |
+                  version = 0.1
+
+                  [default]
+                  [default.global.parameters]
+                  stack_name = "${AWS::StackName}-ecr"
+
+                  [default.build.parameters]
+                  cached = true
+                  parallel = true
+
+                  [default.validate.parameters]
+                  lint = true
+
+                  [default.deploy.parameters]
+                  capabilities = "CAPABILITY_NAMED_IAM"
+                  confirm_changeset = false
+                  resolve_s3 = true
+                  resolve_image_repos = true
+                  region = "${AWS::Region}"
+
+                  [default.package.parameters]
+                  resolve_s3 = true
+
+                  [default.sync.parameters]
+                  watch = true
+
+                  [default.local_start_api.parameters]
+                  warm_containers = "EAGER"
+
+                  [default.local_start_lambda.parameters]
+                  warm_containers = "EAGER"
+              group: ec2-user
+              owner: ec2-user
+            /home/ec2-user/app/template.yml:
+              content: |
+                AWSTemplateFormatVersion: "2010-09-09"
+                Transform: AWS::Serverless-2016-10-31
+                Description: Lambda ECR function
+
+                Resources:
+                  ContainerFunctionRole:
+                    Type: AWS::IAM::Role
+                    Properties:
+                      RoleName:
+                        Fn::Sub: ${AWS::StackName}-ContainerFunctionRole-${AWS::Region}
+                      Description: Service role for ContainerFunction
+                      AssumeRolePolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                          - Effect: Allow
+                            Principal:
+                              Service:
+                                Fn::Sub: lambda.${AWS::URLSuffix}
+                            Action:
+                              - sts:AssumeRole
+                      ManagedPolicyArns:
+                        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+                  ContainerFunctionLogGroup:
+                    Type: AWS::Logs::LogGroup
+                    Properties:
+                      LogGroupName:
+                        Fn::Sub: /aws/lambda/${AWS::StackName}-ContainerFunction
+
+                  ContainerFunction:
+                    Type: AWS::Serverless::Function
+                    Metadata:
+                      Dockerfile: Dockerfile
+                      DockerContext: .
+                      DockerTag: latest
+                    Properties:
+                      FunctionName:
+                        Fn::Sub: ${AWS::StackName}-ContainerFunction
+                      Description: Container function
+                      PackageType: Image
+                      Role:
+                        Fn::GetAtt: ContainerFunctionRole.Arn
+                      Architectures:
+                        - x86_64
+                      LoggingConfig:
+                        LogGroup:
+                          Ref: ContainerFunctionLogGroup
+              group: ec2-user
+              owner: ec2-user
+    Properties:
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      IamInstanceProfile:
+        Ref: EC2InstanceProfile
+      SecurityGroups:
+        - Ref: EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: EC2Instance
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/sh
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
+            dnf install -y amazon-cloudwatch-agent docker git
+            amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c ssm:${CloudWatchAgentConfigParameter}
+            systemctl enable cfn-hup
+            systemctl start cfn-hup
+            systemctl enable docker
+            systemctl start docker
+            usermod -a -G docker ec2-user
+
+            chwon -R ec2-user:ec2-user /home/ec2-user
+            su -l ec2-user /home/ec2-user/app/scripts/ec2-user-init.sh
+
+  # Lambda resources
+  ZipFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ZipFunctionRole-${AWS::Region}
+      Description: Service role for ZipFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ZipFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ZipFunction
+
+  ZipFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ZipFunction
+      Description: My simple Lambda function
+      Role:
+        Fn::GetAtt: ZipFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: ZipFunctionLogGroup
+      InlineCode: |
+        exports.handler = async event => {
+          const response = {
+            statusCode: 200,
+            body: JSON.stringify("Hello from Zip Lambda!"),
+          };
+          return response;
+        };

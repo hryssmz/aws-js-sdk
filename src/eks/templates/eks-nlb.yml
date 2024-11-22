@@ -1,0 +1,493 @@
+# eks/templates/eks-nlb.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Amazon EKS with Network Load Balancer
+
+Parameters:
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
+
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDRs
+    Default: 172.20.0.0/20,172.20.16.0/20
+
+  PrivateSubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Private subnet CIDRs
+    Default: 172.20.128.0/20,172.20.144.0/20
+
+  DeployEKSCluster:
+    Type: String
+    Description: Deploy EKS cluster
+    Default: false
+    AllowedValues:
+      - true
+      - false
+    ConstraintDescription: Must be a boolean value
+
+  PublicAccessCidrs:
+    Type: CommaDelimitedList
+    Description: Public access CIDRs for EKS cluster
+    Default: 0.0.0.0/0
+
+  EKSLBCPolicyName:
+    Type: String
+    Description: IAM policy name for EKS Load Balancer Controller
+    # Default: AWSLoadBalancerControllerIAMPolicy
+
+Conditions:
+  DeployEKSClusterCondition:
+    Fn::Equals:
+      - Ref: DeployEKSCluster
+      - true
+
+Resources:
+  # VPC resources
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Ref: VPCCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  Subnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet0
+        - Key: kubernetes.io/role/elb
+          Value: 1
+
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet1
+        - Key: kubernetes.io/role/elb
+          Value: 1
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: RouteTable
+
+  Subnet0RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet0
+      RouteTableId:
+        Ref: RouteTable
+
+  Subnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet1
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  NLBEIP0:
+    Type: AWS::EC2::EIP
+    Condition: DeployEKSClusterCondition
+    Properties:
+      Domain: vpc
+
+  NLBEIP1:
+    Type: AWS::EC2::EIP
+    Condition: DeployEKSClusterCondition
+    Properties:
+      Domain: vpc
+
+  # Lambda resources
+  EKSManifestFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EKSManifestFunctionRole-${AWS::Region}
+      Description: Service role for EKSManifestFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  EKSManifestFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-EKSManifestFunction
+
+  EKSManifestFunction:
+    Type: AWS::Serverless::Function
+    Condition: DeployEKSClusterCondition
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-EKSManifestFunction
+      Description: My simple Lambda function
+      Role:
+        Fn::GetAtt: EKSManifestFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          EKS_MANIFEST_CONTENT:
+            Fn::Sub: |
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: ${AWS::StackName}
+                labels:
+                  app.kubernetes.io/name: ${AWS::StackName}
+                annotations:
+                  eks.amazonaws.com/role-arn: ${EKSServiceAccountRole.Arn}
+                  eks.amazonaws.com/sts-regional-endpoints: "true"
+              ---
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: ${AWS::StackName}
+                labels:
+                  app.kubernetes.io/name: ${AWS::StackName}
+              spec:
+                replicas: 2
+                selector:
+                  matchLabels:
+                    app.kubernetes.io/name: ${AWS::StackName}
+                template:
+                  metadata:
+                    labels:
+                      app.kubernetes.io/name: ${AWS::StackName}
+                  spec:
+                    serviceAccountName: ${AWS::StackName}
+                    containers:
+                      - name: nginx
+                        image: public.ecr.aws/nginx/nginx:1.23
+                        command:
+                          - /bin/sh
+                        args:
+                          - -c
+                          - |
+                            apt update -y
+                            apt install -y less unzip
+                            curl -sSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+                            unzip awscliv2.zip
+                            ./aws/install
+                            aws --version
+                            rm -rf awscliv2.zip aws
+                            nginx -g "daemon off;"
+                        ports:
+                          - name: http
+                            containerPort: 80
+              ---
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: ${AWS::StackName}
+                labels:
+                  app.kubernetes.io/name: ${AWS::StackName}
+                annotations:
+                  service.beta.kubernetes.io/aws-load-balancer-type: external
+                  service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+                  service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+                  service.beta.kubernetes.io/aws-load-balancer-eip-allocations: ${NLBEIP0.AllocationId},${NLBEIP1.AllocationId}
+              spec:
+                type: LoadBalancer
+                selector:
+                  app.kubernetes.io/name: ${AWS::StackName}
+                ports:
+                  - protocol: TCP
+                    port: 80
+                    targetPort: 80
+      LoggingConfig:
+        LogGroup:
+          Ref: EKSManifestFunctionLogGroup
+      FunctionUrlConfig:
+        AuthType: NONE
+      InlineCode: |
+        exports.handler = async event => {
+          console.log(JSON.stringify(event, null, 2));
+          return {
+            statusCode: 200,
+            body: process.env.EKS_MANIFEST_CONTENT,
+            headers: { "Content-Type": "application/yaml" },
+          };
+        };
+
+  # EKS resources
+  EKSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EKSSecurityGroup
+      GroupDescription: EKS security group
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: EKSSecurityGroup
+
+  EKSClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EKSClusterRole-${AWS::Region}
+      Description: Service role for EKS cluster
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: eks.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonEKSClusterPolicy
+
+  EKSCluster:
+    Type: AWS::EKS::Cluster
+    Condition: DeployEKSClusterCondition
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-EKSCluster
+      RoleArn:
+        Fn::GetAtt: EKSClusterRole.Arn
+      ResourcesVpcConfig:
+        SubnetIds:
+          - Ref: Subnet0
+          - Ref: Subnet1
+        SecurityGroupIds:
+          - Ref: EKSSecurityGroup
+        PublicAccessCidrs:
+          Ref: PublicAccessCidrs
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIG_MAP
+
+  EKSManagedNodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EKSManagedNodeRole-${AWS::Region}
+      Description: Service role for EKS managed node
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: ec2.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonEKS_CNI_Policy
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EKSNodegroup:
+    Type: AWS::EKS::Nodegroup
+    Condition: DeployEKSClusterCondition
+    Properties:
+      NodegroupName:
+        Fn::Sub: ${AWS::StackName}-EKSNodegroup
+      ClusterName:
+        Ref: EKSCluster
+      NodeRole:
+        Fn::GetAtt: EKSManagedNodeRole.Arn
+      AmiType: AL2023_x86_64_STANDARD
+      CapacityType: ON_DEMAND
+      InstanceTypes:
+        - t3.small
+      Subnets:
+        - Ref: Subnet0
+        - Ref: Subnet1
+
+  OIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: DeployEKSClusterCondition
+    Properties:
+      Url:
+        Fn::GetAtt: EKSCluster.OpenIdConnectIssuerUrl
+      ClientIdList:
+        - sts.amazonaws.com
+
+  EKSServiceAccountRole:
+    Type: AWS::IAM::Role
+    Condition: DeployEKSClusterCondition
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EKSServiceAccountRole-${AWS::Region}
+      Description: IAM role for EKS service account
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": {
+                "Effect": "Allow",
+                "Principal": {
+                  "Federated": "${OIDCProvider}"
+                },
+                "Action": ["sts:AssumeRoleWithWebIdentity"],
+                "Condition": {
+                  "StringEquals": {
+                    "${EKSClusterOIDC}:aud": "sts.${AWS::URLSuffix}",
+                    "${EKSClusterOIDC}:sub": "system:serviceaccount:default:${AWS::StackName}"
+                  }
+                }
+              }
+            }
+          - EKSClusterOIDC:
+              Fn::Select:
+                - 1
+                - Fn::Split:
+                    - //
+                    - Fn::GetAtt: EKSCluster.OpenIdConnectIssuerUrl
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonS3FullAccess
+
+  EKSLBCRole:
+    Type: AWS::IAM::Role
+    Condition: DeployEKSClusterCondition
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EKSLBCRole-${AWS::Region}
+      Description: IAM role for EKS Load Balancer Controller
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": {
+                "Effect": "Allow",
+                "Principal": {
+                  "Federated": "${OIDCProvider}"
+                },
+                "Action": ["sts:AssumeRoleWithWebIdentity"],
+                "Condition": {
+                  "StringEquals": {
+                    "${EKSClusterOIDC}:aud": "sts.${AWS::URLSuffix}",
+                    "${EKSClusterOIDC}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller"
+                  }
+                }
+              }
+            }
+          - EKSClusterOIDC:
+              Fn::Select:
+                - 1
+                - Fn::Split:
+                    - //
+                    - Fn::GetAtt: EKSCluster.OpenIdConnectIssuerUrl
+      ManagedPolicyArns:
+        - Fn::Sub: arn:aws:iam::${AWS::AccountId}:policy/${EKSLBCPolicyName}
+
+Outputs:
+  UpdateKubeconfigCommand:
+    Condition: DeployEKSClusterCondition
+    Description: eks update-kubeconfig command
+    Value:
+      Fn::Sub: aws eks update-kubeconfig --region ${AWS::Region} --name ${EKSCluster}
+
+  ApplyManifestCommand:
+    Condition: DeployEKSClusterCondition
+    Description: Apply kubernetes manifest command
+    Value:
+      Fn::Sub: kubectl apply -f ${EKSManifestFunctionUrl.FunctionUrl}
+
+  DeleteManifestCommand:
+    Condition: DeployEKSClusterCondition
+    Description: Delete kubernetes manifest command
+    Value:
+      Fn::Sub: kubectl delete -f ${EKSManifestFunctionUrl.FunctionUrl}
+
+  KubectlExecCommand:
+    Description: kubectl exec command
+    Value:
+      Fn::Sub: POD_NAME=`kubectl get pods -l app=${AWS::StackName} -o go-template --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}' | head -n1`; [ -n "$POD_NAME" ] && kubectl exec -it $POD_NAME -- bash || kubectl get pods -l app=${AWS::StackName}
+
+  InstallLBCCommand:
+    Condition: DeployEKSClusterCondition
+    Description: Install Load Balancer Controller command
+    Value:
+      Fn::Sub: >
+        kubectl apply -f https://github.com/jetstack/cert-manager/releases/download/v1.15.3/cert-manager.yaml && curl -sSL https://github.com/kubernetes-sigs/aws-load-balancer-controller/releases/download/v2.8.2/v2_8_2_full.yaml | sed -e '634 a \ \ annotations:\n\ \ \ \ eks.amazonaws.com/role-arn: ${EKSLBCRole.Arn}\n\ \ \ \ eks.amazonaws.com/sts-regional-endpoints: "true"' -e 's/your-cluster-name/${EKSCluster}/' -e '/--ingress-class=alb/ a \ \ \ \ \ \ \ \ - --aws-vpc-id=${VPC}\n\ \ \ \ \ \ \ \ - --aws-region=${AWS::Region}' | kubectl apply -f - && kubectl apply -f https://github.com/kubernetes-sigs/aws-load-balancer-controller/releases/download/v2.8.2/v2_8_2_ingclass.yaml
+
+  CurlNLBCommand:
+    Condition: DeployEKSClusterCondition
+    Description: curl command sends to NLB
+    Value:
+      Fn::Sub: curl http://${NLBEIP0}
+
+  # CreateLBCPolicyCommand:
+  #   Description: Command to create IAM policy for AWS Load Balancer Controller
+  #   Value:
+  #     Fn::Sub: curl -sSL https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.8.2/docs/install/iam_policy.json | aws iam create-policy --policy-name ${EKSLBCPolicyName} --policy-document file:///dev/stdin

@@ -1,0 +1,79 @@
+# lambda/templates/sam-function-url.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Lambda function with function URL
+
+Resources:
+  SimpleLambdaFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SimpleLambdaFunctionRole-${AWS::Region}
+      Description: Service role for SimpleLambdaFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SimpleLambdaFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SimpleLambdaFunction
+
+  SimpleLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SimpleLambdaFunction
+      Description: My simple Lambda function
+      Role:
+        Fn::GetAtt: SimpleLambdaFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SimpleLambdaFunctionLogGroup
+      FunctionUrlConfig:
+        AuthType: NONE
+      InlineCode: |
+        const http = require("node:http");
+
+        exports.handler = async () => {
+          const globalIpAddress = await new Promise((resolve, reject) => {
+            const req = http.request(
+              { hostname: "ifconfig.me", port: 80, path: "/", method: "GET" },
+              res => {
+                res.on("data", chunk => {
+                  const body = chunk.toString();
+                  resolve(body);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.end();
+          });
+
+          return {
+            statusCode: 200,
+            body: globalIpAddress,
+            headers: { "Content-Type": "text/plain" },
+          };
+        };
+
+Outputs:
+  SimpleLambdaFunctionUrl:
+    Description: SimpleLambdaFunction
+    Value:
+      Fn::GetAtt: SimpleLambdaFunctionUrl.FunctionUrl

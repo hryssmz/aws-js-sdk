@@ -153,6 +153,12 @@ Resources:
               Value:
                 - John Doe
 
+  ImageRecipeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/imagebuilder/${AWS::StackName}-ImageRecipe
+
   InfrastructureConfiguration:
     Type: AWS::ImageBuilder::InfrastructureConfiguration
     Properties:

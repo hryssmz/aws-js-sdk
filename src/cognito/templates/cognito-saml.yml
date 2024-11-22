@@ -1,0 +1,356 @@
+# cognito/templates/cognito-saml.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: |
+  Cognito User Pool for SAML
+
+  1. [Create a SAML 2.0 application in AWS IAM Identity Center](https://docs.aws.amazon.com/singlesignon/latest/userguide/customermanagedapps-set-up-your-own-app-saml2.html). You cannot use AWS CLI.
+  2. Retrieve metadata URL (e.g., `https://portal.sso.ap-northeast-1.amazonaws.com/saml/metadata/NTEyNjY3Mjk5MjkzX2lucy00YzM0ZDQ4ODA5MjJiYjFi`) and configure `SamlMetadataUrl` parameter.
+  3. Deploy the stack, add `redirectUri` from stack Outputs to your `UserPoolClient`'s `CallbackURLs` and update the stack.
+  4. [Update Application ACS URL and Application SAML audience](https://docs.aws.amazon.com/singlesignon/latest/userguide/customermanagedapps-set-up-your-own-app-saml2.html) for your SAML app. You cannot use AWS CLI.
+  5. [Configure map attributes](https://docs.aws.amazon.com/singlesignon/latest/userguide/mapawsssoattributestoapp.html) for your SAML app. You cannot use AWS CLI.
+
+     - **`Subject`**: `${user:subject}` (persistent)
+     - **`Email`**: `${user:email}` (unspecified)
+
+Parameters:
+  SmsSenderRoleExternalId:
+    Type: String
+    Default: KeyboardCat
+
+  UserPoolDomainPrefix:
+    Type: String
+    Description: User pool domain prefix
+    Default: hryssmz
+
+  IdentityStoreId:
+    Type: String
+    Description: SSO identity store ID
+    Default: d-95676dc1f8
+
+  PrincipalId:
+    Type: String
+    Description: SSO user principal ID
+    Default: 2704ba18-c021-7033-8107-f06e36f9426e
+
+  SSOApplicationArn:
+    Type: String
+    Description: SSO instance ARN
+    Default: arn:aws:sso::512667299293:application/ssoins-775850417ae45fb7/apl-4c34d4880922bb1b
+
+  SamlMetadataUrl:
+    Type: String
+    Description: SAML metadata file URL
+    Default: https://portal.sso.ap-northeast-1.amazonaws.com/saml/metadata/NTEyNjY3Mjk5MjkzX2lucy00YzM0ZDQ4ODA5MjJiYjFi
+
+Resources:
+  # SSO resources
+  SSOGroup:
+    Type: AWS::IdentityStore::Group
+    Properties:
+      DisplayName:
+        Fn::Sub: ${AWS::StackName}-SSOGroup
+      Description: SSO group
+      IdentityStoreId:
+        Ref: IdentityStoreId
+
+  UserApplicationAssignment:
+    Type: AWS::SSO::ApplicationAssignment
+    Properties:
+      ApplicationArn:
+        Ref: SSOApplicationArn
+      PrincipalId:
+        Ref: PrincipalId
+      PrincipalType: USER
+
+  GroupApplicationAssignment:
+    Type: AWS::SSO::ApplicationAssignment
+    Properties:
+      ApplicationArn:
+        Ref: SSOApplicationArn
+      PrincipalId:
+        Fn::GetAtt: SSOGroup.GroupId
+      PrincipalType: GROUP
+
+  # Cognito resources
+  SmsSenderPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-SmsSenderPolicy-${AWS::Region}
+      Description: Execution policy for sending SMS
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sns:Publish
+            Resource: "*"
+
+  SmsSenderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SmsSenderRole-${AWS::Region}
+      Description: Service role for sending SMS
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: cognito-idp.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+                sts:ExternalId:
+                  Ref: SmsSenderRoleExternalId
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*
+      ManagedPolicyArns:
+        - Ref: SmsSenderPolicy
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName:
+        Fn::Sub: ${AWS::StackName}-UserPool
+      UsernameConfiguration:
+        CaseSensitive: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+          RequireLowercase: true
+      MfaConfiguration: OPTIONAL
+      EnabledMfas:
+        - SMS_MFA
+        - SOFTWARE_TOKEN_MFA
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      AutoVerifiedAttributes:
+        - email
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate:
+          - email
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+        - Name: phone_number
+          Required: false
+          Mutable: true
+      EmailConfiguration:
+        EmailSendingAccount: COGNITO_DEFAULT
+      SmsConfiguration:
+        ExternalId:
+          Ref: SmsSenderRoleExternalId
+        SnsCallerArn:
+          Fn::GetAtt: SmsSenderRole.Arn
+        SnsRegion:
+          Ref: AWS::Region
+
+  UserPoolIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Properties:
+      ProviderName:
+        Ref: AWS::StackName
+      ProviderType: SAML
+      UserPoolId:
+        Ref: UserPool
+      AttributeMapping:
+        email: Email
+      ProviderDetails:
+        # IDPInit: true
+        IDPSignout: true
+        EncryptedResponses: true
+        RequestSigningAlgorithm: rsa-sha256
+        MetadataURL:
+          Ref: SamlMetadataUrl
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId:
+        Ref: UserPool
+      Domain:
+        Ref: UserPoolDomainPrefix
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName:
+        Fn::Sub: ${AWS::StackName}-UserPoolClient
+      UserPoolId:
+        Ref: UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      ReadAttributes:
+        - email
+        - email_verified
+        - phone_number
+        - phone_number_verified
+      WriteAttributes:
+        - email
+        - phone_number
+      CallbackURLs:
+        - https://ameqqraazwpgonwouubfsw6bx40lylsh.lambda-url.ap-northeast-1.on.aws/
+      SupportedIdentityProviders:
+        - Ref: UserPoolIdentityProvider
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+        - implicit
+      AllowedOAuthScopes:
+        - email
+        - phone
+        - openid
+        - profile
+        - aws.cognito.signin.user.admin
+
+  # Lambda resources
+  HandleAuthFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-HandleAuthFunctionRole-${AWS::Region}
+      Description: Service role for HandleAuthFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  HandleAuthFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-HandleAuthFunction
+
+  HandleAuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-HandleAuthFunction
+      Description: Handle auth function
+      Role:
+        Fn::GetAtt: HandleAuthFunctionRole.Arn
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: HandleAuthFunctionLogGroup
+      FunctionUrlConfig:
+        AuthType: NONE
+      Environment:
+        Variables:
+          CLIENT_ID:
+            Ref: UserPoolClient
+          TOKEN_ENDPOINT_HOST:
+            Fn::Sub: ${UserPoolDomainPrefix}.auth.${AWS::Region}.amazoncognito.com
+      InlineCode: |
+        const https = require("node:https");
+        const querystring = require("node:querystring");
+
+        exports.handler = async event => {
+          console.log(JSON.stringify(event, null, 2));
+          const { domainName } = event.requestContext;
+          const { code } = event.queryStringParameters ?? {};
+          const hostname = process.env.TOKEN_ENDPOINT_HOST;
+          const clientId = process.env.CLIENT_ID;
+          const redirectUri = `https://${domainName}/`;
+          if (!code) {
+            const location = `https://${hostname}/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${redirectUri}`;
+            return { statusCode: 303, headers: { Location: location }, body: "null" };
+          }
+
+          const reqBody = {
+            grant_type: "authorization_code",
+            redirect_uri: redirectUri,
+            client_id: clientId,
+            code,
+          };
+          const headers = { "Content-Type": "application/x-www-form-urlencoded" };
+          const data = await new Promise((resolve, reject) => {
+            const req = https.request(
+              {
+                hostname: process.env.TOKEN_ENDPOINT_HOST,
+                port: 443,
+                path: "/oauth2/token",
+                method: "POST",
+                headers,
+              },
+              res => {
+                const chunks = [];
+                res.on("data", chunk => {
+                  chunks.push(chunk);
+                });
+                res.on("error", error => {
+                  reject(error.message);
+                });
+                res.on("end", () => {
+                  const data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+                  resolve(data);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(querystring.stringify(reqBody));
+            req.end();
+          });
+          const { access_token, id_token } = data;
+          if (access_token) {
+            data.access_token_payload = JSON.parse(
+              Buffer.from(access_token.split(".")[1], "base64").toString(),
+            );
+          }
+          if (id_token) {
+            data.id_token_payload = JSON.parse(
+              Buffer.from(id_token.split(".")[1], "base64").toString(),
+            );
+          }
+          return {
+            statusCode: 200,
+            headers: { "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify(data, null, 2),
+          };
+        };
+
+Outputs:
+  RedirectUri:
+    Description: Redirect URI for OAuth
+    Value:
+      Fn::GetAtt: HandleAuthFunctionUrl.FunctionUrl
+
+  SamlAudience:
+    Description: Cognito SAML audience
+    Value:
+      Fn::Sub: urn:amazon:cognito:sp:${UserPool}
+
+  AcsUrl:
+    Description: Cognito ACS URL
+    Value:
+      Fn::Sub: https://${UserPoolDomainPrefix}.auth.${AWS::Region}.amazoncognito.com/saml2/idpresponse

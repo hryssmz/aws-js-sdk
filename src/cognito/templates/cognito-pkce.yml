@@ -1,0 +1,463 @@
+# cognito/templates/cognito-pkce.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Cognito User Pool for PKCE
+
+Parameters:
+  SmsSenderRoleExternalId:
+    Type: String
+    Default: KeyboardCat
+
+  UserPoolDomainPrefix:
+    Type: String
+    Description: User pool domain prefix
+    Default: hryssmz
+
+  CodeVerifier:
+    Type: String
+    Description: Code verifier
+    Default: 00000000-0000-0000-0000-000000000000
+
+Resources:
+  # Cognito resources
+  SmsSenderPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-SmsSenderPolicy-${AWS::Region}
+      Description: Execution policy for sending SMS
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sns:Publish
+            Resource: "*"
+
+  SmsSenderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SmsSenderRole-${AWS::Region}
+      Description: Service role for sending SMS
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: cognito-idp.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+                sts:ExternalId:
+                  Ref: SmsSenderRoleExternalId
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*
+      ManagedPolicyArns:
+        - Ref: SmsSenderPolicy
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName:
+        Fn::Sub: ${AWS::StackName}-UserPool
+      UsernameConfiguration:
+        CaseSensitive: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+          RequireLowercase: true
+      # MfaConfiguration: "ON"
+      MfaConfiguration: OPTIONAL
+      EnabledMfas:
+        - SMS_MFA
+        - SOFTWARE_TOKEN_MFA
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      AutoVerifiedAttributes:
+        - email
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate:
+          - email
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+        - Name: phone_number
+          Required: false
+          Mutable: true
+      EmailConfiguration:
+        EmailSendingAccount: COGNITO_DEFAULT
+      SmsConfiguration:
+        ExternalId:
+          Ref: SmsSenderRoleExternalId
+        SnsCallerArn:
+          Fn::GetAtt: SmsSenderRole.Arn
+        SnsRegion:
+          Ref: AWS::Region
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId:
+        Ref: UserPool
+      Domain:
+        Ref: UserPoolDomainPrefix
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName:
+        Fn::Sub: ${AWS::StackName}-UserPoolClient
+      UserPoolId:
+        Ref: UserPool
+      GenerateSecret: true
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      ReadAttributes:
+        - email
+        - email_verified
+        - phone_number
+        - phone_number_verified
+      WriteAttributes:
+        - email
+        - phone_number
+      CallbackURLs:
+        - https://tc24lcmm7bwx45auulacelc35u0orfck.lambda-url.ap-northeast-1.on.aws/
+        - http://localhost:3000/api/auth/callback/cognito # Auth.js + Next.js
+      SupportedIdentityProviders:
+        - COGNITO
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+        - implicit
+      AllowedOAuthScopes:
+        - email
+        - phone
+        - openid
+        - profile
+        - aws.cognito.signin.user.admin
+
+  # Custom resources
+  ClientSecretFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: ${AWS::StackName}-ClientSecretFunctionPolicy-${AWS::Region}
+      Description: Policy for ClientSecretFunction
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3AccessPermissions
+            Effect: Allow
+            Action:
+              - cognito-idp:DescribeUserPoolClient
+            Resource: "*"
+          - Sid: CloudWatchLogsAccessPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - Fn::Sub: ${ClientSecretFunctionLogGroup.Arn}
+
+  ClientSecretFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ClientSecretFunctionRole-${AWS::Region}
+      Description: Service role for ClientSecretFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Ref: ClientSecretFunctionPolicy
+
+  ClientSecretFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-ClientSecretFunction
+
+  ClientSecretFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-ClientSecretFunction
+      Description: Retrieve client secret in user pool client
+      Role:
+        Fn::GetAtt: ClientSecretFunctionRole.Arn
+      Architectures:
+        - arm64
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Timeout: 30
+      LoggingConfig:
+        LogGroup:
+          Ref: ClientSecretFunctionLogGroup
+      InlineCode: |
+        const https = require("https");
+        const {
+          CognitoIdentityProviderClient,
+          DescribeUserPoolClientCommand,
+        } = require("@aws-sdk/client-cognito-identity-provider");
+
+        const serialize = obj => JSON.stringify(obj, null, 2);
+
+        const sendResponse = async (
+          event,
+          context,
+          status,
+          data,
+          physicalResourceId,
+          noEcho,
+        ) => {
+          const { StackId, RequestId, LogicalResourceId, ResponseURL } = event;
+          const body = serialize({
+            Status: status,
+            Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,
+            PhysicalResourceId: physicalResourceId || context.logStreamName,
+            Data: data,
+            StackId,
+            RequestId,
+            LogicalResourceId,
+            NoEcho: noEcho || false,
+          });
+
+          const { hostname, pathname, search } = new URL(ResponseURL);
+          const path = `${pathname}${search}`;
+          const headers = {
+            "Content-Type": "application/json",
+            "Content-Length": body.length,
+          };
+
+          return await new Promise((resolve, reject) => {
+            const req = https.request(
+              { hostname, port: 443, path, method: "PUT", headers },
+              res => {
+                const chunks = [];
+                res.on("data", chunk => {
+                  chunks.push(chunk);
+                });
+                res.on("error", error => {
+                  reject(error.message);
+                });
+                res.on("end", () => {
+                  const data = Buffer.concat(chunks);
+                  resolve(data);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(body);
+            req.end();
+          });
+        };
+
+        exports.handler = async (event, context) => {
+          console.log(serialize(event));
+          const client = new CognitoIdentityProviderClient();
+          const { ResourceProperties } = event;
+          const { UserPoolId, ClientId } = ResourceProperties;
+
+          try {
+            if (event.RequestType === "Create" || event.RequestType === "Update") {
+              const command = new DescribeUserPoolClientCommand({
+                UserPoolId,
+                ClientId,
+              });
+              const { UserPoolClient } = await client.send(command);
+              return await sendResponse(
+                event,
+                context,
+                "SUCCESS",
+                { UserPoolId, ClientId },
+                UserPoolClient?.ClientSecret,
+              );
+            } else if (event.RequestType === "Delete") {
+              return await sendResponse(event, context, "SUCCESS");
+            } else {
+              throw new Error(`Invalid RequestType: ${event.RequestType}`);
+            }
+          } catch (error) {
+            console.error(error);
+            return await sendResponse(event, context, "FAILED", {});
+          }
+        };
+
+  ClientSecret:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::GetAtt: ClientSecretFunction.Arn
+      UserPoolId:
+        Ref: UserPool
+      ClientId:
+        Ref: UserPoolClient
+
+  # Lambda resources
+  HandleAuthFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-HandleAuthFunctionRole-${AWS::Region}
+      Description: Service role for HandleAuthFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  HandleAuthFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-HandleAuthFunction
+
+  HandleAuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-HandleAuthFunction
+      Description: Get OAuth token
+      Role:
+        Fn::GetAtt: HandleAuthFunctionRole.Arn
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: HandleAuthFunctionLogGroup
+      FunctionUrlConfig:
+        AuthType: NONE
+      Environment:
+        Variables:
+          CLIENT_ID:
+            Ref: UserPoolClient
+          TOKEN_ENDPOINT_HOST:
+            Fn::Sub: ${UserPoolDomainPrefix}.auth.${AWS::Region}.amazoncognito.com
+          CODE_VERIFIER:
+            Ref: CodeVerifier
+          CLIENT_SECRET:
+            Ref: ClientSecret
+      InlineCode: |
+        const { createHash } = require("node:crypto");
+        const https = require("node:https");
+        const querystring = require("node:querystring");
+
+        exports.handler = async event => {
+          console.log(JSON.stringify(event, null, 2));
+          const { domainName } = event.requestContext;
+          const { code } = event.queryStringParameters ?? {};
+          const hostname = process.env.TOKEN_ENDPOINT_HOST;
+          const clientId = process.env.CLIENT_ID;
+          const redirectUri = `https://${domainName}/`;
+          const codeVerifier = process.env.CODE_VERIFIER;
+          if (!code) {
+            const codeChallenge = createHash("sha256")
+              .update(codeVerifier)
+              .digest()
+              .toString("base64url")
+              .replace(/=+$/, "");
+            const location = `https://${hostname}/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${redirectUri}&code_challenge=${codeChallenge}&code_challenge_method=S256&scope=openid+profile+email`;
+            console.log(JSON.stringify({ codeVerifier, location }, null, 2));
+            return { statusCode: 303, headers: { Location: location }, body: "null" };
+          }
+
+          const clientSecret = process.env.CLIENT_SECRET;
+          const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+          const reqBody = {
+            grant_type: "authorization_code",
+            redirect_uri: redirectUri,
+            code,
+            code_verifier: codeVerifier,
+          };
+          const headers = {
+            Authorization: `Basic ${basic}`,
+            "Content-Type": "application/x-www-form-urlencoded",
+          };
+          const data = await new Promise((resolve, reject) => {
+            const req = https.request(
+              {
+                hostname: process.env.TOKEN_ENDPOINT_HOST,
+                port: 443,
+                path: "/oauth2/token",
+                method: "POST",
+                headers,
+              },
+              res => {
+                const chunks = [];
+                res.on("data", chunk => {
+                  chunks.push(chunk);
+                });
+                res.on("error", error => {
+                  reject(error.message);
+                });
+                res.on("end", () => {
+                  const data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+                  resolve(data);
+                });
+              },
+            );
+            req.on("error", e => {
+              reject(e.message);
+            });
+            req.write(querystring.stringify(reqBody));
+            req.end();
+          });
+          return {
+            statusCode: 200,
+            headers: { "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify(data, null, 2),
+          };
+        };
+
+Outputs:
+  UserPoolClientId:
+    Description: User pool client ID
+    Value:
+      Ref: UserPoolClient
+
+  IssuerUrl:
+    Description: Issuer URL
+    Value:
+      Fn::Sub: https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+
+  ClientSecret:
+    Description: Client secret
+    Value:
+      Ref: ClientSecret
+
+  RedirectUri:
+    Description: Redirect URI for OAuth
+    Value:
+      Fn::GetAtt: HandleAuthFunctionUrl.FunctionUrl

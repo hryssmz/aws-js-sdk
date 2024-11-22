@@ -1,0 +1,128 @@
+# lambda/templates/sam-function-url.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Lambda function for memory test
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-s3bucket-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: S3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - Fn::GetAtt: SimpleLambdaFunctionRole.Arn
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: ${S3Bucket.Arn}/*
+
+  SimpleLambdaFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-SimpleLambdaFunctionRole-${AWS::Region}
+      Description: Service role for SimpleLambdaFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SimpleLambdaFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-SimpleLambdaFunction
+
+  SimpleLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-SimpleLambdaFunction
+      Description: My simple Lambda function
+      Role:
+        Fn::GetAtt: SimpleLambdaFunctionRole.Arn
+      Handler: index.handler
+      Timeout: 900
+      MemorySize: 256
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      LoggingConfig:
+        LogGroup:
+          Ref: SimpleLambdaFunctionLogGroup
+      Environment:
+        Variables:
+          BUCKET:
+            Ref: S3Bucket
+      InlineCode: |
+        import math
+        import os.path
+        from typing import Any
+        import boto3
+
+        MB_SIZE = 1024 * 1024
+        DATA_SIZE = 500 * MB_SIZE
+        MAX_SIZE = 32 * MB_SIZE
+        DATA_PATH = "/tmp/huge_data"
+
+
+        def handler(event: Any, context: Any) -> Any:
+            print("Writing huge object")
+            with open(DATA_PATH, "wb") as f:
+                for i in range(math.ceil(DATA_SIZE / MAX_SIZE)):
+                    chunk_size = min(DATA_SIZE - i * MAX_SIZE, MAX_SIZE)
+                    chunk_data = bytes(chunk_size)
+                    f.write(chunk_data)
+
+            print(f"{os.stat(DATA_PATH).st_size / MB_SIZE} MB")
+            print("Reading huge object")
+            with open(DATA_PATH, "rb") as f:
+                while True:
+                    chunk_data = f.read(MAX_SIZE)
+                    if not chunk_data:
+                        break
+                    print(f"{len(chunk_data) / MB_SIZE} MB")
+
+            s3 = boto3.resource("s3")
+            bucket = s3.Bucket(os.environ["BUCKET"])
+
+            print("Uploading huge object")
+            bucket.upload_file(DATA_PATH, DATA_PATH.replace("/tmp/", ""))
+
+            print("Clearing huge object")
+            with open(DATA_PATH, "wb") as f:
+                f.write(b"")
+
+            print(f"{os.stat(DATA_PATH).st_size / MB_SIZE} MB")
+
+            print("Downloading huge object")
+            bucket.download_file(DATA_PATH.replace("/tmp/", ""), DATA_PATH)
+            print(f"{os.stat(DATA_PATH).st_size / MB_SIZE} MB")
+
+
+        if __name__ == "__main__":
+            print(handler(1, 2))

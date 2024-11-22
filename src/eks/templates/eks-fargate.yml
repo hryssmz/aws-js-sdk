@@ -1,0 +1,442 @@
+# eks/templates/eks-fargate.yml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Amazon EKS with Fargate
+
+Parameters:
+  VPCCidr:
+    Type: String
+    Description: VPC CIDR
+    Default: 172.20.0.0/16
+
+  SubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Subnet CIDRs
+    Default: 172.20.0.0/20,172.20.16.0/20
+
+  PrivateSubnetCidrs:
+    Type: CommaDelimitedList
+    Description: Private subnet CIDRs
+    Default: 172.20.128.0/20,172.20.144.0/20
+
+  DeployEKSCluster:
+    Type: String
+    Description: Deploy EKS cluster
+    Default: false
+    AllowedValues:
+      - true
+      - false
+    ConstraintDescription: Must be a boolean value
+
+  PublicAccessCidrs:
+    Type: CommaDelimitedList
+    Description: Public access CIDRs for EKS cluster
+    Default: 0.0.0.0/0
+
+Conditions:
+  DeployEKSClusterCondition:
+    Fn::Equals:
+      - Ref: DeployEKSCluster
+      - true
+
+Resources:
+  # VPC resources
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Ref: VPCCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  Subnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet0
+
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: SubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subnet1
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: RouteTable
+
+  Subnet0RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet0
+      RouteTableId:
+        Ref: RouteTable
+
+  Subnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: Subnet1
+      RouteTableId:
+        Ref: RouteTable
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  PrivateSubnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Ref: PrivateSubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet0
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Ref: PrivateSubnetCidrs
+      VpcId:
+        Ref: VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet1
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable
+
+  PrivateSubnet0PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet0
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  PrivateSubnet1PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet1
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    Condition: DeployEKSClusterCondition
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Condition: DeployEKSClusterCondition
+    Properties:
+      AllocationId:
+        Fn::GetAtt: NatGatewayEIP.AllocationId
+      SubnetId:
+        Ref: Subnet0
+
+  NatGatewayRoute:
+    Type: AWS::EC2::Route
+    Condition: DeployEKSClusterCondition
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NatGateway
+
+  # Lambda resources
+  EKSManifestFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EKSManifestFunctionRole-${AWS::Region}
+      Description: Service role for EKSManifestFunction
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: lambda.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  EKSManifestFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-EKSManifestFunction
+
+  EKSManifestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-EKSManifestFunction
+      Description: My simple Lambda function
+      Role:
+        Fn::GetAtt: EKSManifestFunctionRole.Arn
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          EKS_MANIFEST_CONTENT:
+            Fn::Sub: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: ${AWS::StackName}
+                labels:
+                  app.kubernetes.io/name: ${AWS::StackName}
+              spec:
+                replicas: 2
+                selector:
+                  matchLabels:
+                    app.kubernetes.io/name: ${AWS::StackName}
+                template:
+                  metadata:
+                    labels:
+                      app.kubernetes.io/name: ${AWS::StackName}
+                  spec:
+                    containers:
+                      - name: nginx
+                        image: public.ecr.aws/nginx/nginx:1.23
+                        ports:
+                          - name: http
+                            containerPort: 80
+              ---
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: ${AWS::StackName}
+                labels:
+                  app.kubernetes.io/name: ${AWS::StackName}
+              spec:
+                selector:
+                  app.kubernetes.io/name: ${AWS::StackName}
+                ports:
+                  - protocol: TCP
+                    port: 80
+                    targetPort: 80
+      LoggingConfig:
+        LogGroup:
+          Ref: EKSManifestFunctionLogGroup
+      FunctionUrlConfig:
+        AuthType: NONE
+      InlineCode: |
+        exports.handler = async event => {
+          console.log(JSON.stringify(event, null, 2));
+          return {
+            statusCode: 200,
+            body: process.env.EKS_MANIFEST_CONTENT,
+            headers: { "Content-Type": "application/yaml" },
+          };
+        };
+
+  # EKS resources
+  EKSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:
+        Fn::Sub: ${AWS::StackName}-EKSSecurityGroup
+      GroupDescription: EKS security group
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: EKSSecurityGroup
+
+  EKSClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EKSClusterRole-${AWS::Region}
+      Description: Service role for EKS cluster
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: eks.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonEKSClusterPolicy
+
+  EKSCluster:
+    Type: AWS::EKS::Cluster
+    Condition: DeployEKSClusterCondition
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-EKSCluster
+      RoleArn:
+        Fn::GetAtt: EKSClusterRole.Arn
+      ResourcesVpcConfig:
+        SubnetIds:
+          - Ref: Subnet0
+          - Ref: Subnet1
+          - Ref: PrivateSubnet0
+          - Ref: PrivateSubnet1
+        SecurityGroupIds:
+          - Ref: EKSSecurityGroup
+        PublicAccessCidrs:
+          Ref: PublicAccessCidrs
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIG_MAP
+
+  EKSFargatePodRole:
+    Type: AWS::IAM::Role
+    Condition: DeployEKSClusterCondition
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-EKSFargatePodRole-${AWS::Region}
+      Description: Service role for EKS pod
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                Fn::Sub: eks-fargate-pods.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+            Condition:
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:fargateprofile/${EKSCluster}/*
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonEKSFargatePodExecutionRolePolicy
+
+  FargateProfile:
+    Type: AWS::EKS::FargateProfile
+    Condition: DeployEKSClusterCondition
+    Properties:
+      FargateProfileName:
+        Fn::Sub: my-${AWS::StackName}-FargateProfile
+      ClusterName:
+        Ref: EKSCluster
+      PodExecutionRoleArn:
+        Fn::GetAtt: EKSFargatePodRole.Arn
+      Subnets:
+        - Ref: PrivateSubnet0
+        - Ref: PrivateSubnet1
+      Selectors:
+        - Namespace: default
+
+  FargateProfileCoreDNS:
+    Type: AWS::EKS::FargateProfile
+    Condition: DeployEKSClusterCondition
+    Properties:
+      FargateProfileName:
+        Fn::Sub: my-${AWS::StackName}-FargateProfileCoreDNS
+      ClusterName:
+        Ref: EKSCluster
+      PodExecutionRoleArn:
+        Fn::GetAtt: EKSFargatePodRole.Arn
+      Subnets:
+        - Ref: PrivateSubnet0
+        - Ref: PrivateSubnet1
+      Selectors:
+        - Namespace: kube-system
+          Labels:
+            - Key: k8s-app
+              Value: kube-dns
+
+Outputs:
+  UpdateKubeconfigCommand:
+    Condition: DeployEKSClusterCondition
+    Description: eks update-kubeconfig command
+    Value:
+      Fn::Sub: aws eks update-kubeconfig --region ${AWS::Region} --name ${EKSCluster} && kubectl rollout restart -n kube-system deployment coredns
+
+  ApplyManifestCommand:
+    Description: Apply kubernetes manifest command
+    Value:
+      Fn::Sub: kubectl apply -f ${EKSManifestFunctionUrl.FunctionUrl}
+
+  KubectlExecCommand:
+    Description: kubectl exec command
+    Value:
+      Fn::Sub: POD_NAME=`kubectl get pods -l app=${AWS::StackName} -o go-template --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}' | head -n1`; [ -n "$POD_NAME" ] && kubectl exec -it $POD_NAME -- bash || kubectl get pods -l app=${AWS::StackName}

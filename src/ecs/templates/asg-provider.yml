@@ -32,7 +32,7 @@ Parameters:
   DisableNatGateway:
     Type: String
     Description: Disable NAT gateway to reduce cost
-    Default: false
+    Default: true
     AllowedValues:
       - true
       - false
